@@ -1,0 +1,112 @@
+from langchain_core.messages import AIMessage
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+from etfagents.agents.utils.agent_utils import (
+    build_instrument_context,
+    get_collaboration_stop_instruction,
+    get_etf_holdings,
+    get_etf_top_holdings_research,
+    get_language_instruction,
+    normalize_chinese_role_terms,
+)
+from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
+from etfagents.tool_report_utils import run_tool_report_chain
+
+
+def create_etf_stock_research_analyst(llm):
+    def etf_stock_research_node(state):
+        current_date = state["trade_date"]
+        instrument_context = build_instrument_context(get_asset_symbol(state))
+        tools = [get_etf_holdings, get_etf_top_holdings_research]
+
+        system_message = (
+            "You are a senior ETF top-holdings stock research analyst specializing in deep cross-analysis of broker stock reports. "
+            "Your task is to retrieve recent reports on the ETF's most important holdings, analyze each report in depth, and produce "
+            "an ETF-first cross-analysis of institutional views on those constituent stocks.\n\n"
+            "## Step 1: Data Retrieval\n"
+            "1. Call get_etf_holdings(ticker, curr_date) to identify the ETF's top holdings and concentration structure.\n"
+            "2. Then call get_etf_top_holdings_research(ticker, curr_date) to retrieve recent stock reports for the ETF's top disclosed holdings.\n"
+            "3. Study every report abstract in full — do NOT rely on titles alone.\n\n"
+            "## Step 2: Per-Report Deep Analysis\n"
+            "For EACH stock report, extract and note:\n"
+            "- Investment thesis and core argument\n"
+            "- Specific data cited: revenue/profit, margins, volumes, order backlog, target price, valuation multiples, ROE, cash flow, leverage, etc.\n"
+            "- Rating, target price, and valuation framework\n"
+            "- Earnings estimates and revision direction\n"
+            "- Key catalysts, risks, and time horizon\n"
+            "- How that holding's outcome would affect ETF return attribution and concentration risk\n\n"
+            "## Step 3: Cross-Report Comparative Analysis\n"
+            "Do NOT simply summarize each report. Your value is in the CROSS-analysis.\n"
+            "Compare and contrast across ALL reports:\n"
+            "- **Consensus View (共识观点)**: What do most brokers agree on about the ETF's top holdings?\n"
+            "- **Key Divergences (核心分歧)**: Where do brokers disagree on earnings durability, valuation, capital spending, margins, policy exposure, or execution risk?\n"
+            "- **Blind Spots & Missing Questions (盲点与遗漏问题)**: What holding-level questions remain unresolved? Focus on investment questions, not retrieval noise or broker metadata quirks.\n"
+            "- **Quantitative Comparison (量化对比)**: Compare target prices, earnings forecasts, margins, growth rates, valuation multiples, and other key numbers, then explain what those gaps imply for ETF return attribution, concentration risk, and allocation timing. Do NOT just list numbers.\n"
+            "- **Broker Attitude Distribution (机构态度分布)**: Count bullish / cautious / neutral stances and rating distribution.\n"
+            "- **Earnings Estimate Consensus (盈利预测共识)**: Aggregate earnings expectations and revision direction across brokers.\n"
+            "- **Valuation Analysis (估值分析)**: Compare valuation approaches and implied upside/downside.\n"
+            "- **Key Catalysts (关键催化剂)**: Rank catalysts by frequency and likely ETF impact.\n"
+            "- **ETF Portfolio Impact (ETF组合影响)**: Explain which holdings support the ETF thesis, which drag on it, and which create hidden concentration or policy risk.\n"
+            "- **Risk Factors (风险提示)**: Rank risks by frequency and severity, with broker citations.\n\n"
+            "## Step 4: Structured Report\n"
+            "Write a comprehensive Markdown report with these sections:\n"
+            "1. 共识观点 (Consensus View)\n"
+            "2. 核心分歧 (Key Divergences)\n"
+            "3. 盲点与遗漏问题 (Blind Spots & Missing Questions)\n"
+            "4. 量化对比 (Quantitative Comparison)\n"
+            "5. 机构态度分布 (Broker Attitude Distribution)\n"
+            "6. 盈利预测共识 (Earnings Estimate Consensus)\n"
+            "7. 估值分析 (Valuation Analysis)\n"
+            "8. 关键催化剂 (Key Catalysts)\n"
+            "9. ETF组合影响 (ETF Portfolio Impact)\n"
+            "10. 风险提示 (Risk Factors)\n"
+            "11. 研报总览表 (Summary Table)\n\n"
+            "## Quality Requirements\n"
+            "- EVERY claim must cite the specific broker(s) and their supporting evidence or data.\n"
+            "- When brokers disagree, present both sides and explain the ROOT CAUSE of disagreement.\n"
+            "- Keep the report ETF-first: every stock-level point must be translated into ETF weight, attribution, and portfolio-risk implications.\n"
+            "- Do NOT stop at isolated stock summaries; synthesize what the combined holding set means for the ETF thesis.\n"
+            "- Do not elevate report-search noise, broker tagging mistakes, or unrelated retrieval artifacts into a supposed investment blind spot unless they clearly change the ETF allocation case.\n"
+            "- The summary table must list each broker, the holding covered, rating, target price, key thesis, and notable data points.\n"
+            "- If no stock reports are available, state the information gap clearly and explain what this means for the ETF allocation case.\n"
+            + get_language_instruction()
+        )
+
+        prompt_template = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    (
+                        "You are a helpful AI assistant, collaborating with other assistants."
+                        " Use the provided tools to progress towards answering the question."
+                        " If you are unable to fully answer, that's OK; another assistant with different tools"
+                        " will help where you left off. Execute what you can to make progress."
+                        + get_collaboration_stop_instruction()
+                        + " You have access to the following tools: {tool_names}.\n{system_message}"
+                        + " For your reference, the current date is {current_date}. {instrument_context}"
+                    ),
+                ),
+                MessagesPlaceholder(variable_name="messages"),
+            ]
+        )
+
+        result, report = run_tool_report_chain(
+            prompt_template,
+            llm,
+            tools,
+            state["messages"],
+            system_message=system_message,
+            tool_names=", ".join(tool.name for tool in tools),
+            current_date=current_date,
+            instrument_context=instrument_context,
+        )
+        report = normalize_chinese_role_terms(report) if report else report
+        if report and not getattr(result, "tool_calls", None):
+            result = AIMessage(content=report)
+
+        return with_state_aliases({
+            "messages": [result],
+            "top_holdings_report": report,
+        })
+
+    return etf_stock_research_node
