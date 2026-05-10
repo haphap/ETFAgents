@@ -29,22 +29,10 @@ from urllib.parse import urlparse
 from etfagents.graph.etf_graph import EtfAgentsGraph
 from etfagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
-from cli.utils import (
-    ask_anthropic_effort,
-    ask_gemini_thinking_config,
-    ask_openai_reasoning_effort,
-    ask_output_language,
-    select_analysts,
-    select_deep_thinking_agent,
-    select_llm_provider,
-    select_research_depth,
-    select_shallow_thinking_agent,
-)
+from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
 from etfagents.agents.utils.agent_utils import (
-    CHINESE_OUTPUT_VALUES,
-    _is_chinese_output,
     extract_analyst_decision_summary,
     extract_feedback_snapshot,
     get_output_language,
@@ -68,6 +56,8 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 
+
+CHINESE_OUTPUT_VALUES = {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
 
 CLI_SECTION_TITLES = {
     "market_flow_report": ("Market & Flow Analysis", "市场与资金流分析"),
@@ -118,6 +108,10 @@ def _normalize_analyst_key(key: str) -> str:
     return ANALYST_KEY_ALIASES.get(lowered, lowered)
 
 _CHINESE_SECTION_NUMERALS = ("一", "二", "三", "四", "五", "六", "七", "八", "九", "十")
+
+
+def _is_chinese_output() -> bool:
+    return get_output_language().strip().lower() in CHINESE_OUTPUT_VALUES
 
 
 def _localize_cli_label(english: str, chinese: str) -> str:
@@ -297,7 +291,6 @@ class MessageBuffer:
         self.report_sections = {}
         self.selected_analysts = []
         self._processed_message_ids = set()
-        self._printed_sections = set()  # Track sections already printed as separate panels
 
     def init_for_analysis(self, selected_analysts):
         """Initialize agent status and report sections based on selected analysts.
@@ -673,7 +666,7 @@ def format_tokens(n):
     return str(n)
 
 
-def update_display(layout, spinner_text=None, stats_handler=None, start_time=None, live=None, message_buffer=None):
+def update_display(layout, spinner_text=None, stats_handler=None, start_time=None):
     # Header with welcome message
     layout["header"].update(
         Panel(
@@ -820,46 +813,25 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
         )
     )
 
-    # Analysis panel: print completed report sections as separate panels (segmented display)
-    # Track newly completed sections and print them outside the constrained layout
-    if live and message_buffer:
-        for section, content in message_buffer.report_sections.items():
-            if content is None or section in message_buffer._printed_sections:
-                continue
-            _, finalizing_agent = message_buffer.REPORT_SECTIONS.get(section, (None, None))
-            if finalizing_agent and message_buffer.agent_status.get(finalizing_agent) == "completed":
-                title = _localize_cli_section_title(section)
-                prepared = _prepare_report_markdown(content, 3)
-                live.console.print()
-                live.console.print(
-                    Panel(
-                        Markdown(prepared),
-                        title=f"[bold]{title}[/bold]",
-                        border_style="blue",
-                        padding=(1, 2),
-                    )
-                )
-                message_buffer._printed_sections.add(section)
-
-    # Show brief status in the analysis panel
-    completed_titles = [
-        _localize_cli_section_title(s)
-        for s in message_buffer._printed_sections
-    ]
-    if completed_titles:
-        status_text = "[green]已完成报告:[/green]\n" + "\n".join(
-            f"  [dim]✓[/dim] {t}" for t in completed_titles
+    # Analysis panel showing current report
+    if message_buffer.current_report:
+        layout["analysis"].update(
+            Panel(
+                Markdown(message_buffer.current_report),
+                title="Current Report",
+                border_style="green",
+                padding=(1, 2),
+            )
         )
-        current_agent = message_buffer.current_agent
-        if current_agent and message_buffer.agent_status.get(current_agent) == "in_progress":
-            status_text += f"\n\n[blue]⏳ 正在分析:[/blue] {current_agent}"
-    elif message_buffer.current_report:
-        status_text = "[blue]⏳ 正在生成报告...[/blue]"
     else:
-        status_text = "[italic]Waiting for analysis report...[/italic]"
-    layout["analysis"].update(
-        Panel(status_text, title="Report Progress", border_style="green", padding=(1, 2))
-    )
+        layout["analysis"].update(
+            Panel(
+                "[italic]Waiting for analysis report...[/italic]",
+                title="Current Report",
+                border_style="green",
+                padding=(1, 2),
+            )
+        )
 
     # Footer with statistics
     # Agent progress - derived from agent_status dict
@@ -906,11 +878,8 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
 def get_user_selections():
     """Get all user selections before starting the analysis display."""
     # Display ASCII art welcome message
-    try:
-        with open(Path(__file__).parent / "static" / "welcome.txt", "r", encoding="utf-8") as f:
-            welcome_ascii = f.read()
-    except FileNotFoundError:
-        welcome_ascii = ""
+    with open(Path(__file__).parent / "static" / "welcome.txt", "r", encoding="utf-8") as f:
+        welcome_ascii = f.read()
 
     # Create welcome box content
     welcome_content = f"{welcome_ascii}\n"
@@ -1901,11 +1870,9 @@ def run_analysis(checkpoint: bool = False):
                         f.write(text)
         return wrapper
 
-    if not getattr(message_buffer, '_patched', False):
-        message_buffer.add_message = save_message_decorator(message_buffer, "add_message")
-        message_buffer.add_tool_call = save_tool_call_decorator(message_buffer, "add_tool_call")
-        message_buffer.update_report_section = save_report_section_decorator(message_buffer, "update_report_section")
-        message_buffer._patched = True
+    message_buffer.add_message = save_message_decorator(message_buffer, "add_message")
+    message_buffer.add_tool_call = save_tool_call_decorator(message_buffer, "add_tool_call")
+    message_buffer.update_report_section = save_report_section_decorator(message_buffer, "update_report_section")
 
     # Now start the display layout
     layout = create_layout()
@@ -1914,7 +1881,7 @@ def run_analysis(checkpoint: bool = False):
     runtime_error = None
     with Live(layout, refresh_per_second=4) as live:
         # Initial display
-        update_display(layout, stats_handler=stats_handler, start_time=start_time, live=live, message_buffer=message_buffer)
+        update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
         # Add initial messages
         message_buffer.add_message("System", f"Selected ticker: {selections['ticker']}")
@@ -1930,18 +1897,18 @@ def run_analysis(checkpoint: bool = False):
                 "System",
                 f"Skipped A-share-only analysts for this ticker: {', '.join(skipped_analyst_labels)}",
             )
-        update_display(layout, stats_handler=stats_handler, start_time=start_time, live=live, message_buffer=message_buffer)
+        update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
         # Update agent status to in_progress for the first analyst
         first_analyst = selected_analyst_labels[0]
         message_buffer.update_agent_status(first_analyst, "in_progress")
-        update_display(layout, stats_handler=stats_handler, start_time=start_time, live=live, message_buffer=message_buffer)
+        update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
         # Create spinner text
         spinner_text = (
             f"Analyzing {selections['ticker']} on {selections['analysis_date']}..."
         )
-        update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time, live=live, message_buffer=message_buffer)
+        update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
 
         try:
             trace = []
@@ -1955,7 +1922,7 @@ def run_analysis(checkpoint: bool = False):
                     "System",
                     f"Resuming checkpoint for {selections['ticker']} on {selections['analysis_date']}",
                 )
-                update_display(layout, stats_handler=stats_handler, start_time=start_time, live=live, message_buffer=message_buffer)
+                update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
             completed_successfully = False
             try:
@@ -2036,7 +2003,7 @@ def run_analysis(checkpoint: bool = False):
                                 message_buffer.update_agent_status("Portfolio Manager", "completed")
 
                     # Update the display
-                    update_display(layout, stats_handler=stats_handler, start_time=start_time, live=live, message_buffer=message_buffer)
+                    update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
                     trace.append(chunk)
                 completed_successfully = True
@@ -2076,11 +2043,11 @@ def run_analysis(checkpoint: bool = False):
                 elif get_state_value(final_state, section, None) is not None:
                     message_buffer.update_report_section(section, get_state_value(final_state, section, ""))
 
-            update_display(layout, stats_handler=stats_handler, start_time=start_time, live=live, message_buffer=message_buffer)
+            update_display(layout, stats_handler=stats_handler, start_time=start_time)
         except Exception as exc:
             runtime_error = exc
             message_buffer.add_message("System", _format_runtime_failure(exc, selections))
-            update_display(layout, stats_handler=stats_handler, start_time=start_time, live=live, message_buffer=message_buffer)
+            update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
     if runtime_error is not None:
         console.print(f"\n[red]{_format_runtime_failure(runtime_error, selections)}[/red]")
