@@ -223,16 +223,13 @@ def _rewrite_market_report(llm, symbol: str, current_date: str, instrument_conte
 Use only the stock data and indicator outputs supplied below. Do not invent values.
 
 You must explicitly cover all of these categories in the final report.
-Each top-level section (一、二) must begin with a hat paragraph (帽段) — 2-3 sentences
-summarizing the key conclusions of that section before sub-sections展开.
-Sub-sections must each start on a new line with a blank line separating them.
+Each top-level section (一、二) must begin with 2-3 sentences summarizing the key conclusions
+of that section, then a blank line before sub-sections.
 
 一、趋势与动量 (Trend & Momentum)
-[Hat paragraph: summarize trend regime and momentum stance]
 （一）Trend and moving averages: close_50_sma, close_200_sma, close_10_ema
 （二）Momentum: macd, macds, macdh, rsi
 二、波动与量能 (Volatility & Volume)
-[Hat paragraph: summarize volatility state and volume confirmation]
 （一）Volatility: boll, boll_ub, boll_lb, atr
 （二）Volume confirmation: vwma
 
