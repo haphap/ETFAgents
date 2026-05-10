@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import re
 from datetime import datetime, timedelta
@@ -10,6 +11,8 @@ import pandas as pd
 from stockstats import wrap
 
 from .exceptions import DataVendorUnavailable
+
+logger = logging.getLogger(__name__)
 
 
 _SUPPORTED_EXCHANGES = {"SH", "SZ", "BJ", "HK"}
@@ -153,8 +156,20 @@ def _resolve_broker_industry_keyword(
     )
 
 
-@lru_cache(maxsize=1)
+_cached_pro_client = None
+
+
+def clear_pro_client_cache():
+    """Clear the cached tushare client so the next call re-initializes."""
+    global _cached_pro_client
+    _cached_pro_client = None
+
+
 def _get_pro_client():
+    global _cached_pro_client
+    if _cached_pro_client is not None:
+        return _cached_pro_client
+
     token = (
         os.getenv("TUSHARE_TOKEN")
         or os.getenv("TUSHARE_API_TOKEN")
@@ -174,7 +189,8 @@ def _get_pro_client():
 
     try:
         ts.set_token(token)
-        return ts.pro_api(token)
+        _cached_pro_client = ts.pro_api(token)
+        return _cached_pro_client
     except Exception as exc:
         raise DataVendorUnavailable(f"Failed to initialize tushare client: {exc}") from exc
 
@@ -298,13 +314,6 @@ def _trim_text(value, max_chars: int = 220) -> str | None:
     if len(text) <= max_chars:
         return text
     return text[: max_chars - 3].rstrip() + "..."
-
-
-def _format_wan_to_billions(value) -> str | None:
-    number = _to_float(value)
-    if number is None:
-        return None
-    return f"{number / 1e4:.2f}亿 CNY"
 
 
 def _prepare_latest_records(
@@ -988,8 +997,8 @@ def _build_earnings_guidance_snapshot(
         row = prepared_forecast.iloc[0]
         _append_if_present(lines, "Latest Forecast Announcement Date", row.get("ann_date"))
         _append_if_present(lines, "Latest Forecast Period", row.get("end_date"))
-        _append_if_present(lines, "Forecast Net Profit Min", row.get("net_profit_min"), _format_wan_to_billions)
-        _append_if_present(lines, "Forecast Net Profit Max", row.get("net_profit_max"), _format_wan_to_billions)
+        _append_if_present(lines, "Forecast Net Profit Min", row.get("net_profit_min"), _format_market_value_10k_cny)
+        _append_if_present(lines, "Forecast Net Profit Max", row.get("net_profit_max"), _format_market_value_10k_cny)
         _append_if_present(lines, "Forecast Change Min", row.get("p_change_min"), _format_pct)
         _append_if_present(lines, "Forecast Change Max", row.get("p_change_max"), _format_pct)
         _append_if_present(lines, "Forecast Summary", _trim_text(row.get("summary"), 180))
@@ -1011,7 +1020,7 @@ def _build_earnings_guidance_snapshot(
                 lines,
                 "Forecast Net Profit Midpoint",
                 forecast_midpoint,
-                _format_wan_to_billions,
+                _format_market_value_10k_cny,
             )
             if (
                 total_market_value_10k is not None
@@ -1542,21 +1551,7 @@ def get_indicator(
     curr_date: str,
     look_back_days: int,
 ) -> str:
-    descriptions = {
-        "close_50_sma": "50 SMA: A medium-term trend indicator. Usage: Identify trend direction and serve as dynamic support/resistance. Tips: It lags price; combine with faster indicators for timely signals.",
-        "close_200_sma": "200 SMA: A long-term trend benchmark. Usage: Confirm overall market trend and identify golden/death cross setups. Tips: It reacts slowly; best for strategic trend confirmation rather than frequent trading entries.",
-        "close_10_ema": "10 EMA: A responsive short-term average. Usage: Capture quick shifts in momentum and potential entry points. Tips: Prone to noise in choppy markets; use alongside longer averages for filtering false signals.",
-        "macd": "MACD: Computes momentum via differences of EMAs. Usage: Look for crossovers and divergence as signals of trend changes. Tips: Confirm with other indicators in low-volatility or sideways markets.",
-        "macds": "MACD Signal: An EMA smoothing of the MACD line. Usage: Use crossovers with the MACD line to trigger trades. Tips: Should be part of a broader strategy to avoid false positives.",
-        "macdh": "MACD Histogram: Shows the gap between the MACD line and its signal. Usage: Visualize momentum strength and spot divergence early. Tips: Can be volatile; complement with additional filters in fast-moving markets.",
-        "rsi": "RSI: Measures momentum to flag overbought/oversold conditions. Usage: Apply 70/30 thresholds and watch for divergence to signal reversals. Tips: In strong trends, RSI may remain extreme; always cross-check with trend analysis.",
-        "boll": "Bollinger Middle: A 20 SMA serving as the basis for Bollinger Bands. Usage: Acts as a dynamic benchmark for price movement. Tips: Combine with the upper and lower bands to effectively spot breakouts or reversals.",
-        "boll_ub": "Bollinger Upper Band: Typically 2 standard deviations above the middle line. Usage: Signals potential overbought conditions and breakout zones. Tips: Confirm signals with other tools; prices may ride the band in strong trends.",
-        "boll_lb": "Bollinger Lower Band: Typically 2 standard deviations below the middle line. Usage: Indicates potential oversold conditions. Tips: Use additional analysis to avoid false reversal signals.",
-        "atr": "ATR: Averages true range to measure volatility. Usage: Set stop-loss levels and adjust position sizes based on current market volatility. Tips: It's a reactive measure, so use it as part of a broader risk management strategy.",
-        "vwma": "VWMA: A moving average weighted by volume. Usage: Confirm trends by integrating price action with volume data. Tips: Watch for skewed results from volume spikes; use in combination with other volume analyses.",
-        "mfi": "MFI: Uses both price and volume to measure buying and selling pressure. Usage: Identify overbought (>80) or oversold (<20) conditions and confirm trends or reversals.",
-    }
+    from etfagents.dataflows.indicator_descriptions import INDICATOR_DESCRIPTIONS as descriptions
     if indicator not in descriptions:
         raise ValueError(
             f"Indicator {indicator} is not supported. Please choose from: {list(descriptions.keys())}"
@@ -2076,8 +2071,8 @@ def get_broker_reports(
                     )
         except DataVendorUnavailable:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Wider-window industry report search failed: %s", exc)
 
         candidates_label = ", ".join(candidate_industries) or "N/A"
         raise DataVendorUnavailable(
@@ -2197,8 +2192,8 @@ def get_stock_reports(
                 )
         except DataVendorUnavailable:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Wider-window stock report search failed: %s", exc)
 
         raise DataVendorUnavailable(
             f"No stock research reports found for '{ts_code}' "

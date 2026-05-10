@@ -31,7 +31,8 @@ class GoogleClient(BaseLLMClient):
         if self.base_url:
             llm_kwargs["base_url"] = self.base_url
 
-        for key in ("timeout", "max_retries", "callbacks", "http_client", "http_async_client"):
+        _PASSTHROUGH_KWARGS = ("timeout", "max_retries", "callbacks", "http_client", "http_async_client")
+        for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 

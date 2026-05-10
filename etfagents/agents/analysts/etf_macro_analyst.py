@@ -1,3 +1,4 @@
+# DEPRECATED: Not wired into default ETF graph. Use news_analyst (macro_regime) instead.
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 

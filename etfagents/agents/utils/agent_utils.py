@@ -1,8 +1,11 @@
 from langchain_core.messages import HumanMessage, RemoveMessage
 from difflib import SequenceMatcher
 from decimal import Decimal, InvalidOperation
+import logging
 import os
 import re
+
+logger = logging.getLogger(__name__)
 
 from etfagents.agents.utils.rating import (
     detect_chinese_rating as _shared_detect_chinese_rating,
@@ -67,6 +70,10 @@ def get_language_instruction() -> str:
         " technical-indicator parameter keys such as `close_10_ema`, `boll_ub`, and"
         " `vwma` with reader-friendly labels such as `10日EMA`, `布林带上轨`, and"
         " `成交量加权移动平均线`."
+        " Use Chinese official-document heading hierarchy numbering throughout the report:"
+        " first level 一、二、三、; second level （一）（二）（三）; third level 1. 2. 3.;"
+        " fourth level (1) (2) (3); fifth level ① ② ③. "
+        " Keep paragraphs distinct and numbering consistent from start to finish."
     )
 
 
@@ -89,8 +96,11 @@ def get_output_language() -> str:
     return get_config().get("output_language", "English")
 
 
+CHINESE_OUTPUT_VALUES = {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
+
+
 def _is_chinese_output() -> bool:
-    return get_output_language().strip().lower() in {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
+    return get_output_language().strip().lower() in CHINESE_OUTPUT_VALUES
 
 
 def truncate_for_prompt(
@@ -785,6 +795,17 @@ _ROLE_BOTH_NAMES: dict[str, set[str]] = {
 }
 
 
+_CHINESE_SECTION_BREAK_PATTERN = re.compile(
+    r"(?<=[^\n])(?=[一二三四五六七八九十]+、)"
+    r"|(?<=[^\n])(?=（[一二三四五六七八九十\d]+）)"
+)
+
+
+def _ensure_chinese_section_breaks(text: str) -> str:
+    """Insert newlines before Chinese section numbering that appears inline."""
+    return _CHINESE_SECTION_BREAK_PATTERN.sub("\n", text)
+
+
 def normalize_chinese_role_terms(text: str) -> str:
     """Normalize user-facing Chinese role terms to a single preferred wording."""
     if not text:
@@ -796,6 +817,7 @@ def normalize_chinese_role_terms(text: str) -> str:
     normalized = _normalize_risk_recommendation_text(normalized)
     normalized = normalize_display_numbering(normalized)
     normalized = normalize_chinese_numeric_expressions(normalized)
+    normalized = _ensure_chinese_section_breaks(normalized)
     return normalize_chinese_finance_terms(normalized)
 
 
@@ -2004,7 +2026,7 @@ def load_snapshot_file(file_path: str) -> str:
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             return f.read()
-    except (FileNotFoundError, OSError):
+    except OSError:
         return ""
 
 
@@ -2311,8 +2333,8 @@ def synthesize_side_report(llm, role: str, full_history: str, snapshot: str) -> 
     try:
         response = llm.invoke(prompt)
         return extract_text_content(response.content)
-    except Exception:
-        # Fall back to truncated raw history if synthesis fails
+    except Exception as exc:
+        logger.warning("Side report synthesis failed for %s: %s", role, exc)
         return truncate_for_prompt(full_history, default_limit=4000)
 
 
@@ -2337,8 +2359,8 @@ def _resolve_company_name(ticker: str) -> str:
             df = pro.stock_basic(ts_code=ts_code, fields="ts_code,name")
             if not df.empty:
                 return df["name"].iloc[0]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Tushare company name lookup failed for %s: %s", ticker, exc)
 
     # --- yfinance fallback ---
     try:
@@ -2352,8 +2374,8 @@ def _resolve_company_name(ticker: str) -> str:
         info = yf.Ticker(yf_sym).info
         name = info.get("longName") or info.get("shortName") or ""
         return name
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("yfinance company name lookup failed for %s: %s", ticker, exc)
 
     return ""
 

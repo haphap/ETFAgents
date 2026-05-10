@@ -808,17 +808,50 @@ def _build_macro_snapshot(curr_date: str, look_back_days: int = 365) -> str:
 
 def _build_commodity_snapshot(curr_date: str, look_back_days: int = 240) -> str:
     commodity_specs = [
-        ("Precious metals", "AU", "SHFE", "AU futures main-contract stitch", "Fiat trust, real rates, systemic risk premium"),
-        ("Industrial metals", "CU", "SHFE", "CU futures main-contract stitch", "Global manufacturing resilience and real new-infrastructure demand"),
-        ("Energy (crude)", "SC", "INE", "SC futures main-contract stitch", "Recession risk, OPEC+ elasticity, and policy tightening room"),
-        ("Energy metals", "LC", "GFEX", "LC futures main-contract stitch", "Energy-transition profit pools and industry-clearing speed"),
-        ("Ferrous / building materials", "RB", "SHFE", "RB futures main-contract stitch", "China investment-cycle strength, PPI turning points, policy intervention"),
-        ("Softs / forestry", "SP", "SHFE", "SP futures main-contract stitch", "Climate shocks, substitution, and logistics-driven inflation"),
+        # Precious metals
+        ("贵金属 · 金", "AU", "SHFE", "沪金主力", "Fiat trust, real rates, systemic risk premium"),
+        ("贵金属 · 银", "AG", "SHFE", "沪银主力", "Industrial + monetary hybrid, solar demand"),
+        # Industrial metals
+        ("工业金属 · 铜", "CU", "SHFE", "沪铜主力", "Global manufacturing resilience and real new-infrastructure demand"),
+        ("工业金属 · 铝", "AL", "SHFE", "沪铝主力", "China smelting capacity, power-grid capex, export tariffs"),
+        ("工业金属 · 铅", "PB", "SHFE", "沪铅主力", "Lead-acid battery demand, recycled metal supply, and power-storage capex"),
+        ("工业金属 · 镍", "NI", "SHFE", "沪镍主力", "Stainless steel demand vs battery-grade NPI substitution"),
+        ("工业金属 · 锌", "ZN", "SHFE", "沪锌主力", "Galvanized steel demand, infrastructure and auto body"),
+        # Energy
+        ("能源 · 原油", "SC", "INE", "原油主力", "Recession risk, OPEC+ elasticity, and policy tightening room"),
+        # Energy-transition metals
+        ("转型金属 · 碳酸锂", "LC", "GFEX", "碳酸锂主力", "Energy-transition profit pools and industry-clearing speed"),
+        # Ferrous / building materials
+        ("黑色 · 螺纹钢", "RB", "SHFE", "螺纹钢主力", "China investment-cycle strength, PPI turning points, policy intervention"),
+        ("黑色 · 热卷", "HC", "SHFE", "热卷主力", "Automotive and manufacturing demand, downstream steel consumption strength"),
+        ("黑色 · 铁矿石", "I", "DCE", "铁矿石主力", "Steel-mill margins, blast-furnace utilization, import dependency"),
+        ("黑色 · 焦煤", "JM", "DCE", "焦煤主力", "Coking cost pass-through, safety-driven supply disruption"),
+        # Chemicals
+        ("化工 · PTA", "TA", "CZCE", "PTA主力", "Polyester chain pricing anchor, textile export demand, and refining margin pass-through"),
+        ("化工 · 甲醇", "MA", "CZCE", "甲醇主力", "Coal-chemical cost anchor, MTO demand, and fuel-alternative policy"),
+        ("化工 · 聚乙烯", "L", "DCE", "聚乙烯主力", "Plastic packaging and film demand, petrochemical margin cycle"),
+        # Oils & oilseeds
+        ("油脂油料 · 豆粕", "M", "DCE", "豆粕主力", "Feed demand anchor for hog/poultry cycle, crush margin, and soybean import dependency"),
+        ("油脂油料 · 玉米", "C", "DCE", "玉米主力", "Grain security, ethanol mandate, and deep-processing capacity"),
+        ("油脂油料 · 棕榈油", "P", "DCE", "棕榈油主力", "Global edible-oil balance, biodiesel mandate, and tropical supply risk"),
+        # Soft commodities
+        ("软商品 · 纸浆", "SP", "SHFE", "纸浆主力", "Climate shocks, substitution, and logistics-driven inflation"),
+        ("软商品 · 天然橡胶", "RU", "SHFE", "天然橡胶主力", "Tire demand, auto production cycle, Southeast Asia supply"),
+        # Industrial commodities
+        ("工业品 · 工业硅", "SI", "GFEX", "工业硅主力", "Polysilicon and silicone demand, capacity overhang"),
+        ("工业品 · 尿素", "UR", "CZCE", "尿素主力", "Fertilizer seasonality, coal-chemical cost, export policy"),
+        ("工业品 · PVC", "V", "DCE", "PVC主力", "Real estate piping demand, calcium-carbide cost curve"),
+        ("工业品 · 纯碱", "SA", "CZCE", "纯碱主力", "Glass production demand, photovoltaic expansion, capacity cycle"),
     ]
     rows: list[list[str]] = []
     anomaly_rows: list[list[str]] = []
     for cluster, symbol, exchange, reference, macro_variable in commodity_specs:
-        frame = _load_tushare_futures_main_frame(symbol, exchange, curr_date, look_back_days)
+        try:
+            frame = _load_tushare_futures_main_frame(symbol, exchange, curr_date, look_back_days)
+        except Exception:
+            rows.append([cluster, reference, "N/A", "N/A", "N/A", "N/A", "N/A", macro_variable])
+            anomaly_rows.append([cluster, "Data unavailable for this contract", "—"])
+            continue
         close_series = _frame_to_series(frame, "trade_date", "close")
         oi_series = _frame_to_series(frame, "trade_date", "oi")
         warehouse_series = _load_tushare_warehouse_series(symbol, exchange, curr_date, look_back_days)

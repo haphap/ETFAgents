@@ -1,6 +1,7 @@
 import openai
 from etfagents.content_utils import extract_text_content
 from etfagents.agents.utils.agent_utils import (
+    CHINESE_OUTPUT_VALUES,
     build_debate_brief,
     build_history_turn,
     extract_feedback_snapshot,
@@ -9,6 +10,7 @@ from etfagents.agents.utils.agent_utils import (
     get_bull_proposal_instruction,
     get_language_instruction,
     get_no_greeting_instruction,
+    get_output_language,
     get_snapshot_template,
     get_snapshot_writing_instruction,
     localize_role_name,
@@ -36,7 +38,6 @@ def create_bull_researcher(llm, memory=None):
         sentiment_report = get_state_value(state, "catalyst_sentiment_report", "")
         news_report = get_state_value(state, "macro_regime_report", "")
         fundamentals_report = get_state_value(state, "meso_commodity_report", "")
-        research_report = get_state_value(state, "market_flow_report", "")
         stock_report = get_state_value(state, "holdings_industry_report", "")
         holdings_report = get_state_value(state, "top_holdings_report", "")
 
@@ -65,7 +66,6 @@ Market research report: {market_research_report}
 Sentiment and catalyst impact report: {sentiment_report}
 Latest macro regime report: {news_report}
 Meso commodity analysis: {fundamentals_report}
-Market and flow analysis: {research_report}
 ETF holdings-industry research: {stock_report}
 ETF top holdings research: {holdings_report}
 Rolling debate brief: {debate_brief}
@@ -77,7 +77,7 @@ Last bear argument body: {current_response}
 When making claims, tie them back to ETF allocation rather than discussing single names in isolation.
 When writing in Chinese, use the exact role names "{localize_role_name('Bull Analyst')}" and "{localize_role_name('Bear Analyst')}". Do not use variants like "牛派分析师" or "熊派分析师".
 For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三.
-Your main argument body must be written entirely in Chinese. {get_bull_proposal_instruction()}
+{"Your main argument body must be written entirely in Chinese." if get_output_language().strip().lower() in CHINESE_OUTPUT_VALUES else f"Write your main argument body in {get_output_language()}."} {get_bull_proposal_instruction()}
 {get_analyst_decision_instruction()}
 Use this exact decision-summary template:
 {get_analyst_decision_template()}

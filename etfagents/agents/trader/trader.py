@@ -36,7 +36,7 @@ def _trader_detail_instruction() -> str:
     )
 
 
-def create_trader(llm, memory=None):
+def create_trader(llm):
     structured_llm = bind_structured(llm, TraderProposal, "Trader")
 
     def trader_node(state, name):

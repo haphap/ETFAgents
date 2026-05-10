@@ -64,10 +64,10 @@ class NewsAnalystTests(unittest.TestCase):
             ["get_etf_info", "get_etf_holdings", "get_macro_regime_data", "get_global_news", "get_news"],
         )
         system_msg = captured["system_message"]
-        self.assertIn("Benchmark / style / sector exposure analysis", system_msg)
+        self.assertIn("ETF暴露分析", system_msg)
         self.assertIn("cn_schedule", system_msg)
-        self.assertIn("Key anomalies and transmission chain", system_msg)
-        self.assertIn("Next rebalance-window catalysts", system_msg)
+        self.assertIn("关键异常与传导链", system_msg)
+        self.assertIn("再平衡窗口催化", system_msg)
 
 
 if __name__ == "__main__":

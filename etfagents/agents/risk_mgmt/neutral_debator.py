@@ -71,7 +71,6 @@ def create_neutral_debator(llm):
         sentiment_report = get_state_value(state, "catalyst_sentiment_report", "")
         news_report = get_state_value(state, "macro_regime_report", "")
         fundamentals_report = get_state_value(state, "meso_commodity_report", "")
-        research_report = get_state_value(state, "market_flow_report", "")
         stock_report = get_state_value(state, "holdings_industry_report", "")
         holdings_report = get_state_value(state, "top_holdings_report", "")
 
@@ -87,7 +86,6 @@ Market & Flow Report: {market_research_report}
 Sentiment & Catalyst Impact Report: {sentiment_report}
 Latest Macro Regime Report: {news_report}
 Meso Commodity Analysis: {fundamentals_report}
-Market and Flow Analysis: {research_report}
 ETF Holdings-Industry Research: {stock_report}
 ETF Top Holdings Research: {holdings_report}
 Rolling risk debate brief: {debate_brief}

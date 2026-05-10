@@ -343,9 +343,13 @@ class TradingAgentsGraph:
         if self._checkpointer_ctx is None:
             return
 
-        self._checkpointer_ctx.__exit__(None, None, None)
-        self._checkpointer_ctx = None
-        self.graph = self.workflow.compile()
+        try:
+            self._checkpointer_ctx.__exit__(None, None, None)
+        except Exception as exc:
+            logger.warning("Checkpointer teardown error: %s", exc)
+        finally:
+            self._checkpointer_ctx = None
+            self.graph = self.workflow.compile()
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
@@ -399,22 +403,26 @@ class TradingAgentsGraph:
             logger.warning("yfinance is not installed; skipping deferred reflection updates.")
             return None, None, None
 
-        from etfagents.dataflows.y_finance import _to_yfinance_symbol
+        try:
+            from etfagents.dataflows.y_finance import _to_yfinance_symbol
 
-        start = datetime.strptime(str(trade_date), "%Y-%m-%d")
-        end = start + timedelta(days=holding_days + 7)
-        benchmark_ticker = self._resolve_benchmark_ticker(ticker)
+            start = datetime.strptime(str(trade_date), "%Y-%m-%d")
+            end = start + timedelta(days=holding_days + 7)
+            benchmark_ticker = self._resolve_benchmark_ticker(ticker)
 
-        stock_history = yf.Ticker(_to_yfinance_symbol(ticker)).history(
-            start=start.strftime("%Y-%m-%d"),
-            end=end.strftime("%Y-%m-%d"),
-            auto_adjust=False,
-        )
-        benchmark_history = yf.Ticker(_to_yfinance_symbol(benchmark_ticker)).history(
-            start=start.strftime("%Y-%m-%d"),
-            end=end.strftime("%Y-%m-%d"),
-            auto_adjust=False,
-        )
+            stock_history = yf.Ticker(_to_yfinance_symbol(ticker)).history(
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                auto_adjust=False,
+            )
+            benchmark_history = yf.Ticker(_to_yfinance_symbol(benchmark_ticker)).history(
+                start=start.strftime("%Y-%m-%d"),
+                end=end.strftime("%Y-%m-%d"),
+                auto_adjust=False,
+            )
+        except Exception as exc:
+            logger.warning("Failed to fetch returns data: %s", exc)
+            return None, None, None
 
         if len(stock_history) < 2 or len(benchmark_history) < 2:
             return None, None, None

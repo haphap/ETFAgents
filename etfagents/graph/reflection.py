@@ -1,4 +1,8 @@
+import logging
+
 from etfagents.content_utils import extract_text_content
+
+logger = logging.getLogger(__name__)
 
 
 class Reflector:
@@ -25,5 +29,9 @@ class Reflector:
                 f"Outcome:\n- Raw return: {raw_return:+.1%}\n- Alpha vs SPY: {alpha_return:+.1%}",
             ),
         ]
-        response = self.quick_thinking_llm.invoke(messages)
-        return extract_text_content(getattr(response, "content", response)).strip()
+        try:
+            response = self.quick_thinking_llm.invoke(messages)
+            return extract_text_content(getattr(response, "content", response)).strip()
+        except Exception as exc:
+            logger.warning("Reflection generation failed: %s", exc)
+            return ""

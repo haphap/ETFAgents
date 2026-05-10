@@ -169,7 +169,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
 
     def test_trader_prompt_respects_output_language(self):
         llm = _CapturingLLM()
-        node = create_trader(llm, _EmptyMemory())
+        node = create_trader(llm)
         node(self.base_state)
 
         system_prompt = llm.structured_calls[0][0]["content"]

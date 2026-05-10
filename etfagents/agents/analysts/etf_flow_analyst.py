@@ -1,3 +1,4 @@
+# DEPRECATED: Not wired into default ETF graph. Use etf_market_analyst instead.
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
