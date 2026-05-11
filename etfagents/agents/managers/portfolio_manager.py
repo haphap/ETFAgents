@@ -113,6 +113,7 @@ def create_portfolio_manager(llm, memory=None):
 
 Your response must evaluate all three risk perspectives before giving a position. Do not jump straight to the final recommendation.
 For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三.
+Output only the finished report. Never copy, quote, or paraphrase the writing rules or bullet instructions from this prompt into the answer, and do not repeat a section heading once it has already appeared.
 
 Use this exact output order with Markdown headings:
 ## {localize_label("Debate Conclusion", "辩论结论")}

@@ -44,6 +44,14 @@ from etfagents.agents.utils.news_data_tools import (
 from etfagents.agents.utils.research_report_tools import get_broker_research, get_stock_research
 
 
+def collapse_blank_lines(text: str) -> str:
+    """Collapse excessive blank lines while preserving one Markdown blank line."""
+    if not text:
+        return ""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+    return re.sub(r"\n(?:[ \t]*\n){2,}", "\n\n", normalized).strip()
+
+
 def get_language_instruction() -> str:
     """Return a prompt instruction for the configured output language.
 
@@ -2094,6 +2102,65 @@ def build_history_turn(raw_content: str, role: str) -> str:
     return f"{speaker}: {cleaned}"
 
 
+_VISIBLE_DEBATE_LIST_RE = re.compile(
+    r"^\s*(?:[-*•]\s+|\d+\s*[.)、．]\s+|[（(]\d+[)）]\s+|[一二三四五六七八九十]+\s*[、.．]\s+)"
+)
+
+
+def normalize_visible_debate_body(text: str) -> str:
+    """Normalize visible debate bodies for display without touching structured blocks."""
+    content = (text or "").strip()
+    if not content:
+        return ""
+
+    normalized_blocks = []
+    for raw_block in re.split(r"\n\s*\n", content):
+        lines = []
+        list_line_count = 0
+        for raw_line in raw_block.splitlines():
+            line = raw_line.strip()
+            if not line:
+                continue
+            line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line)
+            line = re.sub(r"(?<!\*)\*\*(.+?)\*\*(?!\*)", r"\1", line)
+            line = re.sub(r"(?<!_)__(.+?)__(?!_)", r"\1", line)
+            line = re.sub(r"^\s*>+\s*", "", line)
+            line = line.strip()
+            if not line:
+                continue
+            lines.append(line)
+            if _VISIBLE_DEBATE_LIST_RE.match(line):
+                list_line_count += 1
+
+        if not lines:
+            continue
+
+        is_list_like = len(lines) >= 2 and list_line_count >= max(2, len(lines) - 1)
+        if is_list_like:
+            cleaned_items = []
+            for line in lines:
+                item = _VISIBLE_DEBATE_LIST_RE.sub("", line).strip()
+                if item:
+                    cleaned_items.append(item)
+            normalized_blocks.extend(cleaned_items)
+            continue
+
+        normalized_blocks.append("\n".join(lines))
+
+    return collapse_blank_lines("\n\n".join(normalized_blocks).strip())
+
+
+def rebuild_visible_debate_turn(
+    body: str, decision_summary: str = "", snapshot: str = ""
+) -> str:
+    parts = [
+        segment.strip()
+        for segment in (body, decision_summary, snapshot)
+        if segment and segment.strip()
+    ]
+    return "\n\n".join(parts).strip()
+
+
 def strip_role_prefix(text: str, role: str) -> str:
     """Remove self-labeling role prefixes that the LLM may inject.
 
@@ -2187,6 +2254,196 @@ def strip_all_feedback_snapshots(text: str) -> str:
         cleaned = updated
 
 
+_MANAGER_INSTRUCTION_MARKERS = (
+    "这一部分必须写成",
+    "必须引用报告中的具体数据",
+    "Give a clear, actionable ETF",
+    "Include concrete execution guidance",
+    "When writing in Chinese, avoid mixed English labels",
+    "The rating, the positioning recommendation text, and the final transaction proposal",
+    "Keep exactly one explicit final recommendation label",
+)
+
+_MANAGER_INSTRUCTION_INLINE_PATTERNS = (
+    re.compile(r"这一部分必须写成连贯分析段落[^。]*。?"),
+    re.compile(r"这一部分必须写成详细推理段落[^。]*。?"),
+    re.compile(r"必须引用报告中的具体数据来支撑判断[^。]*。?"),
+    re.compile(r"Give a clear, actionable ETF(?: portfolio)? recommendation[^.\n]*\.?"),
+    re.compile(r"Include concrete execution guidance:[^\n]*"),
+    re.compile(r"When writing in Chinese, avoid mixed English labels[^\n]*"),
+    re.compile(r"The rating, the positioning recommendation text, and the final transaction proposal[^\n]*"),
+    re.compile(r"Keep exactly one explicit final recommendation label[^\n]*"),
+)
+
+
+def strip_manager_instruction_leakage(text: str) -> str:
+    """Remove prompt-instruction fragments that occasionally leak into manager output."""
+    cleaned = text or ""
+    if not cleaned:
+        return ""
+
+    cleaned = "\n".join(
+        line
+        for line in cleaned.splitlines()
+        if not any(marker in line for marker in _MANAGER_INSTRUCTION_MARKERS)
+    )
+    for pattern in _MANAGER_INSTRUCTION_INLINE_PATTERNS:
+        cleaned = pattern.sub("", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _collapse_duplicate_markdown_headings(text: str) -> str:
+    lines = (text or "").splitlines()
+    if not lines:
+        return ""
+
+    deduped_lines = []
+    last_heading_key = ""
+    heading_open = False
+    for line in lines:
+        stripped = line.strip()
+        match = re.match(r"^(#{1,6})\s+(.+?)\s*$", stripped)
+        if match:
+            heading_key = re.sub(r"\s+", " ", match.group(2)).strip().lower()
+            if heading_open and heading_key == last_heading_key:
+                continue
+            deduped_lines.append(line)
+            last_heading_key = heading_key
+            heading_open = True
+            continue
+        if stripped:
+            heading_open = False
+        deduped_lines.append(line)
+    return "\n".join(deduped_lines).strip()
+
+
+_MANAGER_SECTION_KEYS = {"辩论结论", "行为逻辑", "持仓建议", "研究结论"}
+_RATING_ONLY_LINE_PATTERN = re.compile(
+    r"^(?:建议评级|评级|配置评级|研究结论|执行倾向|最终配置建议|最终交易建议)\s*[:：]\s*\**(?:买入|增持|持有|减持|卖出)\**[。！!？?\s]*$"
+)
+
+
+def _normalize_manager_section_key(title: str) -> str:
+    cleaned = (title or "").strip()
+    cleaned = re.sub(r"^[一二三四五六七八九十]+[、.．]?\s*", "", cleaned)
+    cleaned = re.sub(r"^[（(][一二三四五六七八九十\d]+[）)]\s*", "", cleaned)
+    cleaned = re.sub(r"^\d+(?:\.\d+)*[、.．)）-]?\s*", "", cleaned)
+    return re.sub(r"\s+", "", cleaned)
+
+
+def _trim_section_lines(lines: list[str]) -> list[str]:
+    trimmed = list(lines)
+    while trimmed and not trimmed[0].strip():
+        trimmed.pop(0)
+    while trimmed and not trimmed[-1].strip():
+        trimmed.pop()
+    return trimmed
+
+
+def _default_manager_positioning_content(rating: str) -> str:
+    mapping = {
+        "BUY": (
+            "先按目标仓位的一半到六成分批建仓，再把加仓动作绑定在价格站稳关键均线、成交量持续高于近20日均量、"
+            "份额或资金流继续净流入的共振验证上。若价格重新跌回关键支撑下方或产品层确认信号转弱，则暂停扩仓并把仓位收回到底仓水平。"
+        ),
+        "OVERWEIGHT": (
+            "在保留底仓基础上先把仓位提升到目标上限的七成到八成，只有在价格承接、量能、溢折价和份额变化继续同步改善时才进一步增配。"
+            "若催化落空或资金承接转弱，则先回到基准仓位并重新评估是否继续保留超配。"
+        ),
+        "HOLD": (
+            "维持当前仓位，不新增方向性敞口，把后续动作绑定在价格、量能、份额变化和产品结构信号的共同确认上。"
+            "若验证链条继续改善，只做小幅上调；若关键支撑失守或资金流重新转弱，则先降回更保守的基准仓位。"
+        ),
+        "UNDERWEIGHT": (
+            "以降低敞口为主，先把仓位压回风险预算下沿，反弹只有在量能与资金承接同步恢复时才允许暂缓减仓。"
+            "若价格修复失败、溢折价走弱或行业盈利验证继续下修，则继续分批减仓并收缩风险预算。"
+        ),
+        "SELL": (
+            "以退出仓位或避免入场为主，把剩余风险暴露压到最低，只有在基本面、价格结构和产品层信号共同修复后才考虑重新评估。"
+            "若后续仍看不到量价承接与资金回流，则继续保持空仓或极低试探仓位。"
+        ),
+    }
+    return mapping.get(rating, mapping["HOLD"])
+
+
+def _dedupe_and_fill_manager_sections(text: str) -> str:
+    lines = (text or "").splitlines()
+    if not lines:
+        return ""
+
+    sections = []
+    prefix_lines = []
+    current_section = None
+    heading_pattern = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
+    for line in lines:
+        match = heading_pattern.match(line.strip())
+        if match:
+            key = _normalize_manager_section_key(match.group(2))
+            if key in _MANAGER_SECTION_KEYS:
+                current_section = {
+                    "heading": line.strip(),
+                    "key": key,
+                    "lines": [],
+                }
+                sections.append(current_section)
+                continue
+        if current_section is None:
+            prefix_lines.append(line)
+        else:
+            current_section["lines"].append(line)
+
+    if not sections:
+        return text.strip()
+
+    merged_sections = []
+    section_index_by_key: dict[str, int] = {}
+    for section in sections:
+        normalized_lines = _trim_section_lines(section["lines"])
+        key = section["key"]
+        if key not in section_index_by_key:
+            merged_sections.append({
+                "heading": section["heading"],
+                "key": key,
+                "lines": normalized_lines,
+            })
+            section_index_by_key[key] = len(merged_sections) - 1
+            continue
+
+        target = merged_sections[section_index_by_key[key]]
+        new_block = "\n".join(normalized_lines).strip()
+        existing_block = "\n".join(target["lines"]).strip()
+        if not new_block or new_block == existing_block or new_block in existing_block:
+            continue
+        if target["lines"] and target["lines"][-1].strip():
+            target["lines"].append("")
+        target["lines"].extend(normalized_lines)
+
+    rating = parse_rating(text, default="HOLD")
+    for section in merged_sections:
+        if section["key"] not in {"持仓建议", "研究结论"}:
+            continue
+        has_non_rating_content = any(
+            line.strip() and not _RATING_ONLY_LINE_PATTERN.match(line.strip())
+            for line in section["lines"]
+        )
+        if has_non_rating_content:
+            continue
+        if section["lines"] and section["lines"][-1].strip():
+            section["lines"].append("")
+        section["lines"].append(_default_manager_positioning_content(rating))
+
+    rebuilt = _trim_section_lines(prefix_lines)
+    for index, section in enumerate(merged_sections):
+        if rebuilt:
+            rebuilt.append("")
+        rebuilt.append(section["heading"])
+        rebuilt.extend(_trim_section_lines(section["lines"]))
+        if index != len(merged_sections) - 1:
+            rebuilt.append("")
+    return "\n".join(rebuilt).strip()
+
+
 def normalize_chinese_manager_terms(text: str) -> str:
     """Normalize Chinese manager wording without altering snapshot semantics."""
     normalized = normalize_chinese_role_terms(text or "")
@@ -2194,7 +2451,7 @@ def normalize_chinese_manager_terms(text: str) -> str:
         return normalized
 
     has_explicit_snapshot = any(marker in normalized for marker in SNAPSHOT_MARKERS)
-    body = strip_all_feedback_snapshots(normalized)
+    body = strip_manager_instruction_leakage(strip_all_feedback_snapshots(normalized))
     snapshot = extract_feedback_snapshot(normalized) if has_explicit_snapshot else ""
     replacements = (
         ("## Debate Verdict", "## 辩论结论"),
@@ -2265,10 +2522,14 @@ def normalize_chinese_manager_terms(text: str) -> str:
                 continue
             deduped_lines.append(line)
         body = "\n".join(deduped_lines)
-    body = normalize_chinese_finance_terms(normalize_display_numbering(body)).strip()
+    body = _dedupe_and_fill_manager_sections(
+        _collapse_duplicate_markdown_headings(
+            normalize_chinese_finance_terms(normalize_display_numbering(body)).strip()
+        )
+    )
     if snapshot:
-        return f"{body}\n\n{snapshot}".strip()
-    return body
+        return collapse_blank_lines(f"{body}\n\n{snapshot}")
+    return collapse_blank_lines(body)
 
 
 def build_debate_brief(snapshots: dict[str, str], latest_speaker: str = "") -> str:

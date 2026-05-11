@@ -47,6 +47,12 @@ def _research_detail_instruction(section: str) -> str:
                 "- 这一部分必须写成连贯分析段落，至少 4 句，不能只写简短观点或要点摘录。"
                 " 必须引用报告中的具体数据来支撑判断——包括价格水平、均线位置、成交量、份额变化、溢折价、持仓集中度、宏观指标、利差、实际利率、供需与盈利线索等。"
             )
+        if section == "positioning":
+            return (
+                "- 这一部分必须写成详细执行段落，至少 4 句，不能只给一句“维持持有/增持”。"
+                " 必须明确写出初始仓位带、最多先建多少仓、何时加仓/减仓/轮动、什么条件触发再平衡，以及下一步重点监控哪些验证指标。"
+                " 不要重复“行为逻辑”里的原句，而要把研究结论翻译成可执行的仓位动作。"
+            )
         return (
             "- 这一部分必须写成详细推理段落，至少 4 句，要把 ETF 的宏观风险暴露、宏观因子冲击方向、行业供需、利润增长前景、市场结构、资金流、催化节奏、价格信号和风险触发条件串成完整逻辑链。"
             " 每个论据都必须引用上方报告中的具体数据，不能只写泛化判断。对于配置建议，必须给出以下具体标准：\n"
@@ -59,6 +65,12 @@ def _research_detail_instruction(section: str) -> str:
         return (
             "- Write this section as a coherent analysis paragraph with at least 4 full sentences; do not output terse fragments or simple bullet-style restatements."
             " You must cite specific data from the reports to support every judgment — prices, moving averages, volume, share changes, premium-discount, holdings concentration, macro indicators, rate spreads, real yields, supply-demand, and profit signals."
+        )
+    if section == "positioning":
+        return (
+            "- Write this section as a detailed execution paragraph with at least 4 full sentences; do not stop at a one-line 'hold/overweight' statement."
+            " You must spell out the initial allocation band, maximum starter size, add / reduce / rotate conditions, rebalance triggers, and the next monitoring priorities."
+            " Do not repeat the action-logic sentences verbatim; translate the research conclusion into concrete position-management instructions."
         )
     return (
         "- Write this section as a detailed reasoning paragraph with at least 4 full sentences, explicitly connecting the ETF's macro risk exposures, macro-factor shock direction, industry supply-demand balance, profit-growth outlook, market structure, flows, catalysts, price action, and risk triggers to the recommendation."
@@ -101,6 +113,7 @@ def create_research_manager(llm, memory=None):
 
 Your response must evaluate both sides before giving a position. Do not jump straight to the allocation suggestion.
 For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三.
+Output only the finished report. Never copy, quote, or paraphrase the writing rules or bullet instructions from this prompt into the answer, and do not repeat a section heading once it has already appeared.
 
 Use this exact output order with Markdown headings:
 ## {localize_label("Debate Conclusion", "辩论结论")}
@@ -123,10 +136,11 @@ Use this exact output order with Markdown headings:
 {_research_detail_instruction("action")}
 
 ## {localize_label("Positioning Recommendation", "持仓建议")}
-- Give a clear, actionable ETF allocation recommendation—{localize_rating_term("Buy")}, {localize_rating_term("Overweight")}, {localize_rating_term("Hold")}, {localize_rating_term("Underweight")}, or {localize_rating_term("Sell")}—grounded in the debate's strongest arguments.
-- Include concrete execution guidance for the trader: initial allocation band, add / reduce / rotate conditions, rebalance triggers, risk controls, and what to monitor next.
-- The rating field and the positioning recommendation text must point to the same action. Do not restate a different recommendation in prose.
-- Keep exactly one explicit recommendation label in this section. {get_localized_research_view_instruction()}
+        - Give a clear, actionable ETF allocation recommendation—{localize_rating_term("Buy")}, {localize_rating_term("Overweight")}, {localize_rating_term("Hold")}, {localize_rating_term("Underweight")}, or {localize_rating_term("Sell")}—grounded in the debate's strongest arguments.
+        - Include concrete execution guidance for the trader: initial allocation band, add / reduce / rotate conditions, rebalance triggers, risk controls, and what to monitor next.
+        - The rating field and the positioning recommendation text must point to the same action. Do not restate a different recommendation in prose.
+        - Keep exactly one explicit recommendation label in this section. {get_localized_research_view_instruction()}
+        {_research_detail_instruction("positioning")}
 
 Only after the three sections above, append a feedback block in this exact format. Do not place the feedback snapshot before the conclusion:
 {get_snapshot_template()}

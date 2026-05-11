@@ -1,12 +1,15 @@
 import re
+from difflib import SequenceMatcher
 from enum import Enum
 
 from pydantic import BaseModel, Field
 
 from etfagents.agents.utils.agent_utils import (
+    collapse_blank_lines,
     get_output_language,
     localize_label,
     localize_rating_term,
+    strip_manager_instruction_leakage,
 )
 from etfagents.agents.utils.rating import detect_chinese_rating, detect_english_rating
 
@@ -224,7 +227,7 @@ def _has_conflicting_primary_action(text: str, rating: PortfolioRating) -> bool:
 
 
 def _sanitize_positioning_recommendation(text: str, rating: PortfolioRating) -> str:
-    content = (text or "").strip()
+    content = strip_manager_instruction_leakage((text or "").strip())
     if not content:
         return _default_positioning_guidance(rating)
 
@@ -288,6 +291,7 @@ def _sanitize_positioning_recommendation(text: str, rating: PortfolioRating) -> 
             continue
         segments.append(sentence)
     cleaned = "\n".join(segments).strip()
+    cleaned = re.sub(r"(?m)^[，,、；;:：\-\s]+", "", cleaned).strip()
     if _is_placeholder_like(cleaned) or _has_conflicting_primary_action(cleaned, rating):
         return _default_positioning_guidance(rating)
     return cleaned or _default_positioning_guidance(rating)
@@ -309,6 +313,66 @@ def _default_positioning_guidance(rating: PortfolioRating) -> str:
         PortfolioRating.HOLD: "Maintain the current position and wait for stronger confirmation before changing exposure.",
         PortfolioRating.UNDERWEIGHT: "Reduce exposure in stages while monitoring rebound strength and the pace of risk release.",
         PortfolioRating.SELL: "Prioritize exiting or avoiding entry while monitoring whether risks are being repriced.",
+    }
+    return mapping[rating]
+
+
+def _default_research_positioning_guidance(rating: PortfolioRating) -> str:
+    if _is_chinese_output():
+        mapping = {
+            PortfolioRating.BUY: (
+                "先按目标仓位的50%—60%建立底仓，确认价格站稳关键均线、成交量连续高于近20日均量且份额继续净申购后，再把仓位逐步提升到目标上沿。"
+                "若溢折价异常扩大、主要支撑失守或行业盈利验证不再改善，则暂停加仓并把仓位收回到底仓。"
+                "执行上按周度复核价格、量能、份额变化与宏观验证链条，任一环节失效都不追高扩仓。"
+            ),
+            PortfolioRating.OVERWEIGHT: (
+                "先把现有仓位提高到目标上限的70%—80%，只有在价格承接、量能、溢折价和资金流继续同向改善时才进一步增配。"
+                "若催化兑现慢于预期、份额恢复停滞或前十大持仓集中度继续抬升而盈利修正未跟上，则先把超配部分降回基准仓位。"
+                "再平衡上优先看价格确认、产品层验证和行业盈利线索是否仍保持同向共振。"
+            ),
+            PortfolioRating.HOLD: (
+                "维持现有基准仓位，不新增方向性敞口，新增资金优先等待价格重新站稳关键支撑与均线、成交量回到近期均量上方、份额或资金流同步改善后再考虑上调一个档位。"
+                "若价格跌破主要支撑、资金流重新转负或产品层指标恶化，则先把仓位降回更保守区间而不是被动承受回撤。"
+                "执行上按周度复核量价、份额变化、溢折价和宏观/行业验证信号，只有验证链条继续强化时才从持有转向增配。"
+            ),
+            PortfolioRating.UNDERWEIGHT: (
+                "先把仓位压回风险预算下沿或目标仓位的30%—40%，反弹只有在价格修复、量能放大和份额恢复净流入同时出现时才允许暂缓减仓。"
+                "若反弹无法收复关键均线、溢折价走弱或行业盈利线索继续下修，则继续分批削减敞口并收缩风险预算。"
+                "再平衡重点盯住价格修复质量、产品层承接与风险释放节奏，而不是仅凭单日反弹回补仓位。"
+            ),
+            PortfolioRating.SELL: (
+                "把剩余仓位降到0%—10%的观察仓或直接清仓，只有在基本面、价格结构和产品层指标共同修复时才重新评估是否回补。"
+                "若后续仍看不到量价承接、份额回流和盈利修正改善，就继续保持低暴露，不因为短期反弹提前回补。"
+                "执行上优先处理流动性和回撤控制，把再入场判断留给下一轮完整验证。"
+            ),
+        }
+        return mapping[rating]
+    mapping = {
+        PortfolioRating.BUY: (
+            "Start with roughly 50% to 60% of target exposure, then scale toward the upper bound only after price, volume, and ETF flow confirmation improve together. "
+            "If support breaks, premium-discount widens abnormally, or earnings confirmation stalls, pause the build and cut back to the starter size. "
+            "Rebalance weekly against price structure, volume, product-level checks, and macro confirmation rather than chasing a single strong session."
+        ),
+        PortfolioRating.OVERWEIGHT: (
+            "Lift the position to roughly 70% to 80% of the intended overweight first, and only move to full overweight if price support, volume, premium-discount, and flows keep improving together. "
+            "If catalyst delivery lags or concentration rises without matching earnings support, trim the add-on back to benchmark size. "
+            "Rebalance around confirmation quality, not just around a headline-driven rally."
+        ),
+        PortfolioRating.HOLD: (
+            "Keep benchmark exposure in place and avoid adding directional risk until price reclaims key levels, volume recovers versus its recent average, and ETF flows improve at the same time. "
+            "If support fails again or product-level indicators deteriorate, reduce back to a more defensive baseline instead of passively absorbing drawdown. "
+            "Review price, volume, flows, premium-discount, and macro or industry confirmation weekly before shifting from hold to add."
+        ),
+        PortfolioRating.UNDERWEIGHT: (
+            "Cut the position back toward the low end of the risk budget, roughly 30% to 40% of target exposure, and only pause the reduction if price repair, stronger volume, and ETF flow stabilization arrive together. "
+            "If rebounds fail at key averages or earnings signals keep weakening, continue trimming in stages and keep risk budget tight. "
+            "Rebalance around repair quality and risk-release cadence rather than short-term relief rallies."
+        ),
+        PortfolioRating.SELL: (
+            "Reduce exposure to zero or to a token 0% to 10% watch position, and only reconsider entry after fundamentals, price structure, and product-level metrics all repair together. "
+            "If there is still no flow support or earnings repair, stay sidelined and do not buy back a reflex rally. "
+            "Keep the focus on liquidity and drawdown control until a new full validation window opens."
+        ),
     }
     return mapping[rating]
 
@@ -356,19 +420,19 @@ def _default_action_logic(rating: PortfolioRating) -> str:
 def _default_trading_thesis(rating: PortfolioRating) -> str:
     if _is_chinese_output():
         mapping = {
-            PortfolioRating.BUY: "当前上行逻辑更完整，适合在确认信号仍然有效的前提下逐步建立仓位。",
-            PortfolioRating.OVERWEIGHT: "当前多头逻辑仍占优，但应以控制节奏的方式增配而不是一次性放大仓位。",
-            PortfolioRating.HOLD: "当前多空因素并存，短期缺乏足够的赔率与胜率优势，更适合等待更清晰的确认信号。",
-            PortfolioRating.UNDERWEIGHT: "当前风险释放节奏快于新增催化兑现速度，更适合先降低敞口并等待更稳健的再介入条件。",
-            PortfolioRating.SELL: "当前风险收益比明显失衡，应以退出仓位或回避参与为主，等待风险重新定价完成。",
+            PortfolioRating.BUY: "当前上行逻辑更完整，适合在确认信号仍然有效的前提下逐步建立仓位。驱动这一判断的核心不是单一价格反弹，而是宏观压制边际缓和、行业盈利与供需线索同步改善，以及 ETF 持仓结构开始获得资金承接。换句话说，配置逻辑要先回答为什么现在值得把风险预算重新投向这只 ETF，再把具体加仓节奏交给执行计划去处理。",
+            PortfolioRating.OVERWEIGHT: "当前多头逻辑仍占优，但应以控制节奏的方式增配而不是一次性放大仓位。支撑增配的关键在于主线产业或持仓盈利韧性仍在、市场结构没有转弱，且资金对核心持仓的承接尚未被破坏；真正需要防守的是估值上沿和催化兑现速度，而不是主线本身已经失效。因而本节应先说明为什么组合仍愿意把权重向这只 ETF 倾斜，而不是重复执行层面的加仓步骤。",
+            PortfolioRating.HOLD: "当前多空因素并存，短期缺乏足够的赔率与胜率优势，更适合等待更清晰的确认信号。配置逻辑层面需要先说明：中期主线并未被证伪，但宏观估值约束、盈利质量验证和资金流确认还没有形成同向共振，因此没有必要在当前位置主动扩大风险暴露。也就是说，当前持有不是“没有观点”，而是在主线尚存、验证不足的情况下优先保留仓位弹性，把真正的动作阈值留给执行计划。",
+            PortfolioRating.UNDERWEIGHT: "当前风险释放节奏快于新增催化兑现速度，更适合先降低敞口并等待更稳健的再介入条件。配置逻辑的重点是说明为什么这只 ETF 当前承受的估值天花板、盈利质量拐点或资金承接弱化，已经让持有成本高于继续等待的收益，而不仅仅是复述减仓动作本身。只有先把这一层“为什么该降权”的逻辑说透，后面的分步减仓和回补条件才有约束力。",
+            PortfolioRating.SELL: "当前风险收益比明显失衡，应以退出仓位或回避参与为主，等待风险重新定价完成。这里需要先说明 ETF 的核心驱动已经从可承受波动演变为主线受损：宏观或产业压制仍在、盈利修复没有兑现、价格结构与资金承接也未出现有效修复。先把退出理由讲清楚，再把清仓与重评估条件留给执行层，才能避免逻辑与动作重复。",
         }
         return mapping[rating]
     mapping = {
-        PortfolioRating.BUY: "The upside thesis is more complete right now, so the setup favors staged accumulation while confirmation remains intact.",
-        PortfolioRating.OVERWEIGHT: "The bullish setup still has the edge, but exposure should be increased in a controlled way rather than all at once.",
-        PortfolioRating.HOLD: "Bullish and bearish factors are still balanced enough that the setup lacks a clear edge, so waiting is more appropriate.",
-        PortfolioRating.UNDERWEIGHT: "Risk is repricing faster than new upside catalysts are materializing, so trimming exposure is more appropriate.",
-        PortfolioRating.SELL: "The current risk-reward is unfavorable enough that exiting or staying out is the cleaner choice until repricing runs its course.",
+        PortfolioRating.BUY: "The upside thesis is more complete right now, so the setup favors staged accumulation while confirmation remains intact. The core case should explain why macro pressure is easing, industry earnings or supply-demand signals are improving, and ETF structure or flows are starting to validate that repair instead of merely repeating the trade steps. In other words, this section should justify why risk budget belongs here now, while the execution plan handles how to deploy it.",
+        PortfolioRating.OVERWEIGHT: "The bullish setup still has the edge, but exposure should be increased in a controlled way rather than all at once. The thesis needs to explain why the main industry and holdings evidence still supports a larger weight, while valuation ceilings and catalyst timing argue for pacing rather than aggression. That rationale should stay conceptually distinct from the execution plan, which is where the actual add rules belong.",
+        PortfolioRating.HOLD: "Bullish and bearish factors are still balanced enough that the setup lacks a clear edge, so waiting is more appropriate. The thesis should explain that the medium-term story is not broken, but macro valuation pressure, earnings-quality confirmation, and flow validation are not yet aligned strongly enough to justify a bigger swing in exposure. That way the logic explains why holding is disciplined, while the execution plan can focus on the thresholds that would change the stance.",
+        PortfolioRating.UNDERWEIGHT: "Risk is repricing faster than new upside catalysts are materializing, so trimming exposure is more appropriate. The thesis should make clear why valuation pressure, weakening earnings quality, or fading flow sponsorship now outweigh the benefit of maintaining full exposure, rather than simply restating that the position should be reduced. The actual trimming sequence and rebuild conditions belong in the execution section.",
+        PortfolioRating.SELL: "The current risk-reward is unfavorable enough that exiting or staying out is the cleaner choice until repricing runs its course. The thesis should first explain why the core ETF driver is impaired across macro, industry, earnings, or structure, and why continued holding no longer earns the downside being taken. The execution section can then handle the mechanics of exit and re-entry review.",
     }
     return mapping[rating]
 
@@ -462,7 +526,9 @@ def _sanitize_section(
     require_detail: bool = False,
     strip_headings: tuple[str, ...] = (),
 ) -> str:
-    content = _strip_leading_section_headings((text or "").strip(), strip_headings)
+    content = strip_manager_instruction_leakage(
+        _strip_leading_section_headings((text or "").strip(), strip_headings)
+    )
     if not content or _is_placeholder_like(content):
         return default_text
     if check_action_conflict and _has_conflicting_primary_action(content, rating):
@@ -497,6 +563,56 @@ def _merge_sparse_section_with_default(content: str, default_text: str) -> str:
     return f"{stripped}{joiner} {default_text}"
 
 
+def _split_sentences(text: str) -> list[str]:
+    content = (text or "").strip()
+    if not content:
+        return []
+    return [
+        segment.strip()
+        for segment in re.split(r"(?:\n+|(?<=[。！？!?])\s*)", content)
+        if segment.strip()
+    ]
+
+
+def _sentence_similarity(left: str, right: str) -> float:
+    left_key = _compact_text(left)
+    right_key = _compact_text(right)
+    if not left_key or not right_key:
+        return 0.0
+    if left_key == right_key:
+        return 1.0
+    if min(len(left_key), len(right_key)) >= 12 and (
+        left_key in right_key or right_key in left_key
+    ):
+        return 0.9
+    return SequenceMatcher(None, left_key, right_key).ratio()
+
+
+def _remove_overlapping_sentences(text: str, reference: str) -> str:
+    reference_sentences = _split_sentences(reference)
+    if not reference_sentences:
+        return (text or "").strip()
+
+    kept = []
+    for sentence in _split_sentences(text):
+        if any(_sentence_similarity(sentence, ref) >= 0.72 for ref in reference_sentences):
+            continue
+        kept.append(sentence)
+    return "\n".join(kept).strip()
+
+
+def _trader_thesis_needs_detail(text: str) -> bool:
+    content = (text or "").strip()
+    if not content:
+        return True
+    compact = _compact_text(content)
+    sentence_count = len(_split_sentences(content))
+    if _is_chinese_output():
+        return len(compact) < 85 or sentence_count < 3
+    word_count = len(re.findall(r"\b\w+\b", content))
+    return word_count < 30 or sentence_count < 3
+
+
 def _missing_execution_thresholds(text: str) -> bool:
     stripped = (text or "").strip()
     if not stripped:
@@ -524,6 +640,56 @@ def _sanitize_snapshot_stance(stance: str, rating: PortfolioRating) -> str:
     return content
 
 
+def _sanitize_trader_thesis(
+    text: str,
+    execution_plan: str,
+    rating: PortfolioRating,
+    strip_headings: tuple[str, ...],
+) -> str:
+    content = strip_manager_instruction_leakage(
+        _strip_leading_section_headings((text or "").strip(), strip_headings)
+    )
+    default_text = _default_trading_thesis(rating)
+    if not content or _is_placeholder_like(content):
+        return default_text
+    if _has_conflicting_primary_action(content, rating):
+        return default_text
+
+    deduped = _remove_overlapping_sentences(content, execution_plan)
+    if not deduped:
+        return default_text
+    if _has_conflicting_primary_action(deduped, rating):
+        return default_text
+    if _trader_thesis_needs_detail(deduped):
+        return _merge_sparse_section_with_default(deduped, default_text)
+    return deduped
+
+
+def _sanitize_trader_risk_management(
+    text: str,
+    thesis: str,
+    execution_plan: str,
+    rating: PortfolioRating,
+    strip_headings: tuple[str, ...],
+) -> str:
+    content = strip_manager_instruction_leakage(
+        _strip_leading_section_headings((text or "").strip(), strip_headings)
+    )
+    default_text = _default_risk_management(rating)
+    if not content or _is_placeholder_like(content):
+        return default_text
+
+    deduped = _remove_overlapping_sentences(
+        content,
+        "\n".join(part for part in (thesis, execution_plan) if part),
+    )
+    if not deduped:
+        return default_text
+    if _section_needs_detail(deduped):
+        return _merge_sparse_section_with_default(deduped, default_text)
+    return deduped
+
+
 def render_research_plan(plan: ResearchPlan) -> str:
     recommendation = localize_rating_term(plan.rating.value)
     debate_conclusion = _sanitize_section(
@@ -542,6 +708,15 @@ def render_research_plan(plan: ResearchPlan) -> str:
     positioning_recommendation = _sanitize_positioning_recommendation(
         plan.positioning_recommendation, plan.rating
     )
+    detailed_positioning = _default_research_positioning_guidance(plan.rating)
+    if _compact_text(positioning_recommendation) == _compact_text(
+        _default_positioning_guidance(plan.rating)
+    ):
+        positioning_recommendation = detailed_positioning
+    elif _section_needs_detail(positioning_recommendation):
+        positioning_recommendation = _merge_sparse_section_with_default(
+            positioning_recommendation, detailed_positioning
+        )
     body = (
         f"## {localize_label('Debate Conclusion', '辩论结论')}\n"
         f"{debate_conclusion}\n\n"
@@ -564,7 +739,7 @@ def render_research_plan(plan: ResearchPlan) -> str:
             plan.rating,
         ),
     )
-    return f"{body}\n\n{snapshot}".strip()
+    return collapse_blank_lines(f"{body}\n\n{snapshot}")
 
 
 def render_trader_proposal(plan: TraderProposal) -> str:
@@ -583,13 +758,6 @@ def render_trader_proposal(plan: TraderProposal) -> str:
         "Rebalance and Risk Control",
     )
     recommendation = localize_rating_term(plan.rating.value)
-    thesis = _sanitize_section(
-        plan.thesis,
-        _default_trading_thesis(plan.rating),
-        plan.rating,
-        require_detail=True,
-        strip_headings=heading_aliases,
-    )
     execution_plan = _sanitize_section(
         plan.execution_plan,
         _default_execution_plan(plan.rating),
@@ -603,15 +771,21 @@ def render_trader_proposal(plan: TraderProposal) -> str:
             execution_plan,
             _default_execution_plan(plan.rating),
         )
-    risk_management = _sanitize_section(
-        plan.risk_management,
-        _default_risk_management(plan.rating),
+    thesis = _sanitize_trader_thesis(
+        plan.thesis,
+        execution_plan,
         plan.rating,
-        require_detail=True,
-        strip_headings=heading_aliases,
+        heading_aliases,
+    )
+    risk_management = _sanitize_trader_risk_management(
+        plan.risk_management,
+        thesis,
+        execution_plan,
+        plan.rating,
+        heading_aliases,
     )
     if _is_chinese_output():
-        return (
+        return collapse_blank_lines(
             "## ETF配置逻辑\n"
             f"{thesis}\n\n"
             "## 配置执行计划\n"
@@ -619,8 +793,8 @@ def render_trader_proposal(plan: TraderProposal) -> str:
             "## 再平衡与风险控制\n"
             f"{risk_management}\n\n"
             f"执行倾向: **{recommendation}**"
-        ).strip()
-    return (
+        )
+    return collapse_blank_lines(
         "## ETF Allocation Thesis\n"
         f"{thesis}\n\n"
         "## Allocation Execution Plan\n"
@@ -628,7 +802,7 @@ def render_trader_proposal(plan: TraderProposal) -> str:
         "## Rebalance and Risk Controls\n"
         f"{risk_management}\n\n"
         f"EXECUTION BIAS: **{recommendation.upper()}**"
-    ).strip()
+    )
 
 
 def render_portfolio_decision(plan: PortfolioDecision) -> str:
@@ -676,4 +850,4 @@ def render_portfolio_decision(plan: PortfolioDecision) -> str:
             plan.rating,
         ),
     )
-    return f"{body}\n\n{snapshot}".strip()
+    return collapse_blank_lines(f"{body}\n\n{snapshot}")

@@ -17,6 +17,8 @@ from etfagents.agents.utils.agent_utils import (
     localize_role_name,
     make_display_snapshot,
     normalize_chinese_role_terms,
+    normalize_visible_debate_body,
+    rebuild_visible_debate_turn,
     save_snapshot_file,
     strip_analyst_decision_summary,
     strip_feedback_snapshot,
@@ -46,11 +48,6 @@ def _paragraphize_neutral_body(text: str) -> str:
         if paragraph:
             paragraphs.append(paragraph)
     return "\n\n".join(paragraphs).strip() or content
-
-
-def _rebuild_neutral_visible_turn(body: str, decision_summary: str, snapshot: str) -> str:
-    parts = [segment.strip() for segment in (body, decision_summary, snapshot) if segment and segment.strip()]
-    return "\n\n".join(parts).strip()
 
 
 def create_neutral_debator(llm):
@@ -115,12 +112,20 @@ After the decision summary, append an exact feedback snapshot block using this t
             )
             decision_summary = extract_analyst_decision_summary(raw_content)
             snapshot_full = extract_feedback_snapshot(raw_content)
-            argument_body = _paragraphize_neutral_body(strip_role_prefix(
-                strip_analyst_decision_summary(strip_feedback_snapshot(raw_content)),
-                "Neutral Analyst",
-            ))
+            argument_body = _paragraphize_neutral_body(
+                normalize_visible_debate_body(
+                    strip_role_prefix(
+                        strip_analyst_decision_summary(
+                            strip_feedback_snapshot(raw_content)
+                        ),
+                        "Neutral Analyst",
+                    )
+                )
+            )
             history_turn = build_history_turn(
-                _rebuild_neutral_visible_turn(argument_body, decision_summary, snapshot_full),
+                rebuild_visible_debate_turn(
+                    argument_body, decision_summary, snapshot_full
+                ),
                 "Neutral Analyst",
             )
             new_neutral_snapshot_full = snapshot_full

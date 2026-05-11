@@ -88,6 +88,7 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("### 研究经理结论\n研究经理: 最终结论", formatted)
         self.assertIn("#### 反馈快照摘要", formatted)
         self.assertLess(formatted.index("研究经理: 最终结论"), formatted.index("#### 反馈快照摘要"))
+        self.assertNotIn("\n\n\n", formatted)
 
     def test_risk_management_history_supports_english_prefixes(self):
         risk_state = {
@@ -145,6 +146,7 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("### 第 2 轮", formatted)
         self.assertIn("#### 激进风险分析师\n\nRound 2 aggressive follow-up", formatted)
         self.assertIn("### 投资组合经理结论\nPortfolio Manager: Final allocation", formatted)
+        self.assertNotIn("\n\n\n", formatted)
 
     def test_inferred_snapshot_shows_snapshot_without_review_heading(self):
         debate_state = {

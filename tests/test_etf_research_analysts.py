@@ -6,6 +6,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from etfagents.agents.analysts.etf_industry_research_analyst import (
     create_etf_industry_research_analyst,
 )
+from etfagents.agents.analysts.etf_structure_analyst import (
+    create_etf_structure_analyst,
+)
 from etfagents.agents.analysts.etf_stock_research_analyst import (
     create_etf_stock_research_analyst,
 )
@@ -85,6 +88,48 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT just list numbers", system_msg)
         self.assertIn("ETF return attribution", system_msg)
         self.assertIn("retrieval artifacts", system_msg)
+
+
+class EtfStructureAnalystPromptTests(unittest.TestCase):
+    def test_prompt_forces_judgment_before_data_dump(self):
+        llm = _CapturingLLM()
+        node = create_etf_structure_analyst(llm)
+
+        captured = {}
+
+        def _mock_run(*args, **kwargs):
+            captured["system_message"] = kwargs.get("system_message", "")
+            return (AIMessage(content="Report content"), "Report content")
+
+        with patch(
+            "etfagents.agents.analysts.etf_structure_analyst.run_tool_report_chain",
+            side_effect=_mock_run,
+        ):
+            node(
+                {
+                    "company_of_interest": "159980.SZ",
+                    "trade_date": "2026-04-30",
+                    "messages": [HumanMessage(content="Analyze 159980.SZ")],
+                }
+            )
+
+        system_msg = captured["system_message"]
+        self.assertIn(
+            "judgment first -> evidence second -> ETF/industry implication last",
+            system_msg,
+        )
+        self.assertIn(
+            "Never output three or more naked data fragments in a row",
+            system_msg,
+        )
+        self.assertIn(
+            "Do NOT enumerate contracts one by one with parallel sentence templates",
+            system_msg,
+        )
+        self.assertIn(
+            "对ETF行业链配置有什么含义",
+            system_msg,
+        )
 
 
 if __name__ == "__main__":

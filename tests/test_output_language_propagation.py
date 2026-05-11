@@ -179,6 +179,9 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("关键支撑", system_prompt)
         self.assertIn("成交量", system_prompt)
         self.assertIn("份额变化", system_prompt)
+        self.assertIn("do not simply restate the execution steps", system_prompt)
+        self.assertIn("do not repeat the thesis sentence verbatim", system_prompt)
+        self.assertIn("failure conditions, rebalance triggers, cut or restore rules", system_prompt)
 
     def test_research_manager_prompt_respects_output_language(self):
         llm = _CapturingLLM()
@@ -241,6 +244,36 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("- 本轮新增与反驳: y；z；r", formatted)
         self.assertNotIn("决策摘要", investment_debate_state["current_bull_response"])
         self.assertNotIn("反馈快照", investment_debate_state["current_bull_response"])
+
+    def test_bull_researcher_visible_body_strips_markdown_decorations(self):
+        llm = MagicMock()
+        llm.invoke.return_value = _FakeResponse(
+            "**核心判断：** 多头主线仍占优。\n"
+            "## 证据展开\n"
+            "需求修复与份额扩张正在同步改善。\n\n"
+            "决策摘要:\n"
+            "- 评级: 增持\n"
+            "- 置信度: 75%\n"
+            "- 时间区间: 3-6个月\n"
+            "- 关键假设:\n"
+            "  1. 需求继续改善。\n"
+            "  2. 份额维持净申购。\n"
+            "  3. 回撤可控。\n\n"
+            "反馈快照:\n"
+            "- 立场: 增持\n"
+            "- 本轮新增与反驳: 强化了需求与份额共振。\n"
+            "- 待验证: 继续跟踪成交量和份额变化。"
+        )
+
+        result = create_bull_researcher(llm, _EmptyMemory())(copy.deepcopy(self.base_state))
+        body = result["investment_debate_state"]["current_bull_response"]
+        formatted = format_research_team_history(result["investment_debate_state"])
+
+        self.assertNotIn("**", body)
+        self.assertNotIn("##", body)
+        self.assertIn("核心判断： 多头主线仍占优。", body)
+        self.assertNotIn("**", formatted)
+        self.assertNotIn("## 证据展开", formatted)
 
     def test_normalize_chinese_role_terms_replaces_display_variants(self):
         text = "我是熊派分析师，也不同意牛派分析师、激进分析师、保守分析师、中性分析师、熊派投资者和根本分析的说法。"
@@ -321,6 +354,38 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("决策摘要", risk_debate_state["current_aggressive_response"])
         self.assertNotIn("反馈快照", risk_debate_state["current_aggressive_response"])
 
+    def test_aggressive_risk_visible_body_strips_sentence_numbering(self):
+        llm = MagicMock()
+        llm.invoke.return_value = _FakeResponse(
+            "1. 价格重新站上20日均线后，进攻仓位的赔率明显改善。\n"
+            "2. ETF份额恢复净申购，说明资金回流已经开始验证主线。\n"
+            "3. 若成交量继续放大，激进仓位可以继续上调。\n\n"
+            "决策摘要:\n"
+            "- 评级: 增持\n"
+            "- 置信度: 70%\n"
+            "- 时间区间: 1-3个月\n"
+            "- 关键假设:\n"
+            "  1. 量价继续共振。\n"
+            "  2. 资金流不再转弱。\n"
+            "  3. 催化维持兑现。\n\n"
+            "反馈快照:\n"
+            "- 立场: 增持\n"
+            "- 本轮新增与反驳: 补充了量价与份额验证。\n"
+            "- 待验证: 继续跟踪成交量、份额变化和催化兑现。"
+        )
+
+        result = create_aggressive_debator(llm)(copy.deepcopy(self.base_state))
+        body = result["risk_debate_state"]["current_aggressive_response"]
+        formatted = format_risk_management_history(result["risk_debate_state"])
+        visible_before_summary = formatted.split("决策摘要:")[0]
+
+        self.assertNotIn("1. 价格重新站上20日均线后", body)
+        self.assertNotIn("2. ETF份额恢复净申购", body)
+        self.assertIn("价格重新站上20日均线后，进攻仓位的赔率明显改善。", body)
+        self.assertIn("\n\n", body)
+        self.assertNotIn("1. 价格重新站上20日均线后", visible_before_summary)
+        self.assertIn("  1. 量价继续共振。", formatted)
+
     def test_portfolio_manager_prompt_respects_output_language(self):
         llm = _CapturingLLM()
         node = create_portfolio_manager(llm, _EmptyMemory())
@@ -365,6 +430,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("研究结论: **持有**", rendered)
         self.assertNotIn("建议采取减持策略", rendered)
         self.assertIn("继续跟踪订单兑现与估值消化", rendered)
+        self.assertNotIn("\n\n\n", rendered)
 
     def test_portfolio_decision_rendering_keeps_single_consistent_rating(self):
         rendered = render_portfolio_decision(
@@ -423,6 +489,25 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("等待验证。", rendered)
         self.assertIn("当前的明确动作是持有", rendered)
         self.assertIn("盯住真正能改写结论的异象", rendered)
+        self.assertNotIn("\n\n\n", rendered)
+
+    def test_research_plan_rendering_enriches_positioning_recommendation(self):
+        rendered = render_research_plan(
+            ResearchPlan(
+                debate_conclusion="多空证据仍在拉锯。",
+                action_logic="先维持现有仓位，等待更多确认。",
+                positioning_recommendation="维持持有，继续观察。",
+                rating=PortfolioRating.HOLD,
+                snapshot_stance="持有",
+                snapshot_new_and_rebuttal="新增了对份额变化的约束。",
+                snapshot_to_verify="继续跟踪成交量、份额变化和盈利兑现。",
+            )
+        )
+
+        self.assertIn("研究结论: **持有**", rendered)
+        self.assertIn("继续观察。", rendered)
+        self.assertIn("新增资金优先等待价格重新站稳关键支撑与均线", rendered)
+        self.assertIn("按周度复核量价、份额变化、溢折价和宏观/行业验证信号", rendered)
 
     def test_trader_rendering_rewrites_conflicting_execution_plan(self):
         rendered = render_trader_proposal(
@@ -437,6 +522,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("执行倾向: **持有**", rendered)
         self.assertNotIn("分批减持", rendered)
         self.assertIn("维持当前仓位", rendered)
+        self.assertNotIn("\n\n\n", rendered)
 
     def test_trader_rendering_expands_overly_brief_execution_plan(self):
         rendered = render_trader_proposal(
@@ -452,6 +538,62 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("较近5日均量放大15%—20%", rendered)
         self.assertIn("份额扩张、溢折价改善、资金流确认或放量突破确认", rendered)
         self.assertIn("20日均量的1.3倍以上", rendered)
+
+    def test_trader_rendering_strengthens_simple_thesis(self):
+        rendered = render_trader_proposal(
+            TraderProposal(
+                thesis="当前多空因素并存。",
+                execution_plan="维持当前仓位，不主动追涨或杀跌；等待关键支撑企稳、成交量改善或新增催化落地后，再决定是否调整敞口。",
+                risk_management="继续跟踪关键支撑与业绩验证。",
+                rating=PortfolioRating.HOLD,
+            )
+        )
+
+        self.assertIn("当前多空因素并存", rendered)
+        self.assertIn("中期主线并未被证伪", rendered)
+        self.assertIn("把真正的动作阈值留给执行计划", rendered)
+
+    def test_trader_rendering_dedupes_overlap_with_execution_plan(self):
+        repeated_sentence = "当前基准情形下，在具体的执行节奏上，159949.SZ面临宏观估值天花板与盈利质量拐点的双重压制，建议下调配置权重。"
+        rendered = render_trader_proposal(
+            TraderProposal(
+                thesis=(
+                    f"{repeated_sentence}"
+                    "当前需要先承认主线压力尚未解除，再决定是否保留观察仓位。"
+                ),
+                execution_plan=(
+                    f"{repeated_sentence}"
+                    "若反弹无法收复50日均线且成交量仍低于20日均量，则继续分批降低敞口。"
+                ),
+                risk_management="若成交量异常放大且跌破关键支撑，则继续减仓。",
+                rating=PortfolioRating.UNDERWEIGHT,
+            )
+        )
+
+        self.assertEqual(rendered.count(repeated_sentence), 1)
+        self.assertIn("当前风险释放节奏快于新增催化兑现速度", rendered)
+        self.assertIn("若反弹无法收复50日均线且成交量仍低于20日均量，则继续分批降低敞口。", rendered)
+
+    def test_trader_rendering_dedupes_overlap_with_risk_management(self):
+        repeated_sentence = "当前基准情形下，在具体的执行节奏上，159949.SZ面临宏观估值天花板与盈利质量拐点的双重压制，建议下调配置权重。"
+        rendered = render_trader_proposal(
+            TraderProposal(
+                thesis="当前需要先承认主线压力尚未解除，再决定是否保留观察仓位。",
+                execution_plan=(
+                    f"{repeated_sentence}"
+                    "若反弹无法收复50日均线且成交量仍低于20日均量，则继续分批降低敞口。"
+                ),
+                risk_management=(
+                    f"{repeated_sentence}"
+                    "若价格有效跌破关键支撑且单日放量达到20日均量的1.3倍以上，则先减掉20%—30%的试探仓位。"
+                ),
+                rating=PortfolioRating.UNDERWEIGHT,
+            )
+        )
+
+        self.assertEqual(rendered.count(repeated_sentence), 1)
+        self.assertIn("若价格有效跌破关键支撑且单日放量达到20日均量的1.3倍以上，则先减掉20%—30%的试探仓位。", rendered)
+        self.assertIn("在减仓过程中重点看反弹强度、成交量结构和事件兑现进度", rendered)
 
     def test_trader_rendering_strips_redundant_section_headings(self):
         rendered = render_trader_proposal(
@@ -530,6 +672,33 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("最终配置建议: 增持。", rendered)
         self.assertIn("在净值回落至2.08元支撑带时分批建立15%至20%的初始底仓", rendered)
 
+    def test_portfolio_decision_rendering_strips_prompt_leakage(self):
+        rendered = render_portfolio_decision(
+            PortfolioDecision(
+                debate_conclusion="中性观点更稳妥，但产业修复与资金承接尚未完全失效。",
+                action_logic="维持基础仓位，同时把后续动作绑定在价格和资金流验证上。",
+                positioning_recommendation=(
+                    "目标仓位先维持在15%至20%，若净值回落至2.08元附近仍有承接，再考虑小幅回补。\n"
+                    "- Give a clear, actionable ETF portfolio recommendation—买入, 增持, 持有, 减持, or 卖出—grounded in the debate's strongest evidence.\n"
+                    "- Include concrete execution guidance: target allocation band, add / reduce / rotate conditions, maximum initial sizing, rebalance triggers, risk controls, and what to monitor next.\n"
+                    '- When writing in Chinese, avoid mixed English labels such as "Time Horizon", "Executive Summary", or "Investment Thesis".\n'
+                    "- The rating, the positioning recommendation text, and the final transaction proposal must all point to the same action. Do not restate a conflicting recommendation in prose.\n"
+                    "- Keep exactly one explicit final recommendation label in this section and make the rest of the paragraph explanatory rather than repetitive. 最终配置建议: 持有 。"
+                ),
+                rating=PortfolioRating.HOLD,
+                snapshot_stance="持有",
+                snapshot_new_and_rebuttal="新增了对仓位上限与回补价位的约束。",
+                snapshot_to_verify="继续跟踪份额变化、成交量和净值承接。",
+            )
+        )
+
+        self.assertIn("最终配置建议: **持有**", rendered)
+        self.assertIn("目标仓位先维持在15%至20%", rendered)
+        self.assertNotIn("Give a clear, actionable ETF portfolio recommendation", rendered)
+        self.assertNotIn("Time Horizon", rendered)
+        self.assertEqual(rendered.count("最终配置建议: **持有**"), 1)
+        self.assertNotIn("\n\n\n", rendered)
+
     def test_research_manager_normalization_strips_inline_duplicate_research_view(self):
         normalized = normalize_chinese_manager_terms(
             "## 持仓建议\n"
@@ -540,6 +709,53 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertEqual(normalized.count("研究结论"), 1)
         self.assertNotIn("研究结论: 增持。", normalized)
         self.assertIn("在回调时分批布局，并跟踪量价验证。", normalized)
+
+    def test_manager_normalization_strips_prompt_leakage_and_duplicate_headings(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 辩论结论\n"
+            "## 辩论结论\n"
+            "整场辩论里，中性观点认为在2.08元支撑带附近承接仍在，但放量突破之前不宜贸然扩仓。\n\n"
+            "## 持仓建议\n"
+            "- 这一部分必须写成连贯分析段落，至少 4 句，不能只写简短观点或要点摘录。\n"
+            "- 必须引用报告中的具体数据来支撑判断——包括价格水平、均线位置、成交量、份额变化、溢折价、持仓集中度、宏观指标等。\n"
+            "最终配置建议: **持有**\n"
+            "- Give a clear, actionable ETF portfolio recommendation—买入, 增持, 持有, 减持, or 卖出—grounded in the debate's strongest evidence.\n"
+            "目标仓位维持在15%至20%，若成交量回到20日均量上方且份额恢复净申购，再考虑上调仓位。\n"
+        )
+
+        self.assertEqual(normalized.count("## 辩论结论"), 1)
+        self.assertIn("最终配置建议: **持有**", normalized)
+        self.assertIn("目标仓位维持在15%至20%", normalized)
+        self.assertNotIn("这一部分必须写成连贯分析段落", normalized)
+        self.assertNotIn("Give a clear, actionable ETF portfolio recommendation", normalized)
+        self.assertNotIn("\n\n\n", normalized)
+
+    def test_manager_normalization_merges_duplicate_positioning_sections(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 辩论结论\n"
+            "当前宏观与盈利线索仍未形成同向共振。\n\n"
+            "## 持仓建议\n"
+            "最终配置建议: **持有**\n\n"
+            "## 持仓建议\n"
+            "维持当前仓位，等待价格、量能与份额变化共同确认后再决定是否调整敞口。\n"
+        )
+
+        self.assertEqual(normalized.count("## 持仓建议"), 1)
+        self.assertEqual(normalized.count("最终配置建议: **持有**"), 1)
+        self.assertIn("维持当前仓位，等待价格、量能与份额变化共同确认后再决定是否调整敞口。", normalized)
+
+    def test_manager_normalization_fills_empty_positioning_section(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 辩论结论\n"
+            "当前估值约束仍在，价格确认不足。\n\n"
+            "## 持仓建议\n"
+            "最终配置建议: **持有**\n"
+        )
+
+        self.assertEqual(normalized.count("## 持仓建议"), 1)
+        self.assertIn("最终配置建议: **持有**", normalized)
+        self.assertIn("维持当前仓位，不新增方向性敞口", normalized)
+        self.assertIn("若验证链条继续改善，只做小幅上调", normalized)
 
     def test_collaboration_stop_instruction_prefers_chinese_display(self):
         instruction = get_collaboration_stop_instruction()

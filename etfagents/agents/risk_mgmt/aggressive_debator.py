@@ -3,6 +3,7 @@ from etfagents.content_utils import extract_text_content
 from etfagents.agents.utils.agent_utils import (
     build_debate_brief,
     build_history_turn,
+    extract_analyst_decision_summary,
     extract_feedback_snapshot,
     get_analyst_decision_instruction,
     get_analyst_decision_template,
@@ -14,6 +15,8 @@ from etfagents.agents.utils.agent_utils import (
     localize_role_name,
     make_display_snapshot,
     normalize_chinese_role_terms,
+    normalize_visible_debate_body,
+    rebuild_visible_debate_turn,
     save_snapshot_file,
     strip_analyst_decision_summary,
     strip_feedback_snapshot,
@@ -82,12 +85,22 @@ After the decision summary, append an exact feedback snapshot block using this t
             raw_content = normalize_chinese_role_terms(
                 extract_text_content(response.content)
             )
-            argument_body = strip_role_prefix(
-                strip_analyst_decision_summary(strip_feedback_snapshot(raw_content)),
+            decision_summary = extract_analyst_decision_summary(raw_content)
+            argument_body = normalize_visible_debate_body(
+                strip_role_prefix(
+                    strip_analyst_decision_summary(
+                        strip_feedback_snapshot(raw_content)
+                    ),
+                    "Aggressive Analyst",
+                )
+            )
+            new_aggressive_snapshot_full = extract_feedback_snapshot(raw_content)
+            history_turn = build_history_turn(
+                rebuild_visible_debate_turn(
+                    argument_body, decision_summary, new_aggressive_snapshot_full
+                ),
                 "Aggressive Analyst",
             )
-            history_turn = build_history_turn(raw_content, "Aggressive Analyst")
-            new_aggressive_snapshot_full = extract_feedback_snapshot(raw_content)
             ticker = get_asset_symbol(state)
             trade_date = state.get("trade_date", "unknown")
             snapshot_path = save_snapshot_file(new_aggressive_snapshot_full, "Aggressive Analyst", ticker, trade_date, round_index + 1)

@@ -33,6 +33,7 @@ from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
 from etfagents.agents.utils.agent_utils import (
+    collapse_blank_lines,
     extract_analyst_decision_summary,
     extract_feedback_snapshot,
     get_output_language,
@@ -227,7 +228,7 @@ def _prepare_report_markdown(content: str, target_min_level: Optional[int] = Non
     text = _normalize_report_heading_numbering(content)
     if target_min_level is not None:
         text = _relevel_markdown_headings(text, target_min_level)
-    return text
+    return collapse_blank_lines(text)
 
 
 # Create a deque to store recent messages with a maximum length
@@ -466,7 +467,7 @@ class MessageBuffer:
                 )
             )
 
-        self.final_report = "\n\n".join(report_parts) if report_parts else None
+        self.final_report = collapse_blank_lines("\n\n".join(report_parts)) if report_parts else None
 
 
 message_buffer = MessageBuffer()
@@ -553,10 +554,10 @@ def _format_grouped_rounds(
                     speaker_parts.append(decision_summary)
                 if snapshot:
                     speaker_parts.append(snapshot)
-                round_parts.append("\n\n".join(speaker_parts))
+                round_parts.append(collapse_blank_lines("\n\n".join(speaker_parts)))
         if round_parts:
             round_title = f"第 {round_index + 1} 轮" if is_chinese else f"Round {round_index + 1}"
-            parts.append(f"### {round_title}\n\n" + "\n\n".join(round_parts))
+            parts.append(collapse_blank_lines(f"### {round_title}\n\n" + "\n\n".join(round_parts)))
 
     if manager_title and manager_content and manager_content.strip():
         parts.append(
@@ -564,7 +565,7 @@ def _format_grouped_rounds(
             f"{_format_manager_decision(manager_content, manager_snapshot_path, show_snapshot_summary=manager_show_snapshot, nested_min_heading_level=4)}"
         )
 
-    return "\n\n".join(parts).strip()
+    return collapse_blank_lines("\n\n".join(parts))
 
 
 def _format_manager_decision(
@@ -599,7 +600,7 @@ def _format_manager_decision(
         )
         parts.append(f"#### {snapshot_title}\n{snapshot_summary}")
 
-    return "\n\n".join(parts).strip() or content
+    return collapse_blank_lines("\n\n".join(parts)) or content
 
 
 def format_research_team_history(debate_state: dict) -> str:
@@ -1110,7 +1111,8 @@ def save_candidate_pool_report(candidates: list[dict[str, str]], analysis_date: 
             f"| {index} | {candidate['ticker']} | {candidate['rating']} | {candidate['score']} | {weight_text} |"
         )
 
-        candidate_body = "\n\n".join(
+        candidate_body = collapse_blank_lines(
+            "\n\n".join(
             [
                 f"# {candidate['ticker']}",
                 f"**{_localize_cli_label('Rating', '评级')}**: {candidate['rating']}",
@@ -1120,11 +1122,13 @@ def save_candidate_pool_report(candidates: list[dict[str, str]], analysis_date: 
                 f"## {_localize_cli_label('Research Allocation View', '研究团队配置观点')}\n{_prepare_report_markdown(candidate.get('research_allocation_plan', ''), 3)}",
             ]
         )
+        )
         candidate_file = candidates_dir / f"{index:02d}_{candidate['ticker'].replace('.', '_')}.md"
         candidate_file.write_text(candidate_body, encoding="utf-8")
 
         sections.append(
-            "\n\n".join(
+            collapse_blank_lines(
+                "\n\n".join(
                 [
                     f"## {index}. {candidate['ticker']}",
                     f"**{_localize_cli_label('Rating', '评级')}**: {candidate['rating']}",
@@ -1133,14 +1137,15 @@ def save_candidate_pool_report(candidates: list[dict[str, str]], analysis_date: 
                     _prepare_report_markdown(candidate.get("final_allocation_decision", ""), 4),
                 ]
             )
+            )
         )
 
-    header = (
+    header = collapse_blank_lines(
         f"# {_localize_cli_label('ETF Candidate Pool Report', 'ETF候选池分析报告')}\n\n"
         f"{_localize_cli_label('Analysis Date', '分析日期')}: {analysis_date}\n\n"
-        f"{_localize_cli_label('Generated', '生成时间')}: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"{_localize_cli_label('Generated', '生成时间')}: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
     )
-    report_text = header + "\n".join(summary_lines) + "\n\n" + "\n\n".join(sections)
+    report_text = collapse_blank_lines(header + "\n" + "\n".join(summary_lines) + "\n\n" + "\n\n".join(sections))
     report_path = save_path / "complete_report.md"
     report_path.write_text(report_text, encoding="utf-8")
     return report_path
@@ -1185,12 +1190,16 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
         (analysts_dir / "top_holdings.md").write_text(holdings_report, encoding="utf-8")
         analyst_parts.append((_localize_cli_role_title("ETF Top Holdings Research Analyst"), holdings_report))
     if analyst_parts:
-        content = "\n\n".join(
+        content = collapse_blank_lines(
+            "\n\n".join(
             f"### {name}\n{_prepare_report_markdown(text, 4)}"
             for name, text in analyst_parts
         )
+        )
         sections.append(
-            f"## {_localize_cli_label('I. Analyst Team Reports', 'I. 分析团队报告')}\n\n{content}"
+            collapse_blank_lines(
+                f"## {_localize_cli_label('I. Analyst Team Reports', 'I. 分析团队报告')}\n{content}"
+            )
         )
 
     # 2. Research
@@ -1222,11 +1231,15 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
             research_dir.mkdir(exist_ok=True)
             (research_dir / "rounds.md").write_text(formatted_research, encoding="utf-8")
         if research_parts:
-            content = formatted_research or "\n\n".join(
+            content = formatted_research or collapse_blank_lines(
+                "\n\n".join(
                 f"### {name}\n{text}" for name, text in research_parts
             )
+            )
             sections.append(
-                f"## {_localize_cli_label('II. Research Team Decision', 'II. 研究团队结论')}\n\n{content}"
+                collapse_blank_lines(
+                    f"## {_localize_cli_label('II. Research Team Decision', 'II. 研究团队结论')}\n{content}"
+                )
             )
 
     # 3. Trading
@@ -1236,9 +1249,11 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
         trader_plan = _prepare_report_markdown(get_state_value(final_state, "trader_allocation_plan", ""))
         (trading_dir / "trader.md").write_text(trader_plan, encoding="utf-8")
         sections.append(
-            f"## {_localize_cli_label('III. Allocation Team Plan', 'III. 配置团队计划')}\n\n"
-            f"### {_localize_cli_role_title('Trader')}\n"
-            f"{_prepare_report_markdown(trader_plan, 4)}"
+            collapse_blank_lines(
+                f"## {_localize_cli_label('III. Allocation Team Plan', 'III. 配置团队计划')}\n"
+                f"### {_localize_cli_role_title('Trader')}\n"
+                f"{_prepare_report_markdown(trader_plan, 4)}"
+            )
         )
 
     # 4. Risk Management
@@ -1263,11 +1278,15 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
             risk_dir.mkdir(exist_ok=True)
             (risk_dir / "rounds.md").write_text(formatted_risk, encoding="utf-8")
         if risk_parts:
-            content = formatted_risk or "\n\n".join(
+            content = formatted_risk or collapse_blank_lines(
+                "\n\n".join(
                 f"### {name}\n{text}" for name, text in risk_parts
             )
+            )
             sections.append(
-                f"## {_localize_cli_label('IV. Risk Management Team Decision', 'IV. 风险管理团队结论')}\n\n{content}"
+                collapse_blank_lines(
+                    f"## {_localize_cli_label('IV. Risk Management Team Decision', 'IV. 风险管理团队结论')}\n{content}"
+                )
             )
 
         # 5. Portfolio Manager
@@ -1282,18 +1301,20 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
             )
             (portfolio_dir / "decision.md").write_text(formatted_portfolio, encoding="utf-8")
             sections.append(
-                f"## {_localize_cli_label('V. Portfolio Manager Decision', 'V. 投资组合经理决策')}\n\n"
-                f"### {_localize_cli_role_title('Portfolio Manager')}\n"
-                f"{_format_manager_decision(risk['judge_decision'], risk.get('judge_snapshot_path', ''), show_snapshot_summary=False, nested_min_heading_level=4)}"
+                collapse_blank_lines(
+                    f"## {_localize_cli_label('V. Portfolio Manager Decision', 'V. 投资组合经理决策')}\n"
+                    f"### {_localize_cli_role_title('Portfolio Manager')}\n"
+                    f"{_format_manager_decision(risk['judge_decision'], risk.get('judge_snapshot_path', ''), show_snapshot_summary=False, nested_min_heading_level=4)}"
+                )
             )
 
     # Write consolidated report
-    header = (
+    header = collapse_blank_lines(
         f"# {_localize_cli_label('ETF Allocation Analysis Report', 'ETF配置分析报告')}: {ticker}\n\n"
-        f"{_localize_cli_label('Generated', '生成时间')}: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"{_localize_cli_label('Generated', '生成时间')}: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
     )
     (save_path / "complete_report.md").write_text(
-        header + "\n\n".join(sections),
+        collapse_blank_lines(header + "\n\n" + "\n\n".join(sections)),
         encoding="utf-8",
     )
     return save_path / "complete_report.md"
