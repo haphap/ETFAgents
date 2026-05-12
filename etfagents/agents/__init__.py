@@ -7,9 +7,7 @@ from .analysts.market_analyst import create_market_analyst
 from .analysts.news_analyst import create_news_analyst
 from .analysts.social_media_analyst import create_social_media_analyst
 from .analysts.broker_research_analyst import create_broker_research_analyst
-from .analysts.etf_flow_analyst import create_etf_flow_analyst
 from .analysts.etf_industry_research_analyst import create_etf_industry_research_analyst
-from .analysts.etf_macro_analyst import create_etf_macro_analyst
 from .analysts.etf_market_analyst import create_etf_market_analyst
 from .analysts.etf_stock_research_analyst import create_etf_stock_research_analyst
 from .analysts.etf_structure_analyst import create_etf_structure_analyst
@@ -36,9 +34,7 @@ __all__ = [
     "create_bear_researcher",
     "create_bull_researcher",
     "create_research_manager",
-    "create_etf_flow_analyst",
     "create_etf_industry_research_analyst",
-    "create_etf_macro_analyst",
     "create_etf_market_analyst",
     "create_etf_stock_research_analyst",
     "create_etf_structure_analyst",

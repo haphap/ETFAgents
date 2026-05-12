@@ -280,11 +280,11 @@ class ETFIndustryResearchAnalystTests(unittest.TestCase):
             )
 
         rendered = result["holdings_industry_report"]
-        self.assertIn("该ETF的行业暴露强弱取决于重仓股映射出的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。", rendered)
+        self.assertIn("该ETF的行业暴露强弱取决于重仓股指向的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。", rendered)
         self.assertFalse(rendered.startswith("#"))
         self.assertIn("一、行业主线与分歧焦点", rendered)
         self.assertLess(
-            rendered.index("该ETF的行业暴露强弱取决于重仓股映射出的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。"),
+            rendered.index("该ETF的行业暴露强弱取决于重仓股指向的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。"),
             rendered.index("一、行业主线与分歧焦点"),
         )
 

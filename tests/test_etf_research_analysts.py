@@ -544,10 +544,10 @@ class EtfAnalystTitleLeadBackfillTests(unittest.TestCase):
         rendered = result["catalyst_sentiment_report"]
         self.assertIn("当前影响该ETF定价的关键变量不在产品 headline 数量，而在主导行业与高权重成分股的事件催化能否继续向净值传导。", rendered)
         self.assertFalse(rendered.startswith("#"))
-        self.assertIn("一、情绪主线与权重映射", rendered)
+        self.assertIn("一、情绪主线与权重影响", rendered)
         self.assertLess(
             rendered.index("当前影响该ETF定价的关键变量不在产品 headline 数量，而在主导行业与高权重成分股的事件催化能否继续向净值传导。"),
-            rendered.index("一、情绪主线与权重映射"),
+            rendered.index("一、情绪主线与权重影响"),
         )
 
     def test_market_report_strips_h1_title(self):
