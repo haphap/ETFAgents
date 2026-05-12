@@ -1,17 +1,22 @@
 from __future__ import annotations
 
 import io
+import logging
 import os
 import re
 from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Any
 
 import pandas as pd
 import requests
 
 from langchain_core.tools import tool
 
+from etfagents.agents.utils.daily_snapshot_cache import (
+    DailySnapshotCacheError,
+    get_or_build_shared_snapshot,
+)
 from etfagents.dataflows.exceptions import DataVendorUnavailable
 from etfagents.dataflows.interface import route_to_vendor
 from etfagents.dataflows.tushare import (
@@ -23,6 +28,8 @@ from etfagents.dataflows.tushare import (
     get_stock_reports,
 )
 
+
+logger = logging.getLogger(__name__)
 
 _ETF_INDICATOR_ALIASES = {
     "ma": "close_20_sma",
@@ -55,6 +62,47 @@ _ETF_INDICATOR_ALIASES = {
     "macd_hist": "macdh",
     "macd_histogram": "macdh",
 }
+
+_SHARED_SNAPSHOT_SCHEMA_VERSION = {
+    "macro": 1,
+    "commodity": 1,
+}
+
+_MACRO_SAFE_HAVEN_SPECS = [
+    ("Gold", "GC=F", False),
+    ("Dollar Index", "DX-Y.NYB", False),
+    ("Swiss franc safe-haven bid", "CHF=X", True),
+    ("Japanese yen safe-haven bid", "JPY=X", True),
+    ("Dry-bulk / shipping stress proxy", "BDRY", False),
+]
+
+_COMMODITY_SPECS = [
+    ("贵金属 · 金", "AU", "SHFE", "沪金主力", "Fiat trust, real rates, systemic risk premium"),
+    ("贵金属 · 银", "AG", "SHFE", "沪银主力", "Industrial + monetary hybrid, solar demand"),
+    ("工业金属 · 铜", "CU", "SHFE", "沪铜主力", "Global manufacturing resilience and real new-infrastructure demand"),
+    ("工业金属 · 铝", "AL", "SHFE", "沪铝主力", "China smelting capacity, power-grid capex, export tariffs"),
+    ("工业金属 · 铅", "PB", "SHFE", "沪铅主力", "Lead-acid battery demand, recycled metal supply, and power-storage capex"),
+    ("工业金属 · 镍", "NI", "SHFE", "沪镍主力", "Stainless steel demand vs battery-grade NPI substitution"),
+    ("工业金属 · 锌", "ZN", "SHFE", "沪锌主力", "Galvanized steel demand, infrastructure and auto body"),
+    ("能源 · 原油", "SC", "INE", "原油主力", "Recession risk, OPEC+ elasticity, and policy tightening room"),
+    ("转型金属 · 碳酸锂", "LC", "GFEX", "碳酸锂主力", "Energy-transition profit pools and industry-clearing speed"),
+    ("黑色 · 螺纹钢", "RB", "SHFE", "螺纹钢主力", "China investment-cycle strength, PPI turning points, policy intervention"),
+    ("黑色 · 热卷", "HC", "SHFE", "热卷主力", "Automotive and manufacturing demand, downstream steel consumption strength"),
+    ("黑色 · 铁矿石", "I", "DCE", "铁矿石主力", "Steel-mill margins, blast-furnace utilization, import dependency"),
+    ("黑色 · 焦煤", "JM", "DCE", "焦煤主力", "Coking cost pass-through, safety-driven supply disruption"),
+    ("化工 · PTA", "TA", "CZCE", "PTA主力", "Polyester chain pricing anchor, textile export demand, and refining margin pass-through"),
+    ("化工 · 甲醇", "MA", "CZCE", "甲醇主力", "Coal-chemical cost anchor, MTO demand, and fuel-alternative policy"),
+    ("化工 · 聚乙烯", "L", "DCE", "聚乙烯主力", "Plastic packaging and film demand, petrochemical margin cycle"),
+    ("油脂油料 · 豆粕", "M", "DCE", "豆粕主力", "Feed demand anchor for hog/poultry cycle, crush margin, and soybean import dependency"),
+    ("油脂油料 · 玉米", "C", "DCE", "玉米主力", "Grain security, ethanol mandate, and deep-processing capacity"),
+    ("油脂油料 · 棕榈油", "P", "DCE", "棕榈油主力", "Global edible-oil balance, biodiesel mandate, and tropical supply risk"),
+    ("软商品 · 纸浆", "SP", "SHFE", "纸浆主力", "Climate shocks, substitution, and logistics-driven inflation"),
+    ("软商品 · 天然橡胶", "RU", "SHFE", "天然橡胶主力", "Tire demand, auto production cycle, Southeast Asia supply"),
+    ("工业品 · 工业硅", "SI", "GFEX", "工业硅主力", "Polysilicon and silicone demand, capacity overhang"),
+    ("工业品 · 尿素", "UR", "CZCE", "尿素主力", "Fertilizer seasonality, coal-chemical cost, export policy"),
+    ("工业品 · PVC", "V", "DCE", "PVC主力", "Real estate piping demand, calcium-carbide cost curve"),
+    ("工业品 · 纯碱", "SA", "CZCE", "纯碱主力", "Glass production demand, photovoltaic expansion, capacity cycle"),
+]
 
 
 def _normalize_indicator_token(indicator: str) -> str:
@@ -453,6 +501,506 @@ def _markdown_table(headers: list[str], rows: list[list[str]]) -> str:
     return "\n".join([header_line, divider, body])
 
 
+def _json_safe_scalar(value: Any) -> Any:
+    if value is None:
+        return None
+    if isinstance(value, pd.Timestamp):
+        return value.strftime("%Y-%m-%d")
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    if isinstance(value, (str, bool, int, float)):
+        return value
+    item = getattr(value, "item", None)
+    if callable(item):
+        try:
+            return item()
+        except Exception:
+            pass
+    return str(value)
+
+
+def _serialize_series(series: pd.Series) -> list[dict[str, Any]]:
+    if series is None or series.empty:
+        return []
+    normalized = series.dropna().sort_index()
+    records: list[dict[str, Any]] = []
+    for index, value in normalized.items():
+        timestamp = pd.Timestamp(index)
+        records.append(
+            {
+                "date": timestamp.strftime("%Y-%m-%d"),
+                "value": _safe_float(value),
+            }
+        )
+    return records
+
+
+def _deserialize_series(records: list[dict[str, Any]] | None) -> pd.Series:
+    if not records:
+        return pd.Series(dtype=float)
+    frame = pd.DataFrame(records)
+    return _frame_to_series(frame, "date", "value")
+
+
+def _serialize_frame_records(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    if frame is None or frame.empty:
+        return []
+    records: list[dict[str, Any]] = []
+    for row in frame.to_dict(orient="records"):
+        records.append(
+            {
+                str(key): _json_safe_scalar(value)
+                for key, value in row.items()
+            }
+        )
+    return records
+
+
+def _deserialize_schedule_frame(records: list[dict[str, Any]] | None) -> pd.DataFrame:
+    if not records:
+        return pd.DataFrame()
+    frame = pd.DataFrame(records)
+    if "publish_date" in frame.columns:
+        frame["publish_date"] = pd.to_datetime(frame["publish_date"], errors="coerce")
+    return frame
+
+
+def _validate_cached_payload(
+    payload: dict[str, Any],
+    snapshot_kind: str,
+    key: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        raise DailySnapshotCacheError(
+            f"Corrupted {snapshot_kind} shared snapshot payload: root payload must be an object."
+        )
+    value = payload.get(key)
+    if not isinstance(value, list):
+        raise DailySnapshotCacheError(
+            f"Corrupted {snapshot_kind} shared snapshot payload: '{key}' must be a list."
+        )
+    return value
+
+
+def _load_cached_snapshot_payload(
+    snapshot_kind: str,
+    curr_date: str,
+    look_back_days: int,
+    builder,
+) -> dict[str, Any]:
+    payload, cache_hit = get_or_build_shared_snapshot(
+        snapshot_kind=snapshot_kind,
+        curr_date=curr_date,
+        min_coverage_days=look_back_days,
+        schema_version=_SHARED_SNAPSHOT_SCHEMA_VERSION[snapshot_kind],
+        builder=builder,
+    )
+    logger.debug(
+        "%s %s shared snapshot for %s (coverage=%s days)",
+        "Reused cached" if cache_hit else "Built",
+        snapshot_kind,
+        curr_date,
+        look_back_days,
+    )
+    return payload
+
+
+def _build_macro_snapshot_payload(
+    curr_date: str,
+    look_back_days: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    rate_specs = [
+        ("United States", lambda: _load_fred_series("FEDFUNDS", curr_date, look_back_days), lambda: _load_fred_series("DGS10", curr_date, look_back_days)),
+        ("Euro Area / Germany proxy", lambda: _load_fred_series("ECBDFR", curr_date, look_back_days), lambda: _load_fred_series("IRLTLT01DEM156N", curr_date, look_back_days)),
+        ("Japan", lambda: _load_fred_series("IR3TIB01JPM156N", curr_date, look_back_days), lambda: _load_fred_series("IRLTLT01JPM156N", curr_date, look_back_days)),
+        ("China", lambda: _load_china_policy_rate_series(curr_date, look_back_days), lambda: _load_china_ten_year_yield_series(curr_date, look_back_days)),
+    ]
+    rates = [
+        {
+            "economy": economy,
+            "policy_short_series": _serialize_series(short_loader()),
+            "ten_year_series": _serialize_series(long_loader()),
+        }
+        for economy, short_loader, long_loader in rate_specs
+    ]
+    safe_havens = [
+        {
+            "label": label,
+            "symbol": symbol,
+            "invert_pct": invert,
+            "close_series": _serialize_series(
+                _load_yfinance_close(symbol, curr_date, look_back_days)
+            ),
+        }
+        for label, symbol, invert in _MACRO_SAFE_HAVEN_SPECS
+    ]
+    start_date, end_date = _date_window(curr_date, look_back_days)
+    return (
+        {
+            "rates": rates,
+            "tips_real_series": _serialize_series(
+                _load_fred_series("DFII10", curr_date, look_back_days)
+            ),
+            "ccc_spread_series": _serialize_series(
+                _load_fred_series("BAMLH0A3HYC", curr_date, look_back_days)
+            ),
+            "safe_havens": safe_havens,
+            "china_calendar": _serialize_frame_records(
+                _load_cn_schedule_frame(curr_date)
+            ),
+        },
+        {
+            "coverage_start_date": start_date,
+            "coverage_end_date": end_date,
+            "source_summary": "FRED, Tushare, YFinance, cn_schedule",
+        },
+    )
+
+
+def _render_macro_snapshot(curr_date: str, payload: dict[str, Any]) -> str:
+    rate_rows: list[list[str]] = []
+    rate_levels: dict[str, tuple[float | None, float | None]] = {}
+    for item in _validate_cached_payload(payload, "macro", "rates"):
+        economy = str(item.get("economy", "Unknown"))
+        short_values = _deserialize_series(item.get("policy_short_series"))
+        long_values = _deserialize_series(item.get("ten_year_series"))
+        short_level, short_delta = _series_latest_and_delta(short_values, curr_date, 30)
+        long_level, long_delta = _series_latest_and_delta(long_values, curr_date, 30)
+        rate_levels[economy] = (short_level, long_level)
+        rate_rows.append(
+            [
+                economy,
+                _format_number(short_level, suffix="%"),
+                _format_number(short_delta, suffix="ppt"),
+                _format_number(long_level, suffix="%"),
+                _format_number(long_delta, suffix="ppt"),
+            ]
+        )
+
+    us_short, us_ten = rate_levels.get("United States", (None, None))
+    cn_short, cn_ten = rate_levels.get("China", (None, None))
+    de_short, de_ten = rate_levels.get("Euro Area / Germany proxy", (None, None))
+    jp_short, jp_ten = rate_levels.get("Japan", (None, None))
+
+    tips_real = _deserialize_series(payload.get("tips_real_series"))
+    ccc_spread = _deserialize_series(payload.get("ccc_spread_series"))
+    tips_level, tips_delta = _series_latest_and_delta(tips_real, curr_date, 30)
+    ccc_level, ccc_delta = _series_latest_and_delta(ccc_spread, curr_date, 30)
+
+    safe_haven_rows: list[list[str]] = []
+    safe_haven_changes: dict[str, float | None] = {}
+    gold_series = pd.Series(dtype=float)
+    for item in _validate_cached_payload(payload, "macro", "safe_havens"):
+        label = str(item.get("label", "Unknown"))
+        symbol = str(item.get("symbol", "N/A"))
+        invert_pct = bool(item.get("invert_pct", False))
+        series = _deserialize_series(item.get("close_series"))
+        latest, pct_change = _series_latest_and_pct(series, curr_date, 30)
+        if pct_change is not None and invert_pct:
+            pct_change = -pct_change
+        safe_haven_changes[label] = pct_change
+        if label == "Gold":
+            gold_series = series
+        safe_haven_rows.append(
+            [
+                label,
+                symbol,
+                _format_number(latest),
+                _format_number(pct_change, suffix="%"),
+            ]
+        )
+
+    gold_latest, gold_pct_3m = _series_latest_and_pct(gold_series, curr_date, 90)
+    _, tips_delta_3m = _series_latest_and_delta(tips_real, curr_date, 90)
+
+    divergence_note = "Gold / real-rate divergence is inconclusive."
+    if gold_pct_3m is not None and tips_delta_3m is not None:
+        if gold_pct_3m > 5 and tips_delta_3m >= 0:
+            divergence_note = (
+                "Gold has appreciated even as 10Y TIPS real yields held firm or rose, "
+                "which points to a structural/systemic risk premium rather than a simple easing narrative."
+            )
+        elif gold_pct_3m < 0 and tips_delta_3m > 0:
+            divergence_note = (
+                "Gold has softened while real yields moved up, which is more consistent with a conventional tightening shock."
+            )
+
+    liquidity_note = "10Y TIPS data unavailable."
+    if tips_level is not None:
+        if tips_level < 0.5:
+            liquidity_note = (
+                "US 10Y real yields remain low, so nominal rate pressure still looks partly inflation-driven rather than fully restrictive."
+            )
+        elif tips_level < 1.5:
+            liquidity_note = (
+                "US 10Y real yields are positive but not yet at obviously extreme levels; liquidity is tightening, though not frozen."
+            )
+        else:
+            liquidity_note = (
+                "US 10Y real yields are high enough to signal meaningfully restrictive real funding costs and tighter global liquidity."
+            )
+
+    spread_rows = [
+        ["US - China short-rate spread", _format_number((us_short - cn_short) if us_short is not None and cn_short is not None else None, suffix="ppt")],
+        ["US - China 10Y spread", _format_number((us_ten - cn_ten) if us_ten is not None and cn_ten is not None else None, suffix="ppt")],
+        ["US - Germany 10Y spread", _format_number((us_ten - de_ten) if us_ten is not None and de_ten is not None else None, suffix="ppt")],
+        ["US - Japan 10Y spread", _format_number((us_ten - jp_ten) if us_ten is not None and jp_ten is not None else None, suffix="ppt")],
+    ]
+    macro_anomalies: list[list[str]] = []
+    us_cn_short_spread = (us_short - cn_short) if us_short is not None and cn_short is not None else None
+    us_cn_ten_spread = (us_ten - cn_ten) if us_ten is not None and cn_ten is not None else None
+    if us_cn_short_spread is not None and abs(us_cn_short_spread) >= 1.0:
+        macro_anomalies.append([
+            "US-China short-rate spread",
+            _format_number(us_cn_short_spread, suffix="ppt"),
+            "Large short-rate gaps are a live capital-flow driver and can distort growth-style ETF valuation."
+        ])
+    if us_cn_ten_spread is not None and abs(us_cn_ten_spread) >= 1.0:
+        macro_anomalies.append([
+            "US-China 10Y spread",
+            _format_number(us_cn_ten_spread, suffix="ppt"),
+            "A wide long-end spread changes global duration pricing and cross-border risk appetite."
+        ])
+    if tips_delta is not None and abs(tips_delta) >= 0.2:
+        macro_anomalies.append([
+            "US 10Y TIPS real-yield shock",
+            _format_number(tips_delta, suffix="ppt"),
+            "A fast real-yield move changes the true funding cost facing long-duration and growth-sensitive ETFs."
+        ])
+    if ccc_delta is not None and abs(ccc_delta) >= 40:
+        macro_anomalies.append([
+            "CCC HY spread repricing",
+            _format_number(ccc_delta, suffix="bps"),
+            "A large HY spread move is often the cleanest early warning that risk capital is tightening or re-opening."
+        ])
+    haven_moves = [
+        safe_haven_changes.get("Gold"),
+        safe_haven_changes.get("Dollar Index"),
+        safe_haven_changes.get("Swiss franc safe-haven bid"),
+        safe_haven_changes.get("Japanese yen safe-haven bid"),
+    ]
+    if all(value is not None and value > 0 for value in haven_moves):
+        macro_anomalies.append([
+            "Safe-haven synchrony",
+            "Gold/DXY/CHF/JPY all positive",
+            "This is unusual enough to treat as a broad de-risking signal rather than an isolated market move."
+        ])
+    if gold_pct_3m is not None and tips_delta_3m is not None and gold_pct_3m > 5 and tips_delta_3m >= 0:
+        macro_anomalies.append([
+            "Gold-vs-real-yield divergence",
+            f"Gold {_format_number(gold_pct_3m, suffix='%')} with TIPS Δ {_format_number(tips_delta_3m, suffix='ppt')}",
+            "Gold rising despite firmer real yields implies a systemic-risk premium rather than a simple easing trade."
+        ])
+
+    schedule_df = _deserialize_schedule_frame(payload.get("china_calendar"))
+    calendar_rows: list[list[str]] = []
+    if schedule_df is not None and not schedule_df.empty:
+        current_dt = _parse_trade_date(curr_date)
+        window = schedule_df[
+            (schedule_df["publish_date"] >= pd.Timestamp(current_dt - timedelta(days=7)))
+            & (schedule_df["publish_date"] <= pd.Timestamp(current_dt + timedelta(days=35)))
+        ].head(12)
+        for _, row in window.iterrows():
+            publish_date = row.get("publish_date")
+            calendar_rows.append(
+                [
+                    publish_date.strftime("%Y-%m-%d") if hasattr(publish_date, "strftime") else str(publish_date),
+                    str(row.get("title", "N/A")),
+                    str(row.get("issuing_org", "N/A")),
+                    str(row.get("data_api", "N/A")),
+                ]
+            )
+
+    return "\n\n".join(
+        [
+            f"# Global Macro Regime Snapshot ({curr_date})",
+            "Data sources: overseas policy/benchmark rates and sovereign yields are pulled from FRED; China short-rate and 10Y government-bond data are pulled from Tushare (LPR / 中债国债收益率曲线, with a FRED fallback only if the Tushare curve is unavailable). China macro release scheduling is pulled from Tushare cn_schedule (used here as the eco-calendar feed).",
+            "## Global rate map",
+            _markdown_table(
+                ["Economy", "Policy / Short Rate", "30D Δ", "10Y Yield", "30D Δ"],
+                rate_rows,
+            ),
+            "## Cross-market spreads",
+            _markdown_table(["Spread", "Latest"], spread_rows),
+            "## Key anomalies",
+            _markdown_table(
+                ["Anomaly", "Evidence", "Why it matters for ETF allocation"],
+                macro_anomalies or [["None dominant", "N/A", "Current macro signals are notable but not yet extreme enough to dominate ETF allocation by themselves."]],
+            ),
+            "## China macro release calendar (eco-calendar) around the next rebalance window",
+            _markdown_table(
+                ["Publish date", "Release", "Issuing org", "Tushare API"],
+                calendar_rows or [["N/A", "No cn_schedule entries available around this date", "N/A", "N/A"]],
+            ),
+            "## Real rates and credit risk pricing",
+            _markdown_table(
+                ["Signal", "Latest", "30D Δ", "Interpretation"],
+                [
+                    [
+                        "US 10Y TIPS real yield",
+                        _format_number(tips_level, suffix="%"),
+                        _format_number(tips_delta, suffix="ppt"),
+                        liquidity_note,
+                    ],
+                    [
+                        "CCC HY credit spread",
+                        _format_number(ccc_level, suffix="bps"),
+                        _format_number(ccc_delta, suffix="bps"),
+                        (
+                            "A fast widening here is the cleanest sign that capital is leaving risky assets."
+                            if ccc_level is not None
+                            else "N/A"
+                        ),
+                    ],
+                ],
+            ),
+            "## Geopolitical stress / safe-haven proxies",
+            _markdown_table(
+                ["Proxy", "Symbol", "Latest", "30D %"],
+                safe_haven_rows,
+            ),
+            "## Capital-flow inference",
+            (
+                "When gold, DXY, CHF, and JPY proxies rise together, global capital is usually rotating away from growth-sensitive exposures "
+                "toward neutrality and protection. Current proxy moves: "
+                f"gold {_format_number(safe_haven_changes.get('Gold'), suffix='%')}, "
+                f"DXY {_format_number(safe_haven_changes.get('Dollar Index'), suffix='%')}, "
+                f"CHF {_format_number(safe_haven_changes.get('Swiss franc safe-haven bid'), suffix='%')}, "
+                f"JPY {_format_number(safe_haven_changes.get('Japanese yen safe-haven bid'), suffix='%')}."
+            ),
+            "## Structural-fragmentation pricing check",
+            f"Gold 3M move: {_format_number(gold_pct_3m, suffix='%')} at spot {_format_number(gold_latest)}. {divergence_note}",
+        ]
+    )
+
+
+def _build_macro_snapshot(curr_date: str, look_back_days: int = 365) -> str:
+    payload = _load_cached_snapshot_payload(
+        "macro",
+        curr_date,
+        look_back_days,
+        _build_macro_snapshot_payload,
+    )
+    return _render_macro_snapshot(curr_date, payload)
+
+
+def _build_commodity_snapshot_payload(
+    curr_date: str,
+    look_back_days: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    contracts: list[dict[str, Any]] = []
+    for cluster, symbol, exchange, reference, macro_variable in _COMMODITY_SPECS:
+        close_series = pd.Series(dtype=float)
+        oi_series = pd.Series(dtype=float)
+        warehouse_series = pd.Series(dtype=float)
+        try:
+            frame = _load_tushare_futures_main_frame(
+                symbol,
+                exchange,
+                curr_date,
+                look_back_days,
+            )
+            close_series = _frame_to_series(frame, "trade_date", "close")
+            oi_series = _frame_to_series(frame, "trade_date", "oi")
+            warehouse_series = _load_tushare_warehouse_series(
+                symbol,
+                exchange,
+                curr_date,
+                look_back_days,
+            )
+        except Exception:
+            pass
+        contracts.append(
+            {
+                "cluster": cluster,
+                "symbol": symbol,
+                "exchange": exchange,
+                "reference": reference,
+                "macro_variable": macro_variable,
+                "close_series": _serialize_series(close_series),
+                "oi_series": _serialize_series(oi_series),
+                "warehouse_series": _serialize_series(warehouse_series),
+            }
+        )
+    start_date, end_date = _date_window(curr_date, look_back_days)
+    return (
+        {"contracts": contracts},
+        {
+            "coverage_start_date": start_date,
+            "coverage_end_date": end_date,
+            "source_summary": "Tushare futures daily and warehouse receipts",
+        },
+    )
+
+
+def _render_commodity_snapshot(curr_date: str, payload: dict[str, Any]) -> str:
+    rows: list[list[str]] = []
+    anomaly_rows: list[list[str]] = []
+    for item in _validate_cached_payload(payload, "commodity", "contracts"):
+        cluster = str(item.get("cluster", "Unknown"))
+        reference = str(item.get("reference", "N/A"))
+        macro_variable = str(item.get("macro_variable", "N/A"))
+        close_series = _deserialize_series(item.get("close_series"))
+        oi_series = _deserialize_series(item.get("oi_series"))
+        warehouse_series = _deserialize_series(item.get("warehouse_series"))
+        latest_price, pct_30d = _series_latest_and_pct(close_series, curr_date, 30)
+        _, pct_90d = _series_latest_and_pct(close_series, curr_date, 90)
+        _, oi_30d = _series_latest_and_pct(oi_series, curr_date, 30)
+        _, warehouse_30d = _series_latest_and_pct(warehouse_series, curr_date, 30)
+        anomaly = _describe_commodity_anomaly(pct_30d, oi_30d, warehouse_30d)
+        rows.append(
+            [
+                cluster,
+                reference,
+                _format_number(latest_price),
+                _format_number(pct_30d, suffix="%"),
+                _format_number(pct_90d, suffix="%"),
+                _format_number(oi_30d, suffix="%"),
+                _format_number(warehouse_30d, suffix="%"),
+                macro_variable,
+            ]
+        )
+        anomaly_rows.append(
+            [
+                cluster,
+                anomaly,
+                "Use price/positioning/inventory anomalies as evidence for macro regime and industry-cycle judgment, not as standalone trading trivia.",
+            ]
+        )
+
+    return "\n\n".join(
+        [
+            f"# Commodity Cluster Snapshot ({curr_date})",
+            "Data sources: Tushare futures daily data stitched across the most active contracts, plus Tushare warehouse-receipt data where available. "
+            "This replaces equity / ETF proxy instruments so the commodity read-through is anchored in directly traded commodity pricing and physical-inventory evidence.",
+            _markdown_table(
+                ["Cluster", "Reference", "Latest", "30D %", "90D %", "30D OI %", "30D WSR %", "Key macro variable signaled"],
+                rows,
+            ),
+            "## Key anomalies",
+            _markdown_table(
+                ["Cluster", "Anomaly evidence", "How to use it"],
+                anomaly_rows,
+            ),
+            "Interpret the clusters as evidence chains: precious and industrial metals map financial pricing into growth expectations; crude and lithium map policy and transition stress into margin pressure; "
+            "rebar and pulp help judge China demand, inventory stress, and cost-push inflation. The goal is to isolate which anomalies are strong enough to change the ETF's macro and industry regime assessment.",
+        ]
+    )
+
+
+def _build_commodity_snapshot(curr_date: str, look_back_days: int = 240) -> str:
+    payload = _load_cached_snapshot_payload(
+        "commodity",
+        curr_date,
+        look_back_days,
+        _build_commodity_snapshot_payload,
+    )
+    return _render_commodity_snapshot(curr_date, payload)
+
+
 def _load_latest_etf_holdings_frame(ticker: str, curr_date: str) -> tuple[str, pd.DataFrame]:
     ts_code = _normalize_ts_code(ticker)
     df = _query_pro("fund_portfolio", ts_code=ts_code)
@@ -576,326 +1124,6 @@ def _format_holdings_summary(rows: pd.DataFrame, label: str) -> str:
     return _markdown_table(
         ["Rank", label, "Representative", "Ticker", "Weight"],
         table_rows,
-    )
-
-
-def _build_macro_snapshot(curr_date: str, look_back_days: int = 365) -> str:
-    rate_specs = [
-        ("United States", lambda: _load_fred_series("FEDFUNDS", curr_date, look_back_days), lambda: _load_fred_series("DGS10", curr_date, look_back_days)),
-        ("Euro Area / Germany proxy", lambda: _load_fred_series("ECBDFR", curr_date, look_back_days), lambda: _load_fred_series("IRLTLT01DEM156N", curr_date, look_back_days)),
-        ("Japan", lambda: _load_fred_series("IR3TIB01JPM156N", curr_date, look_back_days), lambda: _load_fred_series("IRLTLT01JPM156N", curr_date, look_back_days)),
-        ("China", lambda: _load_china_policy_rate_series(curr_date, look_back_days), lambda: _load_china_ten_year_yield_series(curr_date, look_back_days)),
-    ]
-    rate_rows: list[list[str]] = []
-    rate_levels: dict[str, tuple[float | None, float | None]] = {}
-    for economy, short_loader, long_loader in rate_specs:
-        short_values = short_loader()
-        long_values = long_loader()
-        short_level, short_delta = _series_latest_and_delta(short_values, curr_date, 30)
-        long_level, long_delta = _series_latest_and_delta(long_values, curr_date, 30)
-        rate_levels[economy] = (short_level, long_level)
-        rate_rows.append(
-            [
-                economy,
-                _format_number(short_level, suffix="%"),
-                _format_number(short_delta, suffix="ppt"),
-                _format_number(long_level, suffix="%"),
-                _format_number(long_delta, suffix="ppt"),
-            ]
-        )
-
-    us_short, us_ten = rate_levels.get("United States", (None, None))
-    cn_short, cn_ten = rate_levels.get("China", (None, None))
-    de_short, de_ten = rate_levels.get("Euro Area / Germany proxy", (None, None))
-    jp_short, jp_ten = rate_levels.get("Japan", (None, None))
-
-    tips_real = _load_fred_series("DFII10", curr_date, look_back_days)
-    ccc_spread = _load_fred_series("BAMLH0A3HYC", curr_date, look_back_days)
-    tips_level, tips_delta = _series_latest_and_delta(tips_real, curr_date, 30)
-    ccc_level, ccc_delta = _series_latest_and_delta(ccc_spread, curr_date, 30)
-
-    safe_haven_specs = [
-        ("Gold", "GC=F", False),
-        ("Dollar Index", "DX-Y.NYB", False),
-        ("Swiss franc safe-haven bid", "CHF=X", True),
-        ("Japanese yen safe-haven bid", "JPY=X", True),
-        ("Dry-bulk / shipping stress proxy", "BDRY", False),
-    ]
-    safe_haven_rows: list[list[str]] = []
-    safe_haven_changes: dict[str, float | None] = {}
-    for label, symbol, invert in safe_haven_specs:
-        series = _load_yfinance_close(symbol, curr_date, look_back_days)
-        latest, pct_change = _series_latest_and_pct(series, curr_date, 30)
-        if pct_change is not None and invert:
-            pct_change = -pct_change
-        safe_haven_changes[label] = pct_change
-        safe_haven_rows.append(
-            [
-                label,
-                symbol,
-                _format_number(latest),
-                _format_number(pct_change, suffix="%"),
-            ]
-        )
-
-    gold_latest, gold_pct_3m = _series_latest_and_pct(
-        _load_yfinance_close("GC=F", curr_date, look_back_days),
-        curr_date,
-        90,
-    )
-    _, tips_delta_3m = _series_latest_and_delta(tips_real, curr_date, 90)
-
-    divergence_note = "Gold / real-rate divergence is inconclusive."
-    if gold_pct_3m is not None and tips_delta_3m is not None:
-        if gold_pct_3m > 5 and tips_delta_3m >= 0:
-            divergence_note = (
-                "Gold has appreciated even as 10Y TIPS real yields held firm or rose, "
-                "which points to a structural/systemic risk premium rather than a simple easing narrative."
-            )
-        elif gold_pct_3m < 0 and tips_delta_3m > 0:
-            divergence_note = (
-                "Gold has softened while real yields moved up, which is more consistent with a conventional tightening shock."
-            )
-
-    liquidity_note = "10Y TIPS data unavailable."
-    if tips_level is not None:
-        if tips_level < 0.5:
-            liquidity_note = (
-                "US 10Y real yields remain low, so nominal rate pressure still looks partly inflation-driven rather than fully restrictive."
-            )
-        elif tips_level < 1.5:
-            liquidity_note = (
-                "US 10Y real yields are positive but not yet at obviously extreme levels; liquidity is tightening, though not frozen."
-            )
-        else:
-            liquidity_note = (
-                "US 10Y real yields are high enough to signal meaningfully restrictive real funding costs and tighter global liquidity."
-            )
-
-    spread_rows = [
-        ["US - China short-rate spread", _format_number((us_short - cn_short) if us_short is not None and cn_short is not None else None, suffix="ppt")],
-        ["US - China 10Y spread", _format_number((us_ten - cn_ten) if us_ten is not None and cn_ten is not None else None, suffix="ppt")],
-        ["US - Germany 10Y spread", _format_number((us_ten - de_ten) if us_ten is not None and de_ten is not None else None, suffix="ppt")],
-        ["US - Japan 10Y spread", _format_number((us_ten - jp_ten) if us_ten is not None and jp_ten is not None else None, suffix="ppt")],
-    ]
-    macro_anomalies: list[list[str]] = []
-    us_cn_short_spread = (us_short - cn_short) if us_short is not None and cn_short is not None else None
-    us_cn_ten_spread = (us_ten - cn_ten) if us_ten is not None and cn_ten is not None else None
-    if us_cn_short_spread is not None and abs(us_cn_short_spread) >= 1.0:
-        macro_anomalies.append([
-            "US-China short-rate spread",
-            _format_number(us_cn_short_spread, suffix="ppt"),
-            "Large short-rate gaps are a live capital-flow driver and can distort growth-style ETF valuation."
-        ])
-    if us_cn_ten_spread is not None and abs(us_cn_ten_spread) >= 1.0:
-        macro_anomalies.append([
-            "US-China 10Y spread",
-            _format_number(us_cn_ten_spread, suffix="ppt"),
-            "A wide long-end spread changes global duration pricing and cross-border risk appetite."
-        ])
-    if tips_delta is not None and abs(tips_delta) >= 0.2:
-        macro_anomalies.append([
-            "US 10Y TIPS real-yield shock",
-            _format_number(tips_delta, suffix="ppt"),
-            "A fast real-yield move changes the true funding cost facing long-duration and growth-sensitive ETFs."
-        ])
-    if ccc_delta is not None and abs(ccc_delta) >= 40:
-        macro_anomalies.append([
-            "CCC HY spread repricing",
-            _format_number(ccc_delta, suffix="bps"),
-            "A large HY spread move is often the cleanest early warning that risk capital is tightening or re-opening."
-        ])
-    haven_moves = [
-        safe_haven_changes.get("Gold"),
-        safe_haven_changes.get("Dollar Index"),
-        safe_haven_changes.get("Swiss franc safe-haven bid"),
-        safe_haven_changes.get("Japanese yen safe-haven bid"),
-    ]
-    if all(value is not None and value > 0 for value in haven_moves):
-        macro_anomalies.append([
-            "Safe-haven synchrony",
-            "Gold/DXY/CHF/JPY all positive",
-            "This is unusual enough to treat as a broad de-risking signal rather than an isolated market move."
-        ])
-    if gold_pct_3m is not None and tips_delta_3m is not None and gold_pct_3m > 5 and tips_delta_3m >= 0:
-        macro_anomalies.append([
-            "Gold-vs-real-yield divergence",
-            f"Gold {_format_number(gold_pct_3m, suffix='%')} with TIPS Δ {_format_number(tips_delta_3m, suffix='ppt')}",
-            "Gold rising despite firmer real yields implies a systemic-risk premium rather than a simple easing trade."
-        ])
-
-    schedule_df = _load_cn_schedule_frame(curr_date)
-    calendar_rows: list[list[str]] = []
-    if schedule_df is not None and not schedule_df.empty:
-        current_dt = _parse_trade_date(curr_date)
-        window = schedule_df[
-            (schedule_df["publish_date"] >= pd.Timestamp(current_dt - timedelta(days=7)))
-            & (schedule_df["publish_date"] <= pd.Timestamp(current_dt + timedelta(days=35)))
-        ].head(12)
-        for _, row in window.iterrows():
-            publish_date = row.get("publish_date")
-            calendar_rows.append(
-                [
-                    publish_date.strftime("%Y-%m-%d") if hasattr(publish_date, "strftime") else str(publish_date),
-                    str(row.get("title", "N/A")),
-                    str(row.get("issuing_org", "N/A")),
-                    str(row.get("data_api", "N/A")),
-                ]
-            )
-
-    return "\n\n".join(
-        [
-            f"# Global Macro Regime Snapshot ({curr_date})",
-            "Data sources: overseas policy/benchmark rates and sovereign yields are pulled from FRED; China short-rate and 10Y government-bond data are pulled from Tushare (LPR / 中债国债收益率曲线, with a FRED fallback only if the Tushare curve is unavailable). China macro release scheduling is pulled from Tushare cn_schedule (used here as the eco-calendar feed).",
-            "## Global rate map",
-            _markdown_table(
-                ["Economy", "Policy / Short Rate", "30D Δ", "10Y Yield", "30D Δ"],
-                rate_rows,
-            ),
-            "## Cross-market spreads",
-            _markdown_table(["Spread", "Latest"], spread_rows),
-            "## Key anomalies",
-            _markdown_table(
-                ["Anomaly", "Evidence", "Why it matters for ETF allocation"],
-                macro_anomalies or [["None dominant", "N/A", "Current macro signals are notable but not yet extreme enough to dominate ETF allocation by themselves."]],
-            ),
-            "## China macro release calendar (eco-calendar) around the next rebalance window",
-            _markdown_table(
-                ["Publish date", "Release", "Issuing org", "Tushare API"],
-                calendar_rows or [["N/A", "No cn_schedule entries available around this date", "N/A", "N/A"]],
-            ),
-            "## Real rates and credit risk pricing",
-            _markdown_table(
-                ["Signal", "Latest", "30D Δ", "Interpretation"],
-                [
-                    [
-                        "US 10Y TIPS real yield",
-                        _format_number(tips_level, suffix="%"),
-                        _format_number(tips_delta, suffix="ppt"),
-                        liquidity_note,
-                    ],
-                    [
-                        "CCC HY credit spread",
-                        _format_number(ccc_level, suffix="bps"),
-                        _format_number(ccc_delta, suffix="bps"),
-                        (
-                            "A fast widening here is the cleanest sign that capital is leaving risky assets."
-                            if ccc_level is not None
-                            else "N/A"
-                        ),
-                    ],
-                ],
-            ),
-            "## Geopolitical stress / safe-haven proxies",
-            _markdown_table(
-                ["Proxy", "Symbol", "Latest", "30D %"],
-                safe_haven_rows,
-            ),
-            "## Capital-flow inference",
-            (
-                "When gold, DXY, CHF, and JPY proxies rise together, global capital is usually rotating away from growth-sensitive exposures "
-                "toward neutrality and protection. Current proxy moves: "
-                f"gold {_format_number(safe_haven_changes.get('Gold'), suffix='%')}, "
-                f"DXY {_format_number(safe_haven_changes.get('Dollar Index'), suffix='%')}, "
-                f"CHF {_format_number(safe_haven_changes.get('Swiss franc safe-haven bid'), suffix='%')}, "
-                f"JPY {_format_number(safe_haven_changes.get('Japanese yen safe-haven bid'), suffix='%')}."
-            ),
-            "## Structural-fragmentation pricing check",
-            f"Gold 3M move: {_format_number(gold_pct_3m, suffix='%')} at spot {_format_number(gold_latest)}. {divergence_note}",
-        ]
-    )
-
-
-def _build_commodity_snapshot(curr_date: str, look_back_days: int = 240) -> str:
-    commodity_specs = [
-        # Precious metals
-        ("贵金属 · 金", "AU", "SHFE", "沪金主力", "Fiat trust, real rates, systemic risk premium"),
-        ("贵金属 · 银", "AG", "SHFE", "沪银主力", "Industrial + monetary hybrid, solar demand"),
-        # Industrial metals
-        ("工业金属 · 铜", "CU", "SHFE", "沪铜主力", "Global manufacturing resilience and real new-infrastructure demand"),
-        ("工业金属 · 铝", "AL", "SHFE", "沪铝主力", "China smelting capacity, power-grid capex, export tariffs"),
-        ("工业金属 · 铅", "PB", "SHFE", "沪铅主力", "Lead-acid battery demand, recycled metal supply, and power-storage capex"),
-        ("工业金属 · 镍", "NI", "SHFE", "沪镍主力", "Stainless steel demand vs battery-grade NPI substitution"),
-        ("工业金属 · 锌", "ZN", "SHFE", "沪锌主力", "Galvanized steel demand, infrastructure and auto body"),
-        # Energy
-        ("能源 · 原油", "SC", "INE", "原油主力", "Recession risk, OPEC+ elasticity, and policy tightening room"),
-        # Energy-transition metals
-        ("转型金属 · 碳酸锂", "LC", "GFEX", "碳酸锂主力", "Energy-transition profit pools and industry-clearing speed"),
-        # Ferrous / building materials
-        ("黑色 · 螺纹钢", "RB", "SHFE", "螺纹钢主力", "China investment-cycle strength, PPI turning points, policy intervention"),
-        ("黑色 · 热卷", "HC", "SHFE", "热卷主力", "Automotive and manufacturing demand, downstream steel consumption strength"),
-        ("黑色 · 铁矿石", "I", "DCE", "铁矿石主力", "Steel-mill margins, blast-furnace utilization, import dependency"),
-        ("黑色 · 焦煤", "JM", "DCE", "焦煤主力", "Coking cost pass-through, safety-driven supply disruption"),
-        # Chemicals
-        ("化工 · PTA", "TA", "CZCE", "PTA主力", "Polyester chain pricing anchor, textile export demand, and refining margin pass-through"),
-        ("化工 · 甲醇", "MA", "CZCE", "甲醇主力", "Coal-chemical cost anchor, MTO demand, and fuel-alternative policy"),
-        ("化工 · 聚乙烯", "L", "DCE", "聚乙烯主力", "Plastic packaging and film demand, petrochemical margin cycle"),
-        # Oils & oilseeds
-        ("油脂油料 · 豆粕", "M", "DCE", "豆粕主力", "Feed demand anchor for hog/poultry cycle, crush margin, and soybean import dependency"),
-        ("油脂油料 · 玉米", "C", "DCE", "玉米主力", "Grain security, ethanol mandate, and deep-processing capacity"),
-        ("油脂油料 · 棕榈油", "P", "DCE", "棕榈油主力", "Global edible-oil balance, biodiesel mandate, and tropical supply risk"),
-        # Soft commodities
-        ("软商品 · 纸浆", "SP", "SHFE", "纸浆主力", "Climate shocks, substitution, and logistics-driven inflation"),
-        ("软商品 · 天然橡胶", "RU", "SHFE", "天然橡胶主力", "Tire demand, auto production cycle, Southeast Asia supply"),
-        # Industrial commodities
-        ("工业品 · 工业硅", "SI", "GFEX", "工业硅主力", "Polysilicon and silicone demand, capacity overhang"),
-        ("工业品 · 尿素", "UR", "CZCE", "尿素主力", "Fertilizer seasonality, coal-chemical cost, export policy"),
-        ("工业品 · PVC", "V", "DCE", "PVC主力", "Real estate piping demand, calcium-carbide cost curve"),
-        ("工业品 · 纯碱", "SA", "CZCE", "纯碱主力", "Glass production demand, photovoltaic expansion, capacity cycle"),
-    ]
-    rows: list[list[str]] = []
-    anomaly_rows: list[list[str]] = []
-    for cluster, symbol, exchange, reference, macro_variable in commodity_specs:
-        try:
-            frame = _load_tushare_futures_main_frame(symbol, exchange, curr_date, look_back_days)
-        except Exception:
-            rows.append([cluster, reference, "N/A", "N/A", "N/A", "N/A", "N/A", macro_variable])
-            anomaly_rows.append([cluster, "Data unavailable for this contract", "—"])
-            continue
-        close_series = _frame_to_series(frame, "trade_date", "close")
-        oi_series = _frame_to_series(frame, "trade_date", "oi")
-        warehouse_series = _load_tushare_warehouse_series(symbol, exchange, curr_date, look_back_days)
-        latest_price, pct_30d = _series_latest_and_pct(close_series, curr_date, 30)
-        _, pct_90d = _series_latest_and_pct(close_series, curr_date, 90)
-        _, oi_30d = _series_latest_and_pct(oi_series, curr_date, 30)
-        _, warehouse_30d = _series_latest_and_pct(warehouse_series, curr_date, 30)
-        anomaly = _describe_commodity_anomaly(pct_30d, oi_30d, warehouse_30d)
-        rows.append(
-            [
-                cluster,
-                reference,
-                _format_number(latest_price),
-                _format_number(pct_30d, suffix="%"),
-                _format_number(pct_90d, suffix="%"),
-                _format_number(oi_30d, suffix="%"),
-                _format_number(warehouse_30d, suffix="%"),
-                macro_variable,
-            ]
-        )
-        anomaly_rows.append(
-            [
-                cluster,
-                anomaly,
-                "Use price/positioning/inventory anomalies as evidence for macro regime and industry-cycle judgment, not as standalone trading trivia.",
-            ]
-        )
-    return "\n\n".join(
-        [
-            f"# Commodity Cluster Snapshot ({curr_date})",
-            "Data sources: Tushare futures daily data stitched across the most active contracts, plus Tushare warehouse-receipt data where available. "
-            "This replaces equity / ETF proxy instruments so the commodity read-through is anchored in directly traded commodity pricing and physical-inventory evidence.",
-            _markdown_table(
-                ["Cluster", "Reference", "Latest", "30D %", "90D %", "30D OI %", "30D WSR %", "Key macro variable signaled"],
-                rows,
-            ),
-            "## Key anomalies",
-            _markdown_table(
-                ["Cluster", "Anomaly evidence", "How to use it"],
-                anomaly_rows,
-            ),
-            "Interpret the clusters as evidence chains: precious and industrial metals map financial pricing into growth expectations; crude and lithium map policy and transition stress into margin pressure; "
-            "rebar and pulp help judge China demand, inventory stress, and cost-push inflation. The goal is to isolate which anomalies are strong enough to change the ETF's macro and industry regime assessment.",
-        ]
     )
 
 

@@ -63,10 +63,11 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         system_msg = captured["system_message"]
         self.assertIn("Per-Report Deep Analysis", system_msg)
         self.assertIn("Cross-Report Comparative Analysis", system_msg)
-        self.assertIn("ETF Exposure Mapping", system_msg)
+        self.assertIn("ETF Exposure Read-Through", system_msg)
         self.assertIn("Supply-Chain Implications", system_msg)
         self.assertIn("一、行业主线与分歧焦点", system_msg)
         self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
+        self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)
         self.assertIn("Summary Table", system_msg)
         self.assertIn("Do NOT just list numbers", system_msg)
         self.assertIn("industry allocation timing", system_msg)
@@ -116,6 +117,7 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT use lead-ins such as '本部分结论表明'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
+        self.assertIn("keep the original numbering hierarchy", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
 
@@ -169,6 +171,7 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
+        self.assertIn("Forbidden example: `_HEADING_MAP =", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
 
@@ -213,6 +216,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("Positive example (target style)", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
+        self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
 
@@ -322,6 +326,7 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、暴露与宏观主线", system_msg)
         self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
+        self.assertIn("keep the original numbering hierarchy", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
     def test_news_report_strips_malformed_suffix_only_title_inside_body(self):
@@ -385,8 +390,9 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT use lead-ins such as '本部分结论表明'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
-        self.assertIn("一、情绪主线与权重映射", system_msg)
+        self.assertIn("一、情绪主线与权重影响", system_msg)
         self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
+        self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
 

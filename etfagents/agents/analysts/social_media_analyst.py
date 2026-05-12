@@ -33,7 +33,7 @@ _DEFAULT_TITLE_LEAD_EN = (
 _REPORT_TITLE_ZH = "舆情与事件影响分析"
 _REPORT_TITLE_EN = "Sentiment & Catalyst Impact Analysis"
 _SOCIAL_HEADING_MAP = {
-    "一、总体研判": "一、情绪主线与权重映射",
+    "一、总体研判": "一、情绪主线与权重影响",
     "（一）ETF产品情绪与讨论": "（一）产品情绪与讨论强弱",
     "（二）行业与重仓股舆情": "（二）行业与重仓股事件主线",
     "二、深度分析": "二、事件传导与定价辨别",
@@ -83,7 +83,7 @@ def create_social_media_analyst(llm):
             + get_concise_heading_instruction() + "\n"
             "Each top-level section (一、二、三、四) must begin with 2-3 sentences summarizing the key conclusions "
             "of that section, then a blank line before sub-sections.\n\n"
-            "一、情绪主线与权重映射 (Sentiment Thesis & Exposure Map)\n"
+            "一、情绪主线与权重影响 (Sentiment Thesis & Exposure Impact)\n"
             "  （一）产品情绪与讨论强弱: ETF-specific sentiment and product-level discussion\n"
             "  （二）行业与重仓股事件主线: News and sentiment around dominant industries and top holdings\n"
             "二、事件传导与定价辨别 (Transmission & Pricing Signal)\n"
@@ -92,7 +92,7 @@ def create_social_media_analyst(llm):
             "三、后续触发与验证要点 (Next Triggers & Validation)\n"
             "  （一）后续监控要点: What the allocator should monitor next for confirmation or invalidation\n"
             "四、结论与跟踪表 (Conclusion & Tracking Table)\n\n"
-            "Do not stay at the ETF ticker headline level. Expand the analysis to the ETF's heavy industries and weight stocks, then map those findings back to ETF pricing."
+            "Do not stay at the ETF ticker headline level. Expand the analysis to the ETF's heavy industries and weight stocks, then translate those findings back to ETF pricing."
             " When writing in Chinese, use Chinese section titles such as '真实支撑与短期噪声'; do not use English labels like 'Genuine Support'."
             " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read.\n\n"
             "For the title lead and the 2-3 sentence lead under each top-level section, state the conclusion directly. "

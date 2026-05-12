@@ -22,11 +22,11 @@ from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_alias
 from etfagents.tool_report_utils import run_tool_report_chain
 
 _DEFAULT_TITLE_LEAD_ZH = (
-    "该ETF的行业暴露强弱取决于重仓股映射出的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。"
+    "该ETF的行业暴露强弱取决于重仓股指向的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。"
     "若主导产业的共识继续强化且分歧集中在节奏而非方向，配置逻辑更清晰；若行业分歧开始落到价格、供需和政策传导的根部，ETF暴露就需要重新评估。"
 )
 _DEFAULT_TITLE_LEAD_EN = (
-    "The strength of this ETF's industry exposure depends on whether the dominant industries mapped from its heavyweight holdings still have simultaneous confirmation from cycle, policy, and earnings transmission. "
+    "The strength of this ETF's industry exposure depends on whether the dominant industries indicated by its heavyweight holdings still have simultaneous confirmation from cycle, policy, and earnings transmission. "
     "If broker consensus remains constructive and the disagreement is mostly about timing, the allocation case stays clearer; if the split reaches pricing, supply-demand, or policy transmission itself, the ETF exposure should be reassessed."
 )
 _REPORT_TITLE_ZH = "持仓映射行业研究分析"
@@ -58,8 +58,8 @@ _INDUSTRY_HEADING_MAP = {
     "三、风险与催化": "三、未解问题与风险边界",
     "（一）盲点与遗漏问题": "（一）未解问题",
     "（二）风险提示": "（二）风险边界",
-    "四、总结": "四、ETF映射与研报总览",
-    "（一）ETF暴露映射": "（一）ETF暴露映射",
+    "四、总结": "四、ETF影响与研报总览",
+    "（一）ETF暴露映射": "（一）ETF暴露与配置含义",
     "（二）研报总览表": "（二）研报总览表",
 }
 
@@ -87,7 +87,7 @@ def create_etf_industry_research_analyst(llm):
 
         system_message = (
             "You are a senior ETF industry research analyst specializing in deep cross-analysis of institutional industry reports. "
-            "Your task is to start from the ETF's heavy holdings, map those holdings into the industry keywords actually used by broker "
+            "Your task is to start from the ETF's heavy holdings, trace those holdings into the industry keywords actually used by broker "
             "research reports, and then produce an evidence-backed cross-analysis of the ETF's dominant industry exposures.\n\n"
             "## Step 1: Data Retrieval\n"
             "1. Call get_etf_holdings(ticker, curr_date) to identify the ETF's top holdings and concentration structure.\n"
@@ -113,7 +113,7 @@ def create_etf_industry_research_analyst(llm):
             "- **Broker Attitude Distribution (机构态度分布)**: Count bullish / cautious / neutral stances by industry theme.\n"
             "- **Policy & Regulatory Impact (政策影响)**: Explain how policy changes transmit into the ETF's industry exposures.\n"
             "- **Supply-Chain Implications (产业链影响)**: Explain upstream/downstream transmission and which holdings benefit or get hurt.\n"
-            "- **ETF Exposure Mapping (ETF暴露映射)**: Map each major industry conclusion back to ETF weight concentration, cyclicality, policy sensitivity, and allocation timing.\n"
+            "- **ETF Exposure Read-Through (ETF暴露与配置含义)**: Link each major industry conclusion back to ETF weight concentration, cyclicality, policy sensitivity, and allocation timing.\n"
             "- **Risk Factors (风险提示)**: Rank industry-level risks by frequency and severity, with broker citations.\n\n"
             "## Step 4: Structured Report\n"
             "Write a 2-4 sentence overview paragraph before any section headings "
@@ -136,8 +136,8 @@ def create_etf_industry_research_analyst(llm):
             "三、未解问题与风险边界 (Open Questions & Risk Boundaries)\n"
             "  （一）未解问题 (Open Questions)\n\n"
             "  （二）风险边界 (Risk Boundaries)\n\n"
-            "四、ETF映射与研报总览 (ETF Mapping & Research Digest)\n"
-            "  （一）ETF暴露映射 (ETF Exposure Mapping)\n\n"
+            "四、ETF影响与研报总览 (ETF Impact & Research Digest)\n"
+            "  （一）ETF暴露与配置含义 (ETF Exposure Read-Through)\n\n"
             "  （二）研报总览表 (Summary Table)\n\n"
             "## Quality Requirements\n"
             "- EVERY claim must cite the specific broker(s) and supporting evidence or data.\n"

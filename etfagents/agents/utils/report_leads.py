@@ -100,7 +100,13 @@ def get_topic_and_term_style_instruction() -> str:
 def get_concise_heading_instruction() -> str:
     return (
         " Top-level and second-level headings must be concise, specific, and point directly to the content of that section. "
-        "Avoid generic labels such as '总体研判', '深度分析', '风险与催化', or '总结' when a more precise heading is available."
+        "Avoid generic labels such as '总体研判', '深度分析', '风险与催化', or '总结' when a more precise heading is available. "
+        "If you improve any heading, directly write the final rewritten heading text in the report itself: keep the original numbering hierarchy and optimize only the heading wording. "
+        "Do NOT output code blocks, JSON, dictionary mappings, variable assignments, or any programming-language structure for heading changes. "
+        "Forbidden example: `_HEADING_MAP = {\"一、总体研判\": \"一、情绪主线与权重影响\"}`. "
+        "Never present heading changes as rules, mapping tables, or replacement instructions; simply output the final human-readable headings that can be used directly in the report. "
+        "Each heading should be brief, forceful, and immediately usable in the final report. "
+        "Use '一、' for top-level headings and '（一）' for second-level headings."
     )
 
 

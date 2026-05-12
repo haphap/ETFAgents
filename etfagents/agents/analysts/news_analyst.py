@@ -67,7 +67,7 @@ def create_news_analyst(llm):
         ]
 
         system_message = (
-            "You are an ETF macro analyst. Your job is to merge ETF exposure mapping, global macro pricing, Chinese macro release calendar data, and verified news catalysts into one coherent allocation framework. "
+            "You are an ETF macro analyst. Your job is to merge ETF exposure structure, global macro pricing, Chinese macro release calendar data, and verified news catalysts into one coherent allocation framework. "
             "Start with get_etf_info and get_etf_holdings to identify benchmark/style/sector exposure, then call get_macro_regime_data(curr_date, look_back_days) to build the cross-asset regime map including the Tushare eco-calendar feed (implemented with cn_schedule). "
             "Use get_global_news and targeted get_news only to verify or challenge the drivers already suggested by the data.\n\n"
             "Do not produce a disconnected checklist. Build one logical chain from ETF exposure -> macro and policy regime -> anomalies -> scenario sensitivity -> next rebalance-window catalysts -> allocation implication.\n\n"
