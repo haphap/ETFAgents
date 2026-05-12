@@ -9,6 +9,10 @@ from etfagents.agents.utils.agent_utils import (
     get_language_instruction,
     normalize_chinese_role_terms,
 )
+from etfagents.agents.utils.report_leads import (
+    strip_meta_lead_prefixes,
+    strip_title_lead_paragraph,
+)
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.tool_report_utils import run_tool_report_chain
 
@@ -50,7 +54,9 @@ def create_etf_industry_research_analyst(llm):
             "- **ETF Exposure Mapping (ETF暴露映射)**: Map each major industry conclusion back to ETF weight concentration, cyclicality, policy sensitivity, and allocation timing.\n"
             "- **Risk Factors (风险提示)**: Rank industry-level risks by frequency and severity, with broker citations.\n\n"
             "## Step 4: Structured Report\n"
-            "Write a comprehensive Markdown report. Each top-level section (一、二、三、四) must begin "
+            "Use a single H1 title for the report. Start the visible report body directly at '一、总体研判' after that H1 title; "
+            "do NOT insert a separate title lead, overview paragraph, or summary paragraph between the H1 and '一、总体研判'.\n"
+            "Write a comprehensive Markdown report. Every top-level section (一、二、三、四) must begin "
             "with 2-3 sentences summarizing the key conclusions of that section, "
             "then a blank line before sub-sections.\n\n"
             "一、总体研判 (Overview)\n"
@@ -79,6 +85,11 @@ def create_etf_industry_research_analyst(llm):
             "- Start the report directly with the single most important industry consensus or divergence finding. "
             "Do NOT begin with meta-descriptions such as '本报告将…', '以下是…', '本分析基于…', 'This report provides…', "
             "or any sentence that describes what the report will do rather than stating a result.\n"
+            "- Do NOT insert any separate title lead before '一、总体研判'.\n"
+            "- For the 2-3 sentence lead under each top-level section, state the conclusion directly. "
+            "Do NOT use lead-ins such as '本部分结论表明', '该部分说明', '这一节意味着', 'This section shows', or similar meta phrasing.\n"
+            "- Those lead paragraphs must sit one level above the sub-sections: synthesize the broader ETF exposure, style, cycle sensitivity, valuation/risk transmission, and allocation implication. "
+            "Do NOT simply restate the same points that will appear immediately below under the sub-sections.\n"
             "- Every sentence must convey a concrete data point, broker citation, or allocation implication. "
             "Cut filler phrases like '深度挂钩', '全面覆盖', '值得注意的是', 'it is worth noting'.\n"
             "- Write as if presenting to a portfolio manager who wants the bottom line first."
@@ -114,6 +125,8 @@ def create_etf_industry_research_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
+        report = strip_meta_lead_prefixes(report) if report else report
+        report = strip_title_lead_paragraph(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

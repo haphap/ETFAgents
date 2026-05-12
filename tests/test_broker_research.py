@@ -5,8 +5,9 @@ from unittest.mock import patch, MagicMock
 from langchain_core.messages import AIMessage, HumanMessage
 
 from etfagents.agents.analysts.broker_research_analyst import create_broker_research_analyst
+from etfagents.agents.analysts.etf_industry_research_analyst import create_etf_industry_research_analyst
 from etfagents.agents.analysts.stock_research_analyst import create_stock_research_analyst
-from etfagents.agents.utils.agent_utils import localize_role_name
+from etfagents.agents.utils.agent_utils import localize_role_name, normalize_chinese_role_terms
 from etfagents.agents.utils.agent_states import AgentState
 from etfagents.agents.utils.research_report_tools import get_broker_research, get_stock_research
 from etfagents.dataflows.config import get_config, set_config
@@ -96,6 +97,13 @@ class IndustryResearchNamingTests(unittest.TestCase):
         try:
             self.assertEqual("行业研究分析师", localize_role_name("Industry Research Analyst"))
             self.assertEqual("行业研究分析师", localize_role_name("Broker Research Analyst"))
+            self.assertEqual("行业研究分析师", localize_role_name("ETF Holdings-Industry Research Analyst"))
+            self.assertEqual("个股研究分析师", localize_role_name("Stock Research Analyst"))
+            self.assertEqual("个股研究分析师", localize_role_name("ETF Top Holdings Research Analyst"))
+            self.assertEqual(
+                "行业研究分析师与个股研究分析师",
+                normalize_chinese_role_terms("ETF持仓映射行业研究分析师与ETF头部企业研究分析师"),
+            )
         finally:
             set_config(original_config)
 
@@ -247,6 +255,95 @@ class StockResearchAnalystTests(unittest.TestCase):
         self.assertIn("earnings", system_msg.lower())
         self.assertIn("valuation", system_msg.lower())
 
+
+class ETFIndustryResearchAnalystTests(unittest.TestCase):
+    def test_title_lead_before_first_section_is_removed(self):
+        llm = _CapturingLLM("Report content")
+        node = create_etf_industry_research_analyst(llm)
+
+        raw_report = (
+            "# ETF持仓映射行业研究分析报告\n\n"
+            "该ETF的行业暴露主要由核心重仓股映射出的主导产业驱动。\n\n"
+            "## 一、总体研判\n\n"
+            "行业景气回升，重仓暴露集中。"
+        )
+
+        with patch(
+            "etfagents.agents.analysts.etf_industry_research_analyst.run_tool_report_chain",
+            return_value=(AIMessage(content=raw_report), raw_report),
+        ):
+            result = node(
+                {
+                    "asset_symbol": "510300.SH",
+                    "trade_date": "2026-04-01",
+                    "messages": [HumanMessage(content="Analyze 510300.SH")],
+                }
+            )
+
+        rendered = result["holdings_industry_report"]
+        self.assertNotIn("该ETF的行业暴露主要由核心重仓股映射出的主导产业驱动", rendered)
+        self.assertIn("# ETF持仓映射行业研究分析报告", rendered)
+        self.assertIn("一、总体研判", rendered)
+
+    def test_section_lead_meta_prefix_is_stripped(self):
+        llm = _CapturingLLM("Report content")
+        node = create_etf_industry_research_analyst(llm)
+
+        raw_report = (
+            "# ETF持仓映射行业研究分析报告\n\n"
+            "重仓行业景气仍在扩散，高权重板块对估值弹性贡献更大。\n\n"
+            "## 一、总体研判\n\n"
+            "本部分结论表明，该ETF重仓新能源与金融科技，对无风险利率下行更敏感。\n\n"
+            "### （一）共识观点\n\n"
+            "多数机构看多景气延续。\n\n"
+            "## 二、深度分析\n\n"
+            "本部分结论表明，政策催化仍在延续，行业景气尚未逆转。\n\n"
+            "### （一）量化对比\n\n"
+            "盈利预期仍在修复。"
+        )
+
+        with patch(
+            "etfagents.agents.analysts.etf_industry_research_analyst.run_tool_report_chain",
+            return_value=(AIMessage(content=raw_report), raw_report),
+        ):
+            result = node(
+                {
+                    "asset_symbol": "159949.SZ",
+                    "trade_date": "2026-04-01",
+                    "messages": [HumanMessage(content="Analyze 159949.SZ")],
+                }
+            )
+
+        rendered = result["holdings_industry_report"]
+        self.assertNotIn("本部分结论表明", rendered)
+        self.assertIn("该ETF重仓新能源与金融科技，对无风险利率下行更敏感。", rendered)
+        self.assertIn("政策催化仍在延续，行业景气尚未逆转。", rendered)
+
+    def test_prompt_starts_directly_at_first_section_and_forbids_meta_section_leads(self):
+        llm = _CapturingLLM("Report content")
+        node = create_etf_industry_research_analyst(llm)
+
+        captured_args = {}
+
+        def mock_run(*args, **kwargs):
+            captured_args["system_message"] = kwargs.get("system_message", "")
+            return (AIMessage(content="Report content"), "Report content")
+
+        with patch(
+            "etfagents.agents.analysts.etf_industry_research_analyst.run_tool_report_chain",
+            side_effect=mock_run,
+        ):
+            node(
+                {
+                    "asset_symbol": "510300.SH",
+                    "trade_date": "2026-04-01",
+                    "messages": [HumanMessage(content="Analyze 510300.SH")],
+                }
+            )
+
+        system_msg = captured_args.get("system_message", "")
+        self.assertIn("do NOT insert a separate title lead", system_msg)
+        self.assertIn("Do NOT use lead-ins such as '本部分结论表明'", system_msg)
 
 class BrokerResearchTushareTests(unittest.TestCase):
     """Tests for the tushare broker reports data function."""

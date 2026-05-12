@@ -6,6 +6,8 @@ from etfagents.agents.analysts.etf_market_analyst import (
     _etf_report_has_full_coverage,
     _etf_report_has_actionable_intro,
     _etf_report_has_actionable_depth,
+    _etf_report_has_explanatory_clarity,
+    _etf_report_has_compact_structure,
     _etf_market_report_needs_rewrite,
 )
 
@@ -50,6 +52,10 @@ class TestActionableIntro(unittest.TestCase):
         report = "Bullish setup with strong support at the 50 SMA.\nMore details..."
         self.assertTrue(_etf_report_has_actionable_intro(report))
 
+    def test_title_then_actionable_lead_passes(self):
+        report = "# ETF市场与资金流分析报告\n\n偏多格局，50日均线支撑有效，MACD金叉确认。\n后续内容..."
+        self.assertTrue(_etf_report_has_actionable_intro(report))
+
     def test_boilerplate_intro_fails(self):
         report = "本报告将分析ETF技术面指标。\n具体内容如下..."
         self.assertFalse(_etf_report_has_actionable_intro(report))
@@ -77,6 +83,49 @@ class TestActionableDepth(unittest.TestCase):
         self.assertFalse(_etf_report_has_actionable_depth(report))
 
 
+class TestExplanatoryClarity(unittest.TestCase):
+    def test_explained_jargon_passes(self):
+        report = (
+            "多头排列意味着短中期均线同时向上，说明买盘在不同持有周期都占优。"
+            "对交易而言，这更适合持有或等回踩加仓，而不是在急拉后盲目追高。"
+            "MACD金叉说明短期动能重新强于中期趋势，这意味着上行动能恢复。"
+            "操作上若量能继续放大可顺势加仓，若放量失败则等待下一次确认。"
+        )
+        self.assertTrue(_etf_report_has_explanatory_clarity(report))
+
+    def test_unexplained_jargon_fails(self):
+        report = "标准多头发散形态，趋势完好，放量突破，MACD金叉，建议关注。"
+        self.assertFalse(_etf_report_has_explanatory_clarity(report))
+
+
+class TestCompactStructure(unittest.TestCase):
+    def test_exact_two_section_structure_passes(self):
+        report = (
+            "# ETF市场与资金流分析报告\n\n"
+            "偏多格局，量价配合尚未破坏。\n\n"
+            "## 一、市场结构与量价诊断\n\n"
+            "### （一）趋势与动量\n\n"
+            "内容\n\n"
+            "### （二）波动与流动性\n\n"
+            "内容\n\n"
+            "## 二、交易确认与执行计划\n\n"
+            "内容"
+        )
+        self.assertTrue(_etf_report_has_compact_structure(report))
+
+    def test_old_three_section_structure_fails(self):
+        report = (
+            "# ETF市场与资金流分析报告\n\n"
+            "## 一、趋势与动量\n\n"
+            "内容\n\n"
+            "## 二、波动与流动性\n\n"
+            "内容\n\n"
+            "## 三、信号确认与决策\n\n"
+            "内容"
+        )
+        self.assertFalse(_etf_report_has_compact_structure(report))
+
+
 class TestNeedsRewrite(unittest.TestCase):
     def test_empty_needs_rewrite(self):
         self.assertTrue(_etf_market_report_needs_rewrite(""))
@@ -86,12 +135,22 @@ class TestNeedsRewrite(unittest.TestCase):
         # 1. Full coverage (sma/ema, macd, rsi, boll, vwma)
         # 2. Actionable intro (starts with a directional term)
         # 3. Actionable depth (>=400 chars, >=3 keyword groups)
+        # 4. Explanatory clarity (explains jargon and links to trading meaning)
         report = (
-            "偏多格局确认，价格站稳50日均线上方，短期均线呈多头排列，50日SMA位于445元提供中期支撑。"  # intro + sma
-            + "10 EMA金叉20日均线，当前位于452元，MACD信号线看涨，柱状图持续扩张，DIF与DEA差值扩大至1.2，快慢线均位于零轴上方。"  # ema + macd
+            "# ETF市场与资金流分析报告\n\n"
+            "偏多格局确认，价格站稳50日均线上方，短期均线呈多头排列，这意味着不同持有周期的买盘都在同步占优；"
+            "对交易而言，更适合顺势持有并等待回踩确认，而不是在急拉后盲目追高。"
+            + "\n\n## 一、市场结构与量价诊断\n\n"
+            + "趋势与动量、波动与流动性都指向量价仍在同向确认。"
+            + "\n\n### （一）趋势与动量\n\n"
+            + "10 EMA金叉20日均线，当前位于452元，MACD信号线看涨，柱状图持续扩张，DIF与DEA差值扩大至1.2，快慢线均位于零轴上方，这说明短线动能正在重新强化。"  # ema + macd
+            + "对交易而言，若后续量能不掉队，可继续按趋势思路持有；若动能先行钝化，则应收缩仓位等待下一次入场点。"  # clarity + trading meaning
             + "RSI位于58，尚未超买，距离超买区域70仍有较大空间，中期动能偏强，未出现顶背离信号，动量维持正面。"  # rsi
+            + "\n\n### （二）波动与流动性\n\n"
             + "布林带开口扩大，价格运行于中轨448与上轨462之间，中轨提供动态支撑，带宽扩张表明波动率上升，价格贴近上轨运行。"  # boll
             + "成交量加权移动平均线（VWMA）确认放量突破有效，近5日成交量达到20日均量的1.4倍，资金持续流入，换手率维持在合理水平。"  # vwma
+            + "\n\n## 二、交易确认与执行计划\n\n"
+            + "当前确认信号仍强于风险信号，执行上以回踩确认和条件化风控为主。"
             + "若价格回踩448-450支撑区间不破则可加仓，若跌破440则止损减仓，上方第一阻力位462元，第二阻力位470元。"  # depth: if/then + support
             + "当前超买信号尚未触发，但需关注RSI死叉风险，若RSI下穿50则考虑减仓，MACD死叉为次要风控信号。建议维持偏多配置。"  # depth: overbought + crossover
         )

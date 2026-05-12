@@ -9,6 +9,10 @@ from etfagents.agents.utils.agent_utils import (
     get_news,
     normalize_chinese_role_terms,
 )
+from etfagents.agents.utils.report_leads import (
+    strip_meta_lead_prefixes,
+    strip_title_lead_paragraph,
+)
 from langchain_core.messages import AIMessage
 from etfagents.tool_report_utils import run_tool_report_chain
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
@@ -58,11 +62,9 @@ def create_social_media_analyst(llm):
             "Do not stay at the ETF ticker headline level. Expand the analysis to the ETF's heavy industries and weight stocks, then map those findings back to ETF pricing."
             " When writing in Chinese, use Chinese section titles such as '真实支撑、真实拖累与噪声区分'; do not use English labels like 'Genuine Support'."
             " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read.\n\n"
-            "The report must begin with a 2-4 sentence overview paragraph that summarizes: "
-            "(a) the overall sentiment tone (bullish / bearish / mixed / quiet), "
-            "(b) the single most impactful news event or catalyst and why it matters for this ETF, and "
-            "(c) whether current sentiment confirms or challenges the ETF's allocation thesis. "
-            "This overview must come before any section headings. Do NOT start with '本报告将…' or '以下是…' — state the conclusion directly."
+            "Start the visible report body directly at '一、总体研判' after the H1 title; do NOT insert a separate title lead, overview paragraph, or summary paragraph before section one.\n"
+            "For the 2-3 sentence lead under each top-level section, state the conclusion directly. "
+            "Do NOT use lead-ins such as '本部分结论表明', '该部分说明', '这一节意味着', 'This section shows', or similar meta phrasing."
             + get_language_instruction()
         )
 
@@ -95,6 +97,8 @@ def create_social_media_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
+        report = strip_meta_lead_prefixes(report) if report else report
+        report = strip_title_lead_paragraph(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

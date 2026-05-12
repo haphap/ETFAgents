@@ -12,6 +12,10 @@ from etfagents.agents.utils.agent_utils import (
     get_news,
     normalize_chinese_role_terms,
 )
+from etfagents.agents.utils.report_leads import (
+    strip_meta_lead_prefixes,
+    strip_title_lead_paragraph,
+)
 from langchain_core.messages import AIMessage
 from etfagents.tool_report_utils import run_tool_report_chain
 from etfagents.dataflows.config import get_config
@@ -52,11 +56,9 @@ def create_news_analyst(llm):
             "  （二）关键宏观风险与失效点: state what evidence would break the current base case\n"
             "四、总结 (Summary)\n\n"
             "End with a markdown summary table. Keep the framework coherent and ETF-specific rather than generic macro commentary.\n\n"
-            "The report must begin with a 2-4 sentence overview paragraph that summarizes: "
-            "(a) the current macro regime label (e.g. reflationary, stagflationary, goldilocks, tightening cycle), "
-            "(b) the single most important macro driver for this ETF right now and its direction of travel, "
-            "(c) whether the macro backdrop is favorable, headwind, or neutral for the ETF's dominant exposure. "
-            "This overview must come before any section headings. Do NOT start with '本报告将…' or '以下是…' — state the conclusion directly."
+            "Start the visible report body directly at '一、总体研判' after the H1 title; do NOT insert a separate title lead, overview paragraph, or summary paragraph before section one.\n"
+            "For the 2-3 sentence lead under each top-level section, state the conclusion directly. "
+            "Do NOT use lead-ins such as '本部分结论表明', '该部分说明', '这一节意味着', 'This section shows', or similar meta phrasing."
             + get_language_instruction()
         )
 
@@ -89,6 +91,8 @@ def create_news_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
+        report = strip_meta_lead_prefixes(report) if report else report
+        report = strip_title_lead_paragraph(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

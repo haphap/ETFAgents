@@ -9,8 +9,21 @@ from etfagents.agents.utils.agent_utils import (
     get_language_instruction,
     normalize_chinese_role_terms,
 )
+from etfagents.agents.utils.report_leads import (
+    ensure_title_lead_paragraph,
+    strip_meta_lead_prefixes,
+)
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.tool_report_utils import run_tool_report_chain
+
+_DEFAULT_TITLE_LEAD_ZH = (
+    "该ETF头部持仓的盈利修复、估值分化与权重集中度共同决定组合的收益来源与回撤来源。"
+    "当前更需要辨别哪些龙头仍能贡献业绩上修，哪些高权重个股正在放大估值压力，并据此判断ETF的配置弹性与风险暴露。"
+)
+_DEFAULT_TITLE_LEAD_EN = (
+    "The earnings path, valuation dispersion, and weight concentration of this ETF's top holdings jointly determine where returns come from and where drawdown risk sits. "
+    "The key task is to separate the holdings still delivering earnings upgrades from the heavyweight names increasing valuation pressure, then translate that into ETF sizing and risk exposure."
+)
 
 
 def create_etf_stock_research_analyst(llm):
@@ -49,6 +62,9 @@ def create_etf_stock_research_analyst(llm):
             "- **ETF Portfolio Impact (ETF组合影响)**: Explain which holdings support the ETF thesis, which drag on it, and which create hidden concentration or policy risk.\n"
             "- **Risk Factors (风险提示)**: Rank risks by frequency and severity, with broker citations.\n\n"
             "## Step 4: Structured Report\n"
+            "Use a single H1 title for the report. Immediately after that H1 title, write a 2-4 sentence overview paragraph as the title lead "
+            "that summarizes the main holdings concentration, the biggest broker consensus or divergence, and the ETF allocation implication. "
+            "This title lead must appear before any section headings.\n"
             "Write a comprehensive Markdown report. Each top-level section (一、二、三、四) must begin "
             "with 2-3 sentences summarizing the key conclusions of that section, "
             "then a blank line before sub-sections.\n\n"
@@ -79,6 +95,10 @@ def create_etf_stock_research_analyst(llm):
             "- Start the report directly with the most important consensus view or divergence across brokers on the ETF's top holdings. "
             "Do NOT begin with meta-descriptions such as '本报告将…', '以下是…', '本分析基于…', 'This report provides…', "
             "or any sentence that describes what the report will do rather than stating a result.\n"
+            "- For the title lead and the 2-3 sentence lead under each top-level section, state the conclusion directly. "
+            "Do NOT use lead-ins such as '本部分结论表明', '该部分说明', '这一节意味着', 'This section shows', or similar meta phrasing.\n"
+            "- Those lead paragraphs must sit one level above the sub-sections: synthesize concentration risk, earnings revision breadth, valuation pressure, and ETF attribution implications. "
+            "Do NOT simply restate the same points that will appear immediately below under the sub-sections.\n"
             "- Every sentence must convey a concrete data point, broker citation, or portfolio implication. "
             "Cut filler phrases like '深度挂钩', '全面覆盖', '值得注意的是', 'it is worth noting'.\n"
             "- Write as if presenting to a portfolio manager who wants the bottom line first."
@@ -114,6 +134,12 @@ def create_etf_stock_research_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
+        report = strip_meta_lead_prefixes(report) if report else report
+        report = ensure_title_lead_paragraph(
+            report,
+            _DEFAULT_TITLE_LEAD_ZH,
+            _DEFAULT_TITLE_LEAD_EN,
+        ) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

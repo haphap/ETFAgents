@@ -8,8 +8,21 @@ from etfagents.agents.utils.agent_utils import (
     get_language_instruction,
     normalize_chinese_role_terms,
 )
+from etfagents.agents.utils.report_leads import (
+    ensure_title_lead_paragraph,
+    strip_meta_lead_prefixes,
+)
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.tool_report_utils import run_tool_report_chain
+
+_DEFAULT_TITLE_LEAD_ZH = (
+    "商品链异常更像是对宏观与产业链矛盾的提前定价，关键在于辨别成本传导、库存压力与终端需求是否同向。"
+    "对ETF配置而言，真正重要的是识别哪些产业链正在受益于景气扩散，哪些链条则面临利润挤压、库存错配与预期修正。"
+)
+_DEFAULT_TITLE_LEAD_EN = (
+    "Commodity-chain anomalies are best read as early pricing signals of macro and industrial contradictions, with the real question being whether cost pass-through, inventory pressure, and end demand are moving in the same direction. "
+    "For ETF allocation, the priority is to identify which industry chains are benefiting from expansion and which are facing margin squeeze, inventory mismatch, and expectation resets."
+)
 
 
 def create_etf_structure_analyst(llm):
@@ -60,6 +73,9 @@ def create_etf_structure_analyst(llm):
             "Contracts with no anomaly signal may be omitted to keep the主线 focused — do not force-fill a "
             "'平稳观察组' if it would dilute the narrative.\n\n"
             "## Report structure\n"
+            "Use a single H1 title for the report. Immediately after that H1 title, write a 2-4 sentence overview paragraph as the title lead "
+            "that summarizes the dominant cross-commodity contradiction, the main macro read-through, and the ETF industry-chain implication. "
+            "This title lead must appear before any section headings.\n"
             "The report has three top-level sections (一、二、三). Each must begin with 2-3 sentences "
             "summarizing the key conclusions of that section, then a blank line before sub-sections. "
             "For every sub-section, follow the order 'judgment first -> evidence second -> ETF/industry implication last'; "
@@ -105,6 +121,10 @@ def create_etf_structure_analyst(llm):
             "STYLE RULES — strictly follow:\n"
             "- Start the report directly with the core conflict thesis in 一. "
             "Do NOT begin with meta-descriptions such as '本报告将…', '以下是…', '本分析基于…'.\n"
+            "- For the title lead and the 2-3 sentence lead under each top-level section, state the conclusion directly. "
+            "Do NOT use lead-ins such as '本部分结论表明', '该部分说明', '这一节意味着', 'This section shows', or similar meta phrasing.\n"
+            "- Those lead paragraphs must sit one level above the sub-sections: synthesize the dominant contradiction, transmission path, and ETF allocation meaning. "
+            "Do NOT simply restate the same contract observations that will appear immediately below under the sub-sections.\n"
             "- Every sentence must convey a concrete data point, anomaly, or allocation implication. "
             "Cut filler phrases like '深度挂钩', '全面覆盖', '值得注意的是', 'it is worth noting'.\n"
             "- Never output three or more naked data fragments in a row without immediately explaining the contradiction they reveal and the allocation meaning.\n"
@@ -144,6 +164,12 @@ def create_etf_structure_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
+        report = strip_meta_lead_prefixes(report) if report else report
+        report = ensure_title_lead_paragraph(
+            report,
+            _DEFAULT_TITLE_LEAD_ZH,
+            _DEFAULT_TITLE_LEAD_EN,
+        ) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 
