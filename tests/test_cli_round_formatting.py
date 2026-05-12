@@ -90,6 +90,36 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertLess(formatted.index("研究经理: 最终结论"), formatted.index("#### 反馈快照摘要"))
         self.assertNotIn("\n\n\n", formatted)
 
+    def test_prepare_report_markdown_inserts_blank_line_after_visible_heading(self):
+        formatted = _prepare_report_markdown(
+            "一、核心矛盾与主线判断\n本期核心矛盾在于成本传导尚未闭环。"
+        )
+
+        self.assertIn(
+            "一、核心矛盾与主线判断\n\n本期核心矛盾在于成本传导尚未闭环。",
+            formatted,
+        )
+
+    def test_prepare_report_markdown_splits_inline_visible_section_heading(self):
+        formatted = _prepare_report_markdown(
+            "一、总体研判\n\n本部分通过量化数据比对、机构情绪拆解与产业链传导机制，量化评估ETF持仓品种的风险收益比。二、深度分析\n\n后续正文。"
+        )
+
+        self.assertIn("风险收益比。\n\n二、深度分析", formatted)
+        self.assertIn("后续正文。", formatted)
+
+    def test_prepare_report_markdown_strips_exchange_only_pseudo_title_line(self):
+        formatted = _prepare_report_markdown(
+            "# 舆情与事件影响分析\n\n"
+            "一、SH 工业有色ETF万家：舆情与事件影响分析\n\n"
+            "## 一、总体研判\n\n"
+            "正文内容。"
+        )
+
+        self.assertNotIn("一、SH 工业有色ETF万家：舆情与事件影响分析", formatted)
+        self.assertIn("## 一、总体研判", formatted)
+        self.assertIn("正文内容。", formatted)
+
     def test_risk_management_history_supports_english_prefixes(self):
         risk_state = {
             "aggressive_history": (

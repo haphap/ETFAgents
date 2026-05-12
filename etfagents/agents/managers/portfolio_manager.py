@@ -32,11 +32,13 @@ def _portfolio_action_logic_instruction() -> str:
             "- 说明 ETF 结构、资金流、催化节奏、下行边界、仓位大小以及加仓 / 减仓 / 轮动 / 对冲触发条件如何共同导向你的决策。"
             " 每个触发条件必须引用上方报告中的具体数据——如价格、均线、成交量、份额变化、溢折价、持仓集中度、宏观指标等——并给出明确阈值。"
             ' 不能只写\u201c等待确认\u201d\u201c观察成交量\u201d\u201c关注资金流\u201d这类泛化表述，必须写明\u201c达到什么数值才算确认\u201d。'
+            ' 若没有上方报告中的具体价位、均线数值、量能基数或份额/溢折价数据，就不要直接给出加减仓动作。'
         )
     return (
         "- Explain how ETF structure, fund flows, catalyst timing, downside boundaries, position sizing, and add / reduce / rotate / hedge triggers lead to your decision."
         " Every trigger condition must quote specific data from the reports above — prices, moving averages, volume levels, share changes, premium-discount, holdings concentration, macro indicators — with explicit numeric thresholds."
         " Do not use vague phrases like 'wait for confirmation', 'watch volume', or 'monitor fund flows' without stating exactly what numeric level constitutes confirmation."
+        " If you cannot cite concrete price levels, moving-average values, volume baselines, or ETF share / premium-discount data from the reports above, do not issue add or reduce instructions."
     )
 
 
@@ -53,7 +55,8 @@ def _portfolio_detail_instruction(section: str) -> str:
             "  (a) 关键支撑和阻力位的具体价格或均线位置（引用市场报告中的技术指标，如50日均线、布林中轨、前低或密集成交区，并给出具体数值）；\n"
             '  (b) 成交量或资金流改善的具体阈值（相对近5日或20日均量达到什么倍数，如\u201c成交量需达到近20日均量的1.3倍以上\u201d）；\n'
             "  (c) ETF 结构验证的具体指标（如份额变化幅度、溢折价偏离、跟踪误差、前十大持仓集中度百分比）；\n"
-            '  (d) 宏观、风格或政策催化确认的具体条件（如利率决议时间、指数成分调整窗口、资金流向阈值）。'
+            '  (d) 宏观、风格或政策催化确认的具体条件（如利率决议时间、指数成分调整窗口、资金流向阈值）。\n'
+            ' 若缺少这些具体数值，就不要把“回踩确认后加仓”“等待放量后减仓”写成最终执行结论。'
         )
     if section == "conclusion":
         return (
@@ -66,7 +69,8 @@ def _portfolio_detail_instruction(section: str) -> str:
         "  (a) Specific price levels or moving-average positions for key support/resistance (reference the market report — e.g., 50-day SMA at X, Bollinger mid-band at Y, prior swing low at Z — with exact numbers);\n"
         "  (b) Specific volume or fund-flow improvement thresholds (e.g., 'volume must reach 1.3x the 20-day average of N shares');\n"
         "  (c) Specific ETF structure checks (e.g., share change magnitude, premium-discount deviation, tracking error, top-10 holdings concentration percentage);\n"
-        "  (d) Specific macro, style, or policy catalyst confirmation conditions (e.g., rate decision dates, index rebalancing windows, fund-flow thresholds)."
+        "  (d) Specific macro, style, or policy catalyst confirmation conditions (e.g., rate decision dates, index rebalancing windows, fund-flow thresholds).\n"
+        " If those concrete numbers are missing, do not turn 'wait for confirmation' into a final execution instruction."
     )
 
 

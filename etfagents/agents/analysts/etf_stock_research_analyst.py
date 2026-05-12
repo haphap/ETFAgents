@@ -11,6 +11,11 @@ from etfagents.agents.utils.agent_utils import (
 )
 from etfagents.agents.utils.report_leads import (
     ensure_title_lead_paragraph,
+    get_concise_heading_instruction,
+    get_no_title_instruction,
+    normalize_section_headings,
+    get_topic_and_term_style_instruction,
+    strip_report_title,
     strip_meta_lead_prefixes,
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
@@ -24,12 +29,32 @@ _DEFAULT_TITLE_LEAD_EN = (
     "The earnings path, valuation dispersion, and weight concentration of this ETF's top holdings jointly determine where returns come from and where drawdown risk sits. "
     "The key task is to separate the holdings still delivering earnings upgrades from the heavyweight names increasing valuation pressure, then translate that into ETF sizing and risk exposure."
 )
+_REPORT_TITLE_ZH = "头部持仓研究分析"
+_REPORT_TITLE_EN = "Top Holdings Research Analysis"
+_STOCK_HEADING_MAP = {
+    "一、总体研判": "一、核心持仓共识与分歧",
+    "（一）共识观点": "（一）共识主线",
+    "（二）核心分歧": "（二）分歧焦点",
+    "二、深度分析": "二、盈利、估值与机构态度",
+    "（一）量化对比": "（一）关键数据对比",
+    "（二）盈利预测共识": "（二）盈利预期对比",
+    "（三）估值分析": "（三）估值分层",
+    "（四）机构态度分布": "（四）机构观点分布",
+    "三、风险与催化": "三、催化、盲点与风险边界",
+    "（一）盲点与遗漏问题": "（一）未解问题",
+    "（二）关键催化剂": "（二）关键催化",
+    "（三）风险提示": "（三）风险边界",
+    "四、总结": "四、ETF影响与研报总览",
+    "（一）ETF组合影响": "（一）ETF组合影响",
+    "（二）研报总览表": "（二）研报总览表",
+}
 
 
 def create_etf_stock_research_analyst(llm):
     def etf_stock_research_node(state):
         current_date = state["trade_date"]
-        instrument_context = build_instrument_context(get_asset_symbol(state))
+        asset_symbol = get_asset_symbol(state)
+        instrument_context = build_instrument_context(asset_symbol)
         tools = [get_etf_holdings, get_etf_top_holdings_research]
 
         system_message = (
@@ -62,27 +87,30 @@ def create_etf_stock_research_analyst(llm):
             "- **ETF Portfolio Impact (ETF组合影响)**: Explain which holdings support the ETF thesis, which drag on it, and which create hidden concentration or policy risk.\n"
             "- **Risk Factors (风险提示)**: Rank risks by frequency and severity, with broker citations.\n\n"
             "## Step 4: Structured Report\n"
-            "Use a single H1 title for the report. Immediately after that H1 title, write a 2-4 sentence overview paragraph as the title lead "
+            "Write a 2-4 sentence overview paragraph before any section headings "
             "that summarizes the main holdings concentration, the biggest broker consensus or divergence, and the ETF allocation implication. "
-            "This title lead must appear before any section headings.\n"
-            "Write a comprehensive Markdown report. Each top-level section (一、二、三、四) must begin "
-            "with 2-3 sentences summarizing the key conclusions of that section, "
-            "then a blank line before sub-sections.\n\n"
-            "一、总体研判 (Overview)\n"
-            "  （一）共识观点 (Consensus View)\n\n"
-            "  （二）核心分歧 (Key Divergences)\n\n"
-            "二、深度分析 (In-Depth Analysis)\n"
-            "  （一）量化对比 (Quantitative Comparison)\n\n"
-            "  （二）盈利预测共识 (Earnings Estimate Consensus)\n\n"
-            "  （三）估值分析 (Valuation Analysis)\n\n"
-            "  （四）机构态度分布 (Broker Attitude Distribution)\n\n"
-            "三、风险与催化 (Risks & Catalysts)\n"
-            "  （一）盲点与遗漏问题 (Blind Spots & Missing Questions)\n\n"
-            "  （二）关键催化剂 (Key Catalysts)\n\n"
-            "  （三）风险提示 (Risk Factors)\n\n"
-            "四、总结 (Summary)\n"
-            "  （一）ETF组合影响 (ETF Portfolio Impact)\n\n"
-            "  （二）研报总览表 (Summary Table)\n\n"
+             "This lead paragraph must appear before any section headings.\n"
+             + get_no_title_instruction() + "\n"
+             + get_topic_and_term_style_instruction() + "\n"
+             + get_concise_heading_instruction() + "\n"
+             "Write a comprehensive Markdown report. Each top-level section (一、二、三、四) must begin "
+             "with 2-3 sentences summarizing the key conclusions of that section, "
+             "then a blank line before sub-sections.\n\n"
+             "一、核心持仓共识与分歧 (Consensus & Divergence in Core Holdings)\n"
+             "  （一）共识主线 (Consensus Thesis)\n\n"
+             "  （二）分歧焦点 (Divergence Focus)\n\n"
+             "二、盈利、估值与机构态度 (Earnings, Valuation & Broker Stance)\n"
+             "  （一）关键数据对比 (Key Metric Comparison)\n\n"
+             "  （二）盈利预期对比 (Earnings Expectation Comparison)\n\n"
+             "  （三）估值分层 (Valuation Layers)\n\n"
+             "  （四）机构观点分布 (Broker View Distribution)\n\n"
+             "三、催化、盲点与风险边界 (Catalysts, Blind Spots & Risk Boundaries)\n"
+             "  （一）未解问题 (Open Questions)\n\n"
+             "  （二）关键催化 (Key Catalysts)\n\n"
+             "  （三）风险边界 (Risk Boundaries)\n\n"
+             "四、ETF影响与研报总览 (ETF Impact & Research Digest)\n"
+             "  （一）ETF组合影响 (ETF Portfolio Impact)\n\n"
+             "  （二）研报总览表 (Summary Table)\n\n"
             "## Quality Requirements\n"
             "- EVERY claim must cite the specific broker(s) and their supporting evidence or data.\n"
             "- When brokers disagree, present both sides and explain the ROOT CAUSE of disagreement.\n"
@@ -135,6 +163,8 @@ def create_etf_stock_research_analyst(llm):
         )
         report = normalize_chinese_role_terms(report) if report else report
         report = strip_meta_lead_prefixes(report) if report else report
+        report = strip_report_title(report) if report else report
+        report = normalize_section_headings(report, _STOCK_HEADING_MAP) if report else report
         report = ensure_title_lead_paragraph(
             report,
             _DEFAULT_TITLE_LEAD_ZH,

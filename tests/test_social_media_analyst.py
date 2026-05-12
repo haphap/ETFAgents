@@ -71,5 +71,5 @@ class SocialMediaAnalystTests(unittest.TestCase):
         self.assertIn("top-weight holdings", system_msg)
         self.assertIn("macro events", system_msg)
         self.assertIn("support, cap, or drag ETF price action", system_msg)
-        self.assertIn("真实支撑、真实拖累与噪声区分", system_msg)
+        self.assertIn("真实支撑与短期噪声", system_msg)
         self.assertIn("do not use English labels like 'Genuine Support'", system_msg)

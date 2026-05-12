@@ -179,6 +179,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("关键支撑", system_prompt)
         self.assertIn("成交量", system_prompt)
         self.assertIn("份额变化", system_prompt)
+        self.assertIn("若没有上方报告里的具体价位、均线数值、量能基数或份额/溢折价数据，就不要下加仓、减仓或回补指令", system_prompt)
         self.assertIn("do not simply restate the execution steps", system_prompt)
         self.assertIn("do not repeat the thesis sentence verbatim", system_prompt)
         self.assertIn("failure conditions, rebalance triggers, cut or restore rules", system_prompt)
@@ -536,7 +537,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
 
         self.assertIn("50日均线、布林中轨、前低或密集成交区", rendered)
         self.assertIn("较近5日均量放大15%—20%", rendered)
-        self.assertIn("份额扩张、溢折价改善、资金流确认或放量突破确认", rendered)
+        self.assertIn("份额扩张、溢折价改善、资金流确认或放量突破", rendered)
         self.assertIn("20日均量的1.3倍以上", rendered)
 
     def test_trader_rendering_strengthens_simple_thesis(self):
@@ -613,6 +614,39 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("三、 调仓与风控机制", rendered)
         self.assertIn("维持当前仓位，不主动追涨或杀跌", rendered)
 
+    def test_trader_rendering_expands_execution_plan_missing_price_anchor(self):
+        rendered = render_trader_proposal(
+            TraderProposal(
+                thesis="当前主线未被证伪，但执行必须更看重量价与产品层确认。",
+                execution_plan=(
+                    "先以计划目标仓位的20%—30%建立试探仓，只有当价格重新站稳市场分析中给出的首个关键阻力/支撑转换位，"
+                    "且成交量至少较近5日均量放大15%—20%并连续两个交易时段维持，才继续分批加仓。"
+                ),
+                risk_management="若跌破关键支撑且放量，则及时收缩仓位。",
+                rating=PortfolioRating.BUY,
+            )
+        )
+
+        self.assertIn("日成交量连续2个交易日达到近20日均量的1.2—1.3倍", rendered)
+        self.assertIn("ETF 份额继续净申购或溢折价不再走阔", rendered)
+
+    def test_portfolio_decision_rendering_expands_vague_execution_guidance(self):
+        rendered = render_portfolio_decision(
+            PortfolioDecision(
+                debate_conclusion="中性观点更稳妥，但主线尚未被证伪。",
+                action_logic="当前的明确动作是持有，等待更扎实的量价与产品层验证后再决定是否扩大仓位。",
+                positioning_recommendation="目标仓位先维持在15%至20%，等待关键位确认和成交量改善后再考虑分批加仓。",
+                rating=PortfolioRating.HOLD,
+                snapshot_stance="持有",
+                snapshot_new_and_rebuttal="新增了对仓位上限与验证链条的约束。",
+                snapshot_to_verify="继续跟踪关键均线、成交量和份额变化。",
+            )
+        )
+
+        self.assertIn("最终配置建议: **持有**", rendered)
+        self.assertIn("成交量回到近期均量上方", rendered)
+        self.assertIn("份额或资金流同步改善后再考虑上调一个档位", rendered)
+
     def test_portfolio_decision_rendering_rewrites_conflicting_reduce_guidance(self):
         rendered = render_portfolio_decision(
             PortfolioDecision(
@@ -630,7 +664,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertEqual(rendered.count("最终配置建议: **持有**"), 1)
         self.assertNotIn("建议评级为减持", rendered)
         self.assertNotIn("分批减持当前持仓", rendered)
-        self.assertIn("维持当前仓位", rendered)
+        self.assertIn("维持现有基准仓位", rendered)
 
     def test_portfolio_decision_rendering_expands_overly_brief_sections(self):
         rendered = render_portfolio_decision(
@@ -671,6 +705,29 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertEqual(rendered.count("最终配置建议: **增持**"), 1)
         self.assertNotIn("最终配置建议: 增持。", rendered)
         self.assertIn("在净值回落至2.08元支撑带时分批建立15%至20%的初始底仓", rendered)
+
+    def test_portfolio_decision_strips_restatement_sentence_and_awkward_ben_combo(self):
+        rendered = render_portfolio_decision(
+            PortfolioDecision(
+                debate_conclusion="综合宏观与产业共振证据，本组合对516160.SH的明确建议为增持。",
+                action_logic="综合量价与份额变化，本组合当前更适合维持增配节奏。",
+                positioning_recommendation=(
+                    "综合宏观与产业共振证据，本组合对516160.SH的明确建议为增持。"
+                    "目标仓位先控制在20%至25%，只有在价格重新站稳50日均线且成交量回到20日均量上方后再考虑继续加仓。"
+                ),
+                rating=PortfolioRating.OVERWEIGHT,
+                snapshot_stance="增持",
+                snapshot_new_and_rebuttal="新增了对量价与份额验证的约束。",
+                snapshot_to_verify="继续跟踪50日均线、成交量和份额变化。",
+            )
+        )
+
+        self.assertEqual(rendered.count("最终配置建议: **增持**"), 1)
+        self.assertNotIn("本组合对516160.SH的明确建议为增持", rendered)
+        self.assertNotIn("本组合当前", rendered)
+        self.assertNotIn("明确建议为增持", rendered)
+        self.assertIn("当前组合更适合维持增配节奏", rendered)
+        self.assertIn("目标仓位先控制在20%至25%", rendered)
 
     def test_portfolio_decision_rendering_strips_prompt_leakage(self):
         rendered = render_portfolio_decision(
@@ -743,6 +800,17 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertEqual(normalized.count("## 持仓建议"), 1)
         self.assertEqual(normalized.count("最终配置建议: **持有**"), 1)
         self.assertIn("维持当前仓位，等待价格、量能与份额变化共同确认后再决定是否调整敞口。", normalized)
+
+    def test_manager_normalization_dedupes_inline_rating_labels_in_positioning_section(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "建议评级：增持。最终配置建议: 增持\n"
+            "目标仓位控制在20%至25%，只有在量能与份额同步改善后才继续加仓。\n"
+        )
+
+        self.assertNotIn("建议评级：增持", normalized)
+        self.assertEqual(normalized.count("最终配置建议: 增持"), 1)
+        self.assertIn("目标仓位控制在20%至25%", normalized)
 
     def test_manager_normalization_fills_empty_positioning_section(self):
         normalized = normalize_chinese_manager_terms(

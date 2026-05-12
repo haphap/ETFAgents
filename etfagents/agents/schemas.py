@@ -25,7 +25,7 @@ class PortfolioRating(str, Enum):
 class ResearchPlan(BaseModel):
     debate_conclusion: str = Field(description="A detailed synthesis paragraph comparing both sides, naming the strongest evidence from each, and explaining the decisive weakness in the losing view for ETF allocation.")
     action_logic: str = Field(description="A detailed evidence-to-allocation paragraph linking ETF structure, flows, catalysts, downside boundaries, and confirmation or invalidation triggers to the final decision.")
-    positioning_recommendation: str = Field(description="Actionable ETF allocation guidance with execution details, exposure sizing, concrete add or reduce conditions, rebalance triggers, and monitoring priorities.")
+    positioning_recommendation: str = Field(description="Actionable ETF allocation guidance with execution details, exposure sizing, concrete add or reduce conditions, rebalance triggers, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language.")
     rating: PortfolioRating = Field(description="Final research-manager rating for ETF allocation.")
     snapshot_stance: str = Field(description="Concise stance for the feedback snapshot.")
     snapshot_new_and_rebuttal: str = Field(description="What was newly added this round and how it rebuts the opposing case.")
@@ -34,7 +34,7 @@ class ResearchPlan(BaseModel):
 
 class TraderProposal(BaseModel):
     thesis: str = Field(description="Concise ETF allocation thesis explaining the proposed action.")
-    execution_plan: str = Field(description="Concrete ETF allocation plan with support or resistance references, volume or fund-flow thresholds, catalyst triggers, and explicit add, reduce, rotate, or exit conditions.")
+    execution_plan: str = Field(description="Concrete ETF allocation plan with support or resistance references, exact price or moving-average levels, volume or fund-flow thresholds, catalyst triggers, ETF share or premium-discount checks, and explicit add, reduce, rotate, or exit conditions. Do not say 'wait for confirmation' without numeric thresholds.")
     risk_management: str = Field(description="Risk controls, rebalance or invalidation signals, monitoring thresholds, and the actions to take when those thresholds are breached.")
     rating: PortfolioRating = Field(description="Trader recommendation for ETF exposure.")
 
@@ -42,7 +42,7 @@ class TraderProposal(BaseModel):
 class PortfolioDecision(BaseModel):
     debate_conclusion: str = Field(description="A detailed synthesis of the full risk debate across all perspectives, explicitly comparing aggressive, conservative, and neutral cases and stating why the losing view was overruled for ETF allocation.")
     action_logic: str = Field(description="A detailed portfolio-manager paragraph showing how ETF evidence leads to sizing, hedging, rebalance triggers, and risk controls.")
-    positioning_recommendation: str = Field(description="Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities.")
+    positioning_recommendation: str = Field(description="Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language.")
     rating: PortfolioRating = Field(description="Final portfolio-manager rating for ETF allocation.")
     snapshot_stance: str = Field(description="Concise stance for the feedback snapshot.")
     snapshot_new_and_rebuttal: str = Field(description="What was newly added this round and how it rebutted competing views.")
@@ -75,6 +75,16 @@ def _expected_rating_text(rating: PortfolioRating) -> str:
 
 def _compact_text(text: str) -> str:
     return re.sub(r"[\s:：,，。.!！？/\-—_()（）]+", "", text or "").strip().lower()
+
+
+def _normalize_portfolio_chinese_phrasing(text: str) -> str:
+    content = (text or "").strip()
+    if not content or not _is_chinese_output():
+        return content
+    normalized = content.replace("本组合对", "对")
+    normalized = normalized.replace("本组合当前", "当前组合")
+    normalized = normalized.replace("本组合", "组合层面")
+    return normalized
 
 
 def _is_placeholder_like(text: str) -> bool:
@@ -166,6 +176,43 @@ def _is_recommendation_only_segment(text: str) -> bool:
     return any(re.match(pattern, compact, re.IGNORECASE) for pattern in patterns)
 
 
+def _is_recommendation_restating_sentence(text: str) -> bool:
+    sentence = (text or "").strip()
+    if not sentence:
+        return False
+    if _is_chinese_output():
+        return bool(
+            re.match(
+                r"^(?:综合[^。！？!?]{0,40}证据[，,])?"
+                r"(?:(?:本组合|组合层面|当前组合|本次配置|对(?:该ETF|[A-Z0-9.\-]+)|对于(?:该ETF|[A-Z0-9.\-]+))[^。！？!?]{0,24})?"
+                r"(?:明确)?(?:建议|判断|结论|评级|配置建议)(?:为|是)?\s*\**(?:买入|增持|持有|减持|卖出)\**[。！!？?]*$",
+                sentence,
+                re.IGNORECASE,
+            )
+        )
+    return bool(
+        re.match(
+            r"^(?:based on [^.?!]{0,60},\s*)?"
+            r"(?:(?:for|on)\s+[A-Z0-9.\-]+[^.?!]{0,24})?"
+            r"(?:the )?(?:clear )?(?:recommendation|view|stance|allocation recommendation|decision)\s*(?:is|remains)?\s*\**(?:buy|overweight|hold|underweight|sell)\**[.!?]*$",
+            sentence,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _strip_recommendation_restating_sentences(text: str) -> str:
+    content = (text or "").strip()
+    if not content:
+        return ""
+    kept = [
+        sentence
+        for sentence in _split_sentences(content)
+        if not _is_recommendation_restating_sentence(sentence)
+    ]
+    return "\n".join(kept).strip()
+
+
 def _strip_leading_section_headings(text: str, headings: tuple[str, ...]) -> str:
     content = (text or "").strip()
     if not content or not headings:
@@ -230,6 +277,7 @@ def _sanitize_positioning_recommendation(text: str, rating: PortfolioRating) -> 
     content = strip_manager_instruction_leakage((text or "").strip())
     if not content:
         return _default_positioning_guidance(rating)
+    content = _normalize_portfolio_chinese_phrasing(content)
 
     lines = []
     for raw_line in re.split(r"\n+", content):
@@ -288,6 +336,8 @@ def _sanitize_positioning_recommendation(text: str, rating: PortfolioRating) -> 
         if not sentence:
             continue
         if _contains_explicit_rating_marker(sentence) and _is_recommendation_only_segment(sentence):
+            continue
+        if _is_recommendation_restating_sentence(sentence):
             continue
         segments.append(sentence)
     cleaned = "\n".join(segments).strip()
@@ -440,19 +490,19 @@ def _default_trading_thesis(rating: PortfolioRating) -> str:
 def _default_execution_plan(rating: PortfolioRating) -> str:
     if _is_chinese_output():
         mapping = {
-            PortfolioRating.BUY: "先以计划目标仓位的20%—30%建立试探仓，只有当价格重新站稳市场分析中给出的首个关键阻力/支撑转换位，且成交量至少较近5日均量放大15%—20%并连续两个交易时段维持，才继续分批加仓。若核心催化只是消息预期而未带来订单、业绩指引或放量突破的确认，就暂停追价，等待回踩确认后再执行下一笔。",
-            PortfolioRating.OVERWEIGHT: "在保留现有底仓的前提下择机增配，但每一笔加仓都要绑定清晰的确认条件：价格需要守住市场报告中反复验证的支撑区，成交量至少恢复到20日均量附近，且新增催化要从“预期”变成“可验证进展”。若量价配合不足或催化兑现延迟，就把加仓节奏放慢，只保留已经验证过的核心仓位。",
-            PortfolioRating.HOLD: "维持当前仓位，不主动追涨或杀跌。这里的关键支撑应优先参考市场分析中反复出现的50日均线、布林中轨、前低或密集成交区；只有当价格在这些位置附近连续2个交易时段止跌企稳，且成交量至少较近5日均量放大15%—20%或明显回到20日均量上方，才视为成交量改善，可以考虑把持有转为试探性加仓。若新增催化只是消息层面的预期而未带来份额扩张、溢折价改善、资金流确认或放量突破确认，则继续维持仓位，不提前放大敞口。",
-            PortfolioRating.UNDERWEIGHT: "优先分两到三笔降低敞口，第一笔先处理高弹性但验证最弱的仓位，剩余仓位则观察价格是否在关键支撑附近出现缩量反弹。只有当风险收益比明显改善、价格重新站回主要均线或催化出现实质落地时，才考虑小比例回补；若反弹过程中成交量不足或冲高回落，则继续执行减仓而不是抄底。",
-            PortfolioRating.SELL: "以退出仓位或避免入场为主，执行上不要等待模糊修复信号。若价格已跌破主要支撑并伴随放量，就应直接完成清仓；即便后续出现技术性反弹，也要先看到基本面修复、量价结构重建和催化兑现三者同时出现，才考虑重新纳入观察名单，而不是过早回补。",
+            PortfolioRating.BUY: "先以计划目标仓位的20%—30%建立试探仓，后续每一笔只增加10%—15%。只有当价格重新站回市场报告已经写明的首个关键位——优先是50日均线、布林中轨、前高突破位或前低回踩位的具体数值——且日成交量连续2个交易日达到近20日均量的1.2—1.3倍，同时 ETF 份额继续净申购或溢折价不再走阔，才继续加仓。若催化只是消息预期而未兑现为订单、业绩指引、份额扩张或放量突破，就暂停追价，等待回踩该关键位不破后再执行下一笔。",
+            PortfolioRating.OVERWEIGHT: "在保留现有底仓的前提下择机增配，但每一笔加仓都要绑定清晰的关键数据：价格至少守住市场报告中的主支撑位或50日均线，日成交量回到近20日均量的1.1—1.2倍以上，且 ETF 份额、净申购或溢折价改善没有转弱。单笔增配宜控制在目标仓位的10%—15%，只有当新增催化从“预期”变成“可验证进展”并连续两个交易时段保持量价承接时，才继续上调；若量价配合不足或催化兑现延迟，就把超配部分压回到底仓。",
+            PortfolioRating.HOLD: "维持当前仓位，不主动追涨或杀跌。这里的关键支撑必须优先落到市场分析里已经给出的具体数据，例如50日均线、布林中轨、前低或密集成交区的实际位置；只有当价格在该位置附近连续2个交易时段止跌企稳，日成交量至少较近5日均量放大15%—20%且明显回到20日均量附近，同时份额或资金流不再恶化，才考虑把持有转为试探性加仓。若新增催化只是消息层面的预期而未带来份额扩张、溢折价改善、资金流确认或放量突破，则继续维持仓位，不提前放大敞口。",
+            PortfolioRating.UNDERWEIGHT: "优先分2—3笔降低敞口，每一笔先减掉目标仓位的10%—15%，第一笔先处理高弹性但验证最弱的仓位。若反弹连市场报告中的50日均线、20日均线或上一压力位都收不回，且日成交量仍低于近20日均量的0.9—1.0倍或 ETF 份额继续净赎回，就继续执行减仓；只有当价格重新收复主要均线、日成交量回到20日均量的1.1—1.2倍、份额转为连续净申购，才考虑小比例回补，而不是在缩量反弹里抢跑。",
+            PortfolioRating.SELL: "以退出仓位或避免入场为主，执行上不要等待模糊修复信号。若价格已跌破市场报告中的主支撑/止损位，且单日放量达到近20日均量的1.3倍以上，或 ETF 溢折价继续恶化、份额净赎回扩大，就应直接完成清仓；即便后续出现技术性反弹，也要先看到基本面修复、价格重新站回关键均线、日成交量恢复到20日均量上方以及催化兑现三者同时出现，才考虑重新纳入观察名单。",
         }
         return mapping[rating]
     mapping = {
-        PortfolioRating.BUY: "Start with only 20%-30% of the intended target size and add only after price reclaims the first key support/resistance pivot from the market report, volume runs at least 15%-20% above the recent 5-day average, and the catalyst moves from rumor to verifiable progress. If the move lacks volume or catalyst confirmation, pause the build and wait for a cleaner retest.",
-        PortfolioRating.OVERWEIGHT: "Add selectively from the core position, but tie each add to explicit confirmation: price must keep holding the key support zone, volume should recover toward or above the 20-day average, and the catalyst must show measurable follow-through rather than narrative alone. If that confirmation fades, slow the add pace and keep only the already-validated core exposure.",
-        PortfolioRating.HOLD: "Maintain current exposure and avoid forcing new trades. Treat the key support zone as the 50-day moving average, Bollinger mid-band, prior swing low, or other repeated support area from the market report; only reconsider adding if price stabilizes there for two trading sessions and volume improves by roughly 15%-20% versus the recent 5-day average or clearly recovers above the 20-day average. If the catalyst remains only a headline without share growth, premium-discount improvement, fund-flow confirmation, or breakout confirmation, keep the allocation unchanged.",
-        PortfolioRating.UNDERWEIGHT: "Trim exposure in two or three steps, starting with the weakest-conviction slice, and only consider a small rebuild if price reclaims major averages, risk-reward resets, and catalysts regain measurable traction. If rebounds are weak or volume stays thin, keep trimming rather than trying to catch the turn too early.",
-        PortfolioRating.SELL: "Prioritize exiting or staying out without waiting for vague repair signals. If price has already broken core support on heavy volume, complete the exit; only revisit the name after fundamentals, catalysts, and price structure all show repair together.",
+        PortfolioRating.BUY: "Start with only 20%-30% of the intended target size and keep later adds to 10%-15% increments. Add only after price reclaims the first concrete market level already named in the market report — ideally the actual 50-day average, Bollinger mid-band, prior breakout, or retest level — while daily volume holds at roughly 1.2x-1.3x the 20-day average for two sessions and ETF share creation or premium-discount behavior does not deteriorate. If the catalyst is still only narrative rather than verifiable progress, pause the build and wait for a successful retest of that level.",
+        PortfolioRating.OVERWEIGHT: "Add selectively from the core position, but tie each add to explicit confirmation: price must hold the market report's main support or moving-average anchor, volume should recover to roughly 1.1x-1.2x the 20-day average, and ETF share or premium-discount signals should remain orderly. Keep each add controlled rather than one-shot, and if that confirmation fades, cut the pace and keep only the already-validated core exposure.",
+        PortfolioRating.HOLD: "Maintain current exposure and avoid forcing new trades. Treat the key support zone as the concrete 50-day moving average, Bollinger mid-band, prior swing low, or repeated support area already cited in the market report; only reconsider adding if price stabilizes there for two trading sessions, volume improves by roughly 15%-20% versus the recent 5-day average and recovers toward the 20-day average, and ETF share or fund-flow conditions stop worsening. If the catalyst remains only a headline without share growth, premium-discount improvement, fund-flow confirmation, or breakout confirmation, keep the allocation unchanged.",
+        PortfolioRating.UNDERWEIGHT: "Trim exposure in two or three steps, starting with the weakest-conviction slice and reducing roughly 10%-15% of target exposure per step. If rebounds fail to reclaim the market report's key averages or resistance levels while volume stays below roughly 0.9x-1.0x the 20-day average or ETF shares keep shrinking, continue trimming; only consider a small rebuild after price, volume, and ETF flow repair arrive together.",
+        PortfolioRating.SELL: "Prioritize exiting or staying out without waiting for vague repair signals. If price has already broken the market report's core support or stop level on roughly 1.3x the 20-day average volume, or ETF share and premium-discount behavior keep worsening, complete the exit; only revisit the name after fundamentals, catalysts, and price structure all repair together.",
     }
     return mapping[rating]
 
@@ -613,16 +663,44 @@ def _trader_thesis_needs_detail(text: str) -> bool:
     return word_count < 30 or sentence_count < 3
 
 
+def _has_market_level_anchor(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    patterns = (
+        r"\d+(?:\.\d+)?\s*(?:元|美元|港元|点|bp|bps)[^。\n]{0,28}(?:50日均线|20日均线|10日均线|200日均线|均线|布林中轨|布林上轨|布林下轨|布林|支撑|阻力|前低|前高|密集成交区|VWMA|ATR|净值|SMA|EMA)",
+        r"(?:50日均线|20日均线|10日均线|200日均线|均线|布林中轨|布林上轨|布林下轨|布林|支撑|阻力|前低|前高|密集成交区|VWMA|ATR|净值|SMA|EMA)[^。\n]{0,28}\d+(?:\.\d+)?\s*(?:元|美元|港元|点|bp|bps)",
+        r"(?:50日均线|20日均线|10日均线|200日均线|布林中轨|布林上轨|布林下轨|VWMA|ATR|SMA|EMA)",
+    )
+    return any(re.search(pattern, stripped, re.IGNORECASE) for pattern in patterns)
+
+
+def _has_volume_or_flow_threshold(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped:
+        return False
+    patterns = (
+        r"(?:成交量|成交额|量能|5日均量|20日均量|日均量|净流入|净流出|净申购|净赎回|份额|溢折价|跟踪误差|volume|turnover|fund flow|share change|share creation|premium-discount|tracking error)[^。\n]{0,32}\d+(?:\.\d+)?\s*(?:%|％|倍|x|亿元|亿|万份|亿份|bp|bps|天|日)",
+        r"\d+(?:\.\d+)?\s*(?:%|％|倍|x|亿元|亿|万份|亿份|bp|bps|天|日)[^。\n]{0,32}(?:成交量|成交额|量能|5日均量|20日均量|日均量|净流入|净流出|净申购|净赎回|份额|溢折价|跟踪误差|volume|turnover|fund flow|share change|share creation|premium-discount|tracking error)",
+    )
+    return any(re.search(pattern, stripped, re.IGNORECASE) for pattern in patterns)
+
+
 def _missing_execution_thresholds(text: str) -> bool:
     stripped = (text or "").strip()
     if not stripped:
         return True
-    return not bool(
+    has_any_numeric_threshold = bool(
         re.search(
-            r"\d+(?:\.\d+)?(?:%|％|倍|元|美元|港元|日|天|周|月|SMA|EMA|ATR|VWMA|均线|布林)",
+            r"\d+(?:\.\d+)?(?:%|％|倍|元|美元|港元|日|天|周|月|SMA|EMA|ATR|VWMA|均线|布林|bp|bps|x)",
             stripped,
             re.IGNORECASE,
         )
+    )
+    return not (
+        has_any_numeric_threshold
+        and _has_market_level_anchor(stripped)
+        and _has_volume_or_flow_threshold(stripped)
     )
 
 
@@ -807,22 +885,33 @@ def render_trader_proposal(plan: TraderProposal) -> str:
 
 def render_portfolio_decision(plan: PortfolioDecision) -> str:
     recommendation = localize_rating_term(plan.rating.value)
-    debate_conclusion = _sanitize_section(
+    debate_conclusion = _strip_recommendation_restating_sentences(_normalize_portfolio_chinese_phrasing(_sanitize_section(
         plan.debate_conclusion,
         _default_debate_conclusion(plan.rating),
         plan.rating,
         require_detail=True,
-    )
-    action_logic = _sanitize_section(
+    )))
+    action_logic = _strip_recommendation_restating_sentences(_normalize_portfolio_chinese_phrasing(_sanitize_section(
         plan.action_logic,
         _default_action_logic(plan.rating),
         plan.rating,
         check_action_conflict=True,
         require_detail=True,
-    )
+    )))
     positioning_recommendation = _sanitize_positioning_recommendation(
         plan.positioning_recommendation, plan.rating
     )
+    detailed_positioning = _default_research_positioning_guidance(plan.rating)
+    if _compact_text(positioning_recommendation) == _compact_text(
+        _default_positioning_guidance(plan.rating)
+    ):
+        positioning_recommendation = detailed_positioning
+    elif _section_needs_detail(positioning_recommendation) or _missing_execution_thresholds(
+        positioning_recommendation
+    ):
+        positioning_recommendation = _merge_sparse_section_with_default(
+            positioning_recommendation, detailed_positioning
+        )
     if _is_chinese_output():
         final_line = f"最终配置建议: **{recommendation}**"
     else:

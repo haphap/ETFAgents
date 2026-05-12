@@ -257,13 +257,12 @@ class StockResearchAnalystTests(unittest.TestCase):
 
 
 class ETFIndustryResearchAnalystTests(unittest.TestCase):
-    def test_title_lead_before_first_section_is_removed(self):
+    def test_title_lead_before_first_section_is_backfilled(self):
         llm = _CapturingLLM("Report content")
         node = create_etf_industry_research_analyst(llm)
 
         raw_report = (
             "# ETF持仓映射行业研究分析报告\n\n"
-            "该ETF的行业暴露主要由核心重仓股映射出的主导产业驱动。\n\n"
             "## 一、总体研判\n\n"
             "行业景气回升，重仓暴露集中。"
         )
@@ -281,9 +280,13 @@ class ETFIndustryResearchAnalystTests(unittest.TestCase):
             )
 
         rendered = result["holdings_industry_report"]
-        self.assertNotIn("该ETF的行业暴露主要由核心重仓股映射出的主导产业驱动", rendered)
-        self.assertIn("# ETF持仓映射行业研究分析报告", rendered)
-        self.assertIn("一、总体研判", rendered)
+        self.assertIn("该ETF的行业暴露强弱取决于重仓股映射出的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。", rendered)
+        self.assertFalse(rendered.startswith("#"))
+        self.assertIn("一、行业主线与分歧焦点", rendered)
+        self.assertLess(
+            rendered.index("该ETF的行业暴露强弱取决于重仓股映射出的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。"),
+            rendered.index("一、行业主线与分歧焦点"),
+        )
 
     def test_section_lead_meta_prefix_is_stripped(self):
         llm = _CapturingLLM("Report content")
@@ -318,8 +321,40 @@ class ETFIndustryResearchAnalystTests(unittest.TestCase):
         self.assertNotIn("本部分结论表明", rendered)
         self.assertIn("该ETF重仓新能源与金融科技，对无风险利率下行更敏感。", rendered)
         self.assertIn("政策催化仍在延续，行业景气尚未逆转。", rendered)
+        self.assertIn("一、行业主线与分歧焦点", rendered)
+        self.assertIn("（一）共识主线", rendered)
+        self.assertIn("二、景气、政策与产业链验证", rendered)
+        self.assertIn("（一）景气与价格对比", rendered)
 
-    def test_prompt_starts_directly_at_first_section_and_forbids_meta_section_leads(self):
+    def test_industry_noise_paragraph_is_stripped(self):
+        llm = _CapturingLLM("Report content")
+        node = create_etf_industry_research_analyst(llm)
+
+        raw_report = (
+            "主导行业景气仍在修复，配置逻辑没有被破坏。\n\n"
+            "## 一、总体研判\n\n"
+            "行业分类噪声干扰：兴业银锡（000426.SZ）在数据源中被归类为贵金属，但其核心主业为铅锌锡冶炼。贵金属研报大量聚焦金银宏观定价，缺乏对锡主产国具体验证。\n\n"
+            "真正需要跟踪的是有色链供需和价格传导是否继续改善。"
+        )
+
+        with patch(
+            "etfagents.agents.analysts.etf_industry_research_analyst.run_tool_report_chain",
+            return_value=(AIMessage(content=raw_report), raw_report),
+        ):
+            result = node(
+                {
+                    "asset_symbol": "159949.SZ",
+                    "trade_date": "2026-04-01",
+                    "messages": [HumanMessage(content="Analyze 159949.SZ")],
+                }
+            )
+
+        rendered = result["holdings_industry_report"]
+        self.assertNotIn("行业分类噪声干扰", rendered)
+        self.assertNotIn("数据源中被归类", rendered)
+        self.assertIn("真正需要跟踪的是有色链供需和价格传导是否继续改善。", rendered)
+
+    def test_prompt_requires_title_lead_and_forbids_meta_section_leads(self):
         llm = _CapturingLLM("Report content")
         node = create_etf_industry_research_analyst(llm)
 
@@ -342,8 +377,13 @@ class ETFIndustryResearchAnalystTests(unittest.TestCase):
             )
 
         system_msg = captured_args.get("system_message", "")
-        self.assertIn("do NOT insert a separate title lead", system_msg)
+        self.assertIn("overview paragraph before any section headings", system_msg)
+        self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Do NOT use lead-ins such as '本部分结论表明'", system_msg)
+        self.assertIn("compact 1-2 sentence lead paragraph", system_msg)
+        self.assertIn("Never discuss data-source classification noise", system_msg)
+        self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
+        self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
 class BrokerResearchTushareTests(unittest.TestCase):
     """Tests for the tushare broker reports data function."""

@@ -2369,6 +2369,29 @@ def _default_manager_positioning_content(rating: str) -> str:
     return mapping.get(rating, mapping["HOLD"])
 
 
+def _dedupe_manager_rating_only_lines(lines: list[str]) -> list[str]:
+    rating_lines = [
+        (index, line.strip())
+        for index, line in enumerate(lines)
+        if _RATING_ONLY_LINE_PATTERN.match(line.strip())
+    ]
+    if len(rating_lines) <= 1:
+        return lines
+
+    preferred_index = rating_lines[0][0]
+    for index, stripped in reversed(rating_lines):
+        if stripped.startswith(("最终配置建议", "最终交易建议")):
+            preferred_index = index
+            break
+
+    deduped = []
+    for index, line in enumerate(lines):
+        if any(index == candidate for candidate, _ in rating_lines) and index != preferred_index:
+            continue
+        deduped.append(line)
+    return deduped
+
+
 def _dedupe_and_fill_manager_sections(text: str) -> str:
     lines = (text or "").splitlines()
     if not lines:
@@ -2425,6 +2448,7 @@ def _dedupe_and_fill_manager_sections(text: str) -> str:
     for section in merged_sections:
         if section["key"] not in {"持仓建议", "研究结论"}:
             continue
+        section["lines"] = _dedupe_manager_rating_only_lines(section["lines"])
         has_non_rating_content = any(
             line.strip() and not _RATING_ONLY_LINE_PATTERN.match(line.strip())
             for line in section["lines"]
@@ -2482,6 +2506,11 @@ def normalize_chinese_manager_terms(text: str) -> str:
         body = body.replace(source, target)
     body = re.sub(
         r"(?<=\S)\s+(?=(?:建议评级|评级|配置评级|研究结论|执行倾向|最终配置建议|最终交易建议)\s*[:：])",
+        "\n",
+        body,
+    )
+    body = re.sub(
+        r"(?<=[。！？!?；;])\s*(?=(?:建议评级|评级|配置评级|研究结论|执行倾向|最终配置建议|最终交易建议)\s*[:：])",
         "\n",
         body,
     )
@@ -2653,6 +2682,34 @@ def build_instrument_context(ticker: str) -> str:
         "preserving any exchange suffix (e.g. `.TO`, `.L`, `.HK`, `.T`). "
         "Never spell ticker digits in Chinese and never replace `.` with `点`."
     )
+
+
+def build_report_title(
+    ticker: str,
+    chinese_subject: str,
+    english_subject: str,
+    instrument_name: str = "",
+) -> str:
+    """Build a consistent analyst report title with ticker-first formatting."""
+    normalized_ticker = str(ticker or "").strip()
+    invalid_display_tickers = {"SH", "SZ", "BJ", "HK", "SS", "SSE", "SZSE", "BSE", "HKG", "SEHK"}
+    if normalized_ticker.upper() in invalid_display_tickers:
+        normalized_ticker = ""
+    elif "." in normalized_ticker:
+        code, suffix = normalized_ticker.rsplit(".", 1)
+        if not code.strip() or suffix.upper() in invalid_display_tickers and code.upper() in invalid_display_tickers:
+            normalized_ticker = ""
+    name = (instrument_name or "").strip()
+    if not name and normalized_ticker and normalized_ticker.lower() != "unknown":
+        name = (_resolve_company_name(normalized_ticker) or "").strip()
+
+    base = f"{normalized_ticker} {name}".strip() if name else normalized_ticker
+    if not base:
+        return chinese_subject if _is_chinese_output() else english_subject
+    if _is_chinese_output():
+        return f"{base}：{chinese_subject}"
+    return f"{base}: {english_subject}"
+
 
 def create_msg_delete():
     def delete_messages(state):

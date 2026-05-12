@@ -24,6 +24,8 @@ def _trader_detail_instruction() -> str:
             '以及什么样的宏观、风格或结构催化确认才足以支持加仓、持有、减仓、轮动或退出（如利率决议时间、指数成分调整窗口、资金流向阈值）；'
             '还需要说明 ETF 结构验证的具体指标（如份额变化幅度、溢折价偏离百分比、跟踪误差、前十大持仓集中度百分比）。'
             '这两部分必须写成完整分析段落，并给出清晰阈值与触发条件。'
+            '若没有上方报告里的具体价位、均线数值、量能基数或份额/溢折价数据，就不要下加仓、减仓或回补指令。'
+            '优先写成“2.08元的50日均线、2.05元的布林中轨、成交量回到20日均量的1.3倍、份额连续2日净申购”这种可执行格式。'
         )
     return (
         "For the ETF allocation execution plan and risk controls, do not use generic phrases such as 'wait for support', 'watch volume', or 'monitor fund flows' without explanation. "
@@ -32,7 +34,8 @@ def _trader_detail_instruction() -> str:
         "what level of volume or fund-flow recovery counts as improvement (e.g., 'volume must reach 1.3x the 20-day average of N shares'), "
         "what specific macro, style, or structure catalyst confirmation would justify adding, holding, reducing, rotating, or exiting (e.g., rate decision dates, index rebalancing windows, fund-flow thresholds), "
         "and what ETF structure checks matter (e.g., share change magnitude, premium-discount deviation percentage, tracking error, top-10 holdings concentration percentage). "
-        "Write these sections as full analytical paragraphs with explicit thresholds and trigger conditions."
+        "Write these sections as full analytical paragraphs with explicit thresholds and trigger conditions. "
+        "If you cannot cite concrete price levels, moving-average values, volume baselines, or ETF share / premium-discount data from the reports above, do not issue add, reduce, or rebuild instructions."
     )
 
 

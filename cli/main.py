@@ -46,6 +46,7 @@ from etfagents.agents.utils.agent_utils import (
     strip_feedback_snapshot,
     strip_role_prefix,
 )
+from etfagents.agents.utils.report_leads import strip_exchange_only_pseudo_titles
 from etfagents.agents.utils.state_keys import get_state_value
 
 console = Console()
@@ -224,8 +225,55 @@ def _normalize_report_heading_numbering(content: str) -> str:
     return heading_pattern.sub(_replace, text)
 
 
+_REPORT_HEADING_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+\S")
+_VISIBLE_SECTION_LINE_PATTERN = re.compile(
+    r"^\s*(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*\S"
+)
+_INLINE_VISIBLE_SECTION_PATTERN = re.compile(
+    r"([。！？；：:])\s*((?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*\S)"
+)
+
+
+def _is_report_heading_line(line: str) -> bool:
+    stripped = (line or "").strip()
+    if not stripped:
+        return False
+    return bool(
+        _REPORT_HEADING_LINE_PATTERN.match(stripped)
+        or _VISIBLE_SECTION_LINE_PATTERN.match(stripped)
+    )
+
+
+def _split_inline_section_headings(content: str) -> str:
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+    return _INLINE_VISIBLE_SECTION_PATTERN.sub(r"\1\n\n\2", text)
+
+
+def _ensure_report_heading_spacing(content: str) -> str:
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        return ""
+
+    lines = text.split("\n")
+    spaced: list[str] = []
+    for index, line in enumerate(lines):
+        spaced.append(line)
+        if index == len(lines) - 1:
+            continue
+        if not _is_report_heading_line(line):
+            continue
+        if lines[index + 1].strip():
+            spaced.append("")
+    return "\n".join(spaced)
+
+
 def _prepare_report_markdown(content: str, target_min_level: Optional[int] = None) -> str:
-    text = _normalize_report_heading_numbering(content)
+    text = strip_exchange_only_pseudo_titles(content)
+    text = _split_inline_section_headings(text)
+    text = _normalize_report_heading_numbering(text)
+    text = _ensure_report_heading_spacing(text)
     if target_min_level is not None:
         text = _relevel_markdown_headings(text, target_min_level)
     return collapse_blank_lines(text)

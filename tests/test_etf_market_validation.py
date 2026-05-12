@@ -99,7 +99,7 @@ class TestExplanatoryClarity(unittest.TestCase):
 
 
 class TestCompactStructure(unittest.TestCase):
-    def test_exact_two_section_structure_passes(self):
+    def test_exact_three_section_structure_passes(self):
         report = (
             "# ETF市场与资金流分析报告\n\n"
             "偏多格局，量价配合尚未破坏。\n\n"
@@ -109,6 +109,8 @@ class TestCompactStructure(unittest.TestCase):
             "### （二）波动与流动性\n\n"
             "内容\n\n"
             "## 二、交易确认与执行计划\n\n"
+            "内容\n\n"
+            "## 三、关键价位与条件情景推演\n\n"
             "内容"
         )
         self.assertTrue(_etf_report_has_compact_structure(report))
@@ -153,6 +155,9 @@ class TestNeedsRewrite(unittest.TestCase):
             + "当前确认信号仍强于风险信号，执行上以回踩确认和条件化风控为主。"
             + "若价格回踩448-450支撑区间不破则可加仓，若跌破440则止损减仓，上方第一阻力位462元，第二阻力位470元。"  # depth: if/then + support
             + "当前超买信号尚未触发，但需关注RSI死叉风险，若RSI下穿50则考虑减仓，MACD死叉为次要风控信号。建议维持偏多配置。"  # depth: overbought + crossover
+            + "\n\n## 三、关键价位与条件情景推演\n\n"
+            + "448-450元是本轮结构的第一支撑带，因为这里同时对应20日均线与近阶段成交密集区，若回踩后成交量没有明显失速、VWMA继续抬升，基准情景仍是震荡消化后上攻462-470元阻力带，这意味着趋势资金仍在承接，操作上可以继续持有并等待回踩加仓。"
+            + "反之，若价格放量跌破448元并进一步失守440元，同时MACD柱状图收缩、RSI回落至50下方，则应把情景切换为结构转弱，优先减仓而非继续追随原有偏多判断。"
         )
         self.assertFalse(_etf_market_report_needs_rewrite(report))
 
