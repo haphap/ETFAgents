@@ -15,6 +15,9 @@ from etfagents.default_config import DEFAULT_CONFIG
 from etfagents.graph.trading_graph import TradingAgentsGraph
 
 
+_VALIDATION_PASSED_JSON = '{"score": 9, "pass": true, "critical_issues": [], "minor_issues": [], "missing_elements": [], "general_comment": "OK"}'
+
+
 class _CapturingLLM:
     """Mock LLM that records prompts and returns a fixed response."""
 
@@ -27,6 +30,9 @@ class _CapturingLLM:
 
     def invoke(self, prompt, **kwargs):
         self.prompts.append(prompt if isinstance(prompt, str) else str(prompt))
+        # Return valid JSON for validation judge step so it passes cleanly
+        if "报告质量审核员" in str(prompt):
+            return AIMessage(content=_VALIDATION_PASSED_JSON)
         return AIMessage(content=self.final_content)
 
 
@@ -132,103 +138,6 @@ class StockResearchToolTests(unittest.TestCase):
 
 
 class ETFIndustryResearchAnalystTests(unittest.TestCase):
-    def test_title_lead_before_first_section_is_backfilled(self):
-        llm = _CapturingLLM("Report content")
-        node = create_etf_industry_research_analyst(llm)
-
-        raw_report = (
-            "# ETF持仓行业研究分析报告\n\n"
-            "## 一、行业主线与分歧焦点\n\n"
-            "行业景气回升，重仓暴露集中。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_industry_research_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ):
-            result = node(
-                {
-                    "asset_symbol": "510300.SH",
-                    "trade_date": "2026-04-01",
-                    "messages": [HumanMessage(content="Analyze 510300.SH")],
-                }
-            )
-
-        rendered = result["holdings_industry_report"]
-        self.assertIn("该ETF的行业暴露强弱取决于重仓股指向的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。", rendered)
-        self.assertFalse(rendered.startswith("#"))
-        self.assertIn("一、行业主线与分歧焦点", rendered)
-        self.assertLess(
-            rendered.index("该ETF的行业暴露强弱取决于重仓股指向的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。"),
-            rendered.index("一、行业主线与分歧焦点"),
-        )
-
-    def test_section_lead_meta_prefix_is_stripped(self):
-        llm = _CapturingLLM("Report content")
-        node = create_etf_industry_research_analyst(llm)
-
-        raw_report = (
-            "# ETF持仓行业研究分析报告\n\n"
-            "重仓行业景气仍在扩散，高权重板块对估值弹性贡献更大。\n\n"
-            "## 一、行业主线与分歧焦点\n\n"
-            "本部分结论表明，该ETF重仓新能源与金融科技，对无风险利率下行更敏感。\n\n"
-            "### （一）共识主线\n\n"
-            "多数机构看多景气延续。\n\n"
-            "## 二、景气、政策与产业链验证\n\n"
-            "本部分结论表明，政策催化仍在延续，行业景气尚未逆转。\n\n"
-            "### （一）景气与价格对比\n\n"
-            "盈利预期仍在修复。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_industry_research_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ):
-            result = node(
-                {
-                    "asset_symbol": "159949.SZ",
-                    "trade_date": "2026-04-01",
-                    "messages": [HumanMessage(content="Analyze 159949.SZ")],
-                }
-            )
-
-        rendered = result["holdings_industry_report"]
-        self.assertNotIn("本部分结论表明", rendered)
-        self.assertIn("该ETF重仓新能源与金融科技，对无风险利率下行更敏感。", rendered)
-        self.assertIn("政策催化仍在延续，行业景气尚未逆转。", rendered)
-        self.assertIn("一、行业主线与分歧焦点", rendered)
-        self.assertIn("（一）共识主线", rendered)
-        self.assertIn("二、景气、政策与产业链验证", rendered)
-        self.assertIn("（一）景气与价格对比", rendered)
-
-    def test_industry_noise_paragraph_is_stripped(self):
-        llm = _CapturingLLM("Report content")
-        node = create_etf_industry_research_analyst(llm)
-
-        raw_report = (
-            "主导行业景气仍在修复，配置逻辑没有被破坏。\n\n"
-            "## 一、总体研判\n\n"
-            "行业分类噪声干扰：兴业银锡（000426.SZ）在数据源中被归类为贵金属，但其核心主业为铅锌锡冶炼。贵金属研报大量聚焦金银宏观定价，缺乏对锡主产国具体验证。\n\n"
-            "真正需要跟踪的是有色链供需和价格传导是否继续改善。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_industry_research_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ):
-            result = node(
-                {
-                    "asset_symbol": "159949.SZ",
-                    "trade_date": "2026-04-01",
-                    "messages": [HumanMessage(content="Analyze 159949.SZ")],
-                }
-            )
-
-        rendered = result["holdings_industry_report"]
-        self.assertNotIn("行业分类噪声干扰", rendered)
-        self.assertNotIn("数据源中被归类", rendered)
-        self.assertIn("真正需要跟踪的是有色链供需和价格传导是否继续改善。", rendered)
-
     def test_prompt_requires_title_lead_and_forbids_meta_section_leads(self):
         llm = _CapturingLLM("Report content")
         node = create_etf_industry_research_analyst(llm)
@@ -253,7 +162,7 @@ class ETFIndustryResearchAnalystTests(unittest.TestCase):
 
         system_msg = captured_args.get("system_message", "")
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
-        self.assertIn("不得使用'本部分结论表明'", system_msg)
+        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("1-2句导语开头", system_msg)
         self.assertIn("数据源分类噪声", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)

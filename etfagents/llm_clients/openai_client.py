@@ -1,6 +1,8 @@
 import os
-from typing import Any, Optional
+from typing import Any, List, Optional
 
+from langchain_core.messages import BaseMessage
+from langchain_core.prompt_values import ChatPromptValue
 from langchain_openai import ChatOpenAI
 
 from .base_client import BaseLLMClient, normalize_content
@@ -26,12 +28,84 @@ _PASSTHROUGH_KWARGS = (
 
 # Provider base URLs and API key env vars
 _PROVIDER_CONFIG = {
+    "deepseek": ("https://api.deepseek.com", "DEEPSEEK_API_KEY"),
     "xai": ("https://api.x.ai/v1", "XAI_API_KEY"),
     "minimax": ("https://api.minimax.chat/v1", "MINIMAX_API_KEY"),
     "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
     "ollama": ("http://localhost:11434/v1", None),
     "vllm": ("http://127.0.0.1:8020/v1", None),
 }
+
+
+def _input_to_messages(input: Any) -> List[BaseMessage]:
+    """Convert input to a list of messages for DeepSeekChatOpenAI."""
+    if isinstance(input, ChatPromptValue):
+        return input.to_messages()
+    return ChatOpenAI._input_to(input)
+
+
+class DeepSeekChatOpenAI(NormalizedChatOpenAI):
+    """ChatOpenAI subclass for DeepSeek models.
+
+    DeepSeek's thinking-mode models (deepseek-reasoner) return reasoning
+    in a separate ``reasoning_content`` field.  This class:
+    * Captures ``reasoning_content`` from the response into
+      ``AIMessage.additional_kwargs`` so callers can inspect it.
+    * Echoes ``reasoning_content`` back in subsequent request messages so
+      the API does not reject multi-turn conversations (HTTP 400).
+    * Blocks ``with_structured_output`` for ``deepseek-reasoner`` because
+      that model does not support ``tool_choice``.
+    """
+
+    def _input_to(self, input: Any) -> List[BaseMessage]:
+        return _input_to_messages(input)
+
+    # --- response handling ---
+
+    def _create_chat_result(self, response: dict):
+        result = super()._create_chat_result(response)
+        # Promote reasoning_content into additional_kwargs for each
+        # generation so downstream code can access the chain-of-thought.
+        for gen in result.generations:
+            msg = gen.message
+            if not msg or not hasattr(msg, "additional_kwargs"):
+                continue
+            for choice in response.get("choices", []):
+                rc = (choice.get("message") or {}).get("reasoning_content")
+                if rc:
+                    msg.additional_kwargs["reasoning_content"] = rc
+                    break
+        return result
+
+    # --- request payload ---
+
+    def _get_request_payload(
+        self, input, *, stop=None, **kwargs
+    ) -> dict:
+        payload = super()._get_request_payload(input, stop=stop, **kwargs)
+        # Echo reasoning_content back for multi-turn conversations.
+        # DeepSeek returns HTTP 400 if a previous assistant message
+        # contained reasoning_content but the follow-up omits it.
+        for msg in payload.get("messages", []):
+            if not isinstance(msg, dict):
+                continue
+            rc = (
+                (msg.get("additional_kwargs") or {}).get("reasoning_content")
+                or (msg.get("message_kwargs") or {}).get("reasoning_content")
+            )
+            if rc:
+                msg["reasoning_content"] = rc
+        return payload
+
+    # --- structured output guard ---
+
+    def with_structured_output(self, schema, **kwargs):
+        if self.model == "deepseek-reasoner":
+            raise NotImplementedError(
+                "deepseek-reasoner does not support tool_choice / structured output. "
+                "Use deepseek-chat or another model for structured extraction."
+            )
+        return super().with_structured_output(schema, **kwargs)
 
 
 class OpenAIClient(BaseLLMClient):
@@ -80,6 +154,10 @@ class OpenAIClient(BaseLLMClient):
         # all model families. Third-party providers use Chat Completions.
         if self.provider == "openai":
             llm_kwargs["use_responses_api"] = True
+
+        # DeepSeek: use custom subclass for reasoning_content round-trip
+        if self.provider == "deepseek":
+            return DeepSeekChatOpenAI(**llm_kwargs)
 
         return NormalizedChatOpenAI(**llm_kwargs)
 

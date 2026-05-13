@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.runnables import RunnableLambda
 
 from etfagents.agents.analysts.etf_industry_research_analyst import (
     create_etf_industry_research_analyst,
@@ -24,18 +25,23 @@ from etfagents.agents.analysts.etf_stock_research_analyst import (
 from etfagents.agents.utils.agent_utils import build_report_title
 from etfagents.agents.utils.report_leads import (
     ensure_h1_title,
-    normalize_chinese_section_headings,
-    strip_meta_lead_prefixes,
     strip_report_title,
 )
 
 
-class _CapturingLLM:
+class _CapturingLLM(RunnableLambda):
+    """Mock LLM that works with both tool-calling chains and direct prompt | llm."""
+
+    def __init__(self):
+        super().__init__(func=self._invoke)
+        self._prompts = []
+
+    def _invoke(self, prompt, **kwargs):
+        self._prompts.append(prompt)
+        return AIMessage(content="Report content")
+
     def bind_tools(self, tools):
         return self
-
-    def invoke(self, prompt, **kwargs):
-        return AIMessage(content="Report content")
 
 
 class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
@@ -121,7 +127,7 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("检索伪影", system_msg)
         self.assertIn("每项论点必须引用", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
-        self.assertIn("不得使用'本部分结论表明'", system_msg)
+        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("If the structure does not provide a heading, write one that is brief, forceful, and immediately usable", system_msg)
@@ -176,7 +182,7 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
         self.assertIn("反面示例（禁止）", system_msg)
         self.assertIn("正面示例（目标风格）", system_msg)
         self.assertIn("冲突驱动", system_msg)
-        self.assertIn("不得使用'本部分结论表明'", system_msg)
+        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("不要写'本节锁定'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
@@ -224,7 +230,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("核心交易信号", system_msg)
         self.assertIn("结论依据", system_msg)
         self.assertIn("without any sub-heading", system_msg)
-        self.assertIn("must NOT have a separate lead paragraph or hat paragraph", system_msg)
+        self.assertIn("每个一级章节（一、二、三）以2-3句导语开头", system_msg)
         self.assertIn("段落式表达", system_msg)
         self.assertIn("反面示例（禁止）", system_msg)
         self.assertIn("正面示例（目标风格）", system_msg)
@@ -299,34 +305,6 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         self.assertNotIn("# 舆情与事件影响分析", cleaned)
         self.assertTrue(cleaned.startswith("导语内容。"))
 
-    def test_strip_meta_lead_prefixes_removes_direct_present_and_through_phrases(self):
-        report = (
-            "本部分结论直接呈现全市场主流机构对工业有色核心品种供需格局的基准判断。\n"
-            "本部分通过量化数据比对、机构情绪拆解与产业链传导机制，量化评估ETF持仓品种的风险收益比。\n"
-            "本节锁定制造业复苏与成本倒逼的剪刀差，判断利润修复能否落到中游。"
-        )
-        cleaned = strip_meta_lead_prefixes(report)
-        self.assertNotIn("本部分结论直接呈现", cleaned)
-        self.assertNotIn("本部分通过", cleaned)
-        self.assertNotIn("本节锁定", cleaned)
-        self.assertIn("全市场主流机构对工业有色核心品种供需格局的基准判断。", cleaned)
-        self.assertIn("量化数据比对、机构情绪拆解与产业链传导机制，量化评估ETF持仓品种的风险收益比。", cleaned)
-        self.assertIn("制造业复苏与成本倒逼的剪刀差，判断利润修复能否落到中游。", cleaned)
-
-    def test_normalize_chinese_section_headings_dedupes_top_level_and_strips_english(self):
-        report = (
-            "一、核心持仓共识与分歧 (Consensus & Divergence in Core Holdings)\n\n"
-            "一、核心持仓共识与分歧 (Consensus & Divergence in Core Holdings)\n\n"
-            "（一）共识主线 (Consensus Thesis)\n\n"
-            "高权重个股盈利分化继续扩大。"
-        )
-
-        cleaned = normalize_chinese_section_headings(report)
-
-        self.assertEqual(cleaned.count("一、核心持仓共识与分歧"), 1)
-        self.assertNotIn("Consensus & Divergence in Core Holdings", cleaned)
-        self.assertNotIn("（一）共识主线 (Consensus Thesis)", cleaned)
-        self.assertIn("（一）共识主线", cleaned)
 
 
 class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
@@ -353,7 +331,7 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("不得使用'本部分结论表明'", system_msg)
+        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、暴露与宏观主线", system_msg)
@@ -395,30 +373,43 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         self.assertFalse(rendered.startswith("#"))
         self.assertNotIn("一、SZ：宏观框架分析", rendered)
 
-    def test_social_prompt_requires_title_lead_before_first_section(self):
-        llm = _CapturingLLM()
-        node = create_social_media_analyst(llm)
+    @patch("etfagents.agents.analysts.social_media_analyst.get_news_for_queries")
+    @patch("etfagents.agents.analysts.social_media_analyst.get_global_news")
+    @patch("etfagents.agents.analysts.social_media_analyst.get_news")
+    @patch("etfagents.agents.analysts.social_media_analyst.get_etf_holdings")
+    @patch("etfagents.agents.analysts.social_media_analyst.get_etf_info")
+    def test_social_prompt_requires_title_lead_before_first_section(
+        self, mock_info, mock_holdings, mock_news, mock_global, mock_queries
+    ):
+        mock_info.func.return_value = "ETF profile"
+        mock_holdings.func.return_value = "name,weight\n紫金矿业,8.5%\n"
+        mock_news.return_value = "## news"
+        mock_global.return_value = "## global"
+        mock_queries.return_value = "## holdings"
 
         captured = {}
 
-        def _mock_run(*args, **kwargs):
-            captured["system_message"] = kwargs.get("system_message", "")
-            return (AIMessage(content="Report content"), "Report content")
+        def capturing_func(input, config=None):
+            text = str(input)
+            if "报告质量审核员" not in text and "prompt" not in captured:
+                captured["prompt"] = text
+            if "报告质量审核员" in text:
+                return AIMessage(content='{"score": 9, "pass": true, "critical_issues": [], "minor_issues": [], "missing_elements": [], "general_comment": "OK"}')
+            return AIMessage(content="Report content")
 
-        with patch(
-            "etfagents.agents.analysts.social_media_analyst.run_tool_report_chain",
-            side_effect=_mock_run,
-        ):
-            node(
-                {
-                    "company_of_interest": "510300.SH",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 510300.SH")],
-                }
-            )
+        llm = RunnableLambda(capturing_func)
+        node = create_social_media_analyst(llm)
 
-        system_msg = captured["system_message"]
-        self.assertIn("不得使用'本部分结论表明'", system_msg)
+        node(
+            {
+                "company_of_interest": "510300.SH",
+                "trade_date": "2026-04-30",
+                "messages": [HumanMessage(content="Analyze 510300.SH")],
+            }
+        )
+
+        system_msg = captured.get("prompt", "")
+        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、情绪主线与权重影响", system_msg)
@@ -428,318 +419,6 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
 
-class EtfAnalystTitleLeadBackfillTests(unittest.TestCase):
-    def test_stock_report_missing_title_lead_is_backfilled(self):
-        llm = _CapturingLLM()
-        node = create_etf_stock_research_analyst(llm)
-
-        raw_report = (
-            "# ETF头部持仓研究分析报告\n\n"
-            "## 一、核心持仓共识与分歧\n\n"
-            "高权重个股盈利分化继续扩大。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_stock_research_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ):
-            result = node(
-                {
-                    "company_of_interest": "516650.SH",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 516650.SH")],
-                }
-            )
-
-        rendered = result["top_holdings_report"]
-        self.assertIn("该ETF头部持仓的盈利修复、估值分化与权重集中度共同决定组合的收益来源与回撤来源。", rendered)
-        self.assertIn("一、核心持仓共识与分歧", rendered)
-        self.assertLess(
-            rendered.index("该ETF头部持仓的盈利修复、估值分化与权重集中度共同决定组合的收益来源与回撤来源。"),
-            rendered.index("一、核心持仓共识与分歧"),
-        )
-
-    def test_stock_report_dedupes_repeated_top_level_heading_and_strips_english(self):
-        llm = _CapturingLLM()
-        node = create_etf_stock_research_analyst(llm)
-
-        raw_report = (
-            "一、核心持仓共识与分歧 (Consensus & Divergence in Core Holdings)\n\n"
-            "一、核心持仓共识与分歧 (Consensus & Divergence in Core Holdings)\n\n"
-            "（一）共识主线 (Consensus Thesis)\n\n"
-            "高权重个股盈利分化继续扩大。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_stock_research_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ):
-            result = node(
-                {
-                    "company_of_interest": "516650.SH",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 516650.SH")],
-                }
-            )
-
-        rendered = result["top_holdings_report"]
-        self.assertEqual(rendered.count("一、核心持仓共识与分歧"), 1)
-        self.assertNotIn("Consensus & Divergence in Core Holdings", rendered)
-        self.assertNotIn("（一）共识主线 (Consensus Thesis)", rendered)
-        self.assertIn("（一）共识主线", rendered)
-
-    def test_structure_report_missing_title_lead_is_backfilled(self):
-        llm = _CapturingLLM()
-        node = create_etf_structure_analyst(llm)
-
-        raw_report = (
-            "# ETF中观大宗商品分析报告\n\n"
-            "## 一、核心矛盾与主线判断\n\n"
-            "上游成本压力与下游利润承压并存。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_structure_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ):
-            result = node(
-                {
-                    "company_of_interest": "159980.SZ",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 159980.SZ")],
-                }
-            )
-
-        rendered = result["meso_commodity_report"]
-        self.assertIn("本期中观商品主线不在单一品种的涨跌，而在复苏预期能否穿透库存与成本倒逼", rendered)
-        self.assertLess(
-            rendered.index("本期中观商品主线不在单一品种的涨跌，而在复苏预期能否穿透库存与成本倒逼"),
-            rendered.index("一、核心矛盾与主线判断"),
-        )
-
-    def test_structure_report_strips_section_self_reference_phrases(self):
-        llm = _CapturingLLM()
-        node = create_etf_structure_analyst(llm)
-
-        raw_report = (
-            "一、核心矛盾与主线判断\n\n"
-            "本节锁定制造业复苏与成本倒逼的剪刀差，铜与热卷强势能否传导到焦煤去库决定利润修复能否成立。\n\n"
-            "二、矛盾推演\n\n"
-            "本节讨论化工链负反馈如何压制中游盈利。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_structure_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ):
-            result = node(
-                {
-                    "company_of_interest": "159980.SZ",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 159980.SZ")],
-                }
-            )
-
-        rendered = result["meso_commodity_report"]
-        self.assertNotIn("本节锁定", rendered)
-        self.assertNotIn("本节讨论", rendered)
-        self.assertIn("制造业复苏与成本倒逼的剪刀差，铜与热卷强势能否传导到焦煤去库决定利润修复能否成立。", rendered)
-        self.assertIn("化工链负反馈如何压制中游盈利。", rendered)
-
-    def test_market_report_missing_title_lead_is_backfilled(self):
-        llm = _CapturingLLM()
-        node = create_etf_market_analyst(llm)
-
-        raw_report = (
-            "# ETF市场与资金流分析报告\n\n"
-            "## 一、趋势与动量\n\n"
-            "价格仍运行在关键均线之上。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_market_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ), patch(
-            "etfagents.agents.analysts.etf_market_analyst._etf_market_report_needs_rewrite",
-            return_value=False,
-        ):
-            result = node(
-                {
-                    "company_of_interest": "159949.SZ",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 159949.SZ")],
-                }
-            )
-
-        rendered = result["market_flow_report"]
-        self.assertIn("该ETF当前量价结构更接近趋势延续还是震荡回撤", rendered)
-        self.assertLess(
-            rendered.index("该ETF当前量价结构更接近趋势延续还是震荡回撤"),
-            rendered.index("一、趋势与动量"),
-        )
-
-    def test_news_report_missing_title_lead_is_backfilled(self):
-        llm = _CapturingLLM()
-        node = create_macro_analyst(llm)
-
-        raw_report = (
-            "# ETF宏观框架分析报告\n\n"
-            "## 一、暴露与宏观主线\n\n"
-            "利率与政策预期继续主导配置方向。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.macro_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ):
-            result = node(
-                {
-                    "company_of_interest": "510300.SH",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 510300.SH")],
-                }
-            )
-
-        rendered = result["macro_regime_report"]
-        self.assertIn("该ETF当前的宏观胜负手取决于利率路径、信用环境、政策节奏与核心暴露方向能否形成同向共振。", rendered)
-        self.assertFalse(rendered.startswith("#"))
-        self.assertIn("一、暴露与宏观主线", rendered)
-        self.assertLess(
-            rendered.index("该ETF当前的宏观胜负手取决于利率路径、信用环境、政策节奏与核心暴露方向能否形成同向共振。"),
-            rendered.index("一、暴露与宏观主线"),
-        )
-
-    def test_sentiment_report_missing_title_lead_is_backfilled(self):
-        llm = _CapturingLLM()
-        node = create_social_media_analyst(llm)
-
-        raw_report = (
-            "# ETF舆情与事件影响分析报告\n\n"
-            "## 一、情绪主线与权重影响\n\n"
-            "主导板块事件催化仍强于产品层面噪声。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.social_media_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ):
-            result = node(
-                {
-                    "company_of_interest": "510300.SH",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 510300.SH")],
-                }
-            )
-
-        rendered = result["catalyst_sentiment_report"]
-        self.assertIn("当前影响该ETF定价的关键变量不在产品 headline 数量，而在主导行业与高权重成分股的事件催化能否继续向净值传导。", rendered)
-        self.assertFalse(rendered.startswith("#"))
-        self.assertIn("一、情绪主线与权重影响", rendered)
-        self.assertLess(
-            rendered.index("当前影响该ETF定价的关键变量不在产品 headline 数量，而在主导行业与高权重成分股的事件催化能否继续向净值传导。"),
-            rendered.index("一、情绪主线与权重影响"),
-        )
-
-    def test_market_report_strips_h1_title(self):
-        llm = _CapturingLLM()
-        node = create_etf_market_analyst(llm)
-
-        raw_report = (
-            "# ETF市场与资金流分析报告\n\n"
-            "## 一、市场结构与量价诊断\n\n"
-            "价格仍运行在关键均线之上。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_market_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ), patch(
-            "etfagents.agents.analysts.etf_market_analyst._etf_market_report_needs_rewrite",
-            return_value=False,
-        ):
-            result = node(
-                {
-                    "company_of_interest": "159949.SZ",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 159949.SZ")],
-                }
-            )
-
-        rendered = result["market_flow_report"]
-        self.assertFalse(rendered.startswith("#"))
-        self.assertIn("一、市场结构与量价诊断", rendered)
-
-    def test_market_report_strips_conclusion_basis_label(self):
-        llm = _CapturingLLM()
-        node = create_etf_market_analyst(llm)
-
-        raw_report = (
-            "# ETF市场与资金流分析报告\n\n"
-            "偏多格局延续，但确认信号仍需要量能配合。\n\n"
-            "## 一、市场结构与量价诊断\n\n"
-            "### （一）趋势与动量\n\n"
-            "**结论依据**：10日均线继续上穿20日均线。\n\n"
-            "## 二、交易确认与执行计划\n\n"
-            "### （一）信号确认与决策\n\n"
-            "若回踩不破支撑，可继续持有。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_market_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ), patch(
-            "etfagents.agents.analysts.etf_market_analyst._etf_market_report_needs_rewrite",
-            return_value=False,
-        ):
-            result = node(
-                {
-                    "company_of_interest": "159949.SZ",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 159949.SZ")],
-                }
-            )
-
-        rendered = result["market_flow_report"]
-        self.assertNotIn("结论依据", rendered)
-        self.assertNotIn("### （一）信号确认与决策", rendered)
-        self.assertIn("10日均线继续上穿20日均线。", rendered)
-
-    def test_market_report_replaces_malformed_suffix_only_title_heading(self):
-        llm = _CapturingLLM()
-        node = create_etf_market_analyst(llm)
-
-        raw_report = (
-            "一、SZ：技术面与资金流综合诊断\n\n"
-            "价格仍运行在关键均线之上，量能没有失真。\n\n"
-            "## 一、市场结构与量价诊断\n\n"
-            "### （一）趋势与动量\n\n"
-            "10日均线继续上穿20日均线。"
-        )
-
-        with patch(
-            "etfagents.agents.analysts.etf_market_analyst.run_tool_report_chain",
-            return_value=(AIMessage(content=raw_report), raw_report),
-        ), patch(
-            "etfagents.agents.analysts.etf_market_analyst._etf_market_report_needs_rewrite",
-            return_value=False,
-        ), patch(
-            "etfagents.agents.analysts.etf_market_analyst.build_instrument_context",
-            return_value="",
-        ), patch(
-            "etfagents.agents.utils.agent_utils._is_chinese_output",
-            return_value=True,
-        ):
-            result = node(
-                {
-                    "company_of_interest": "SZ",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze SZ")],
-                }
-            )
-
-        rendered = result["market_flow_report"]
-        self.assertFalse(rendered.startswith("#"))
-        self.assertNotIn("一、SZ：技术面与资金流综合诊断", rendered)
 
 
 if __name__ == "__main__":

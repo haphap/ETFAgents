@@ -331,6 +331,7 @@ def select_llm_provider() -> tuple[str, str]:
         ("OpenAI", "openai", "https://api.openai.com/v1"),
         ("Google", "google", "https://generativelanguage.googleapis.com/v1"),
         ("Anthropic", "anthropic", "https://api.anthropic.com/"),
+        ("DeepSeek", "deepseek", "https://api.deepseek.com"),
         ("xAI", "xai", "https://api.x.ai/v1"),
         ("MiniMax", "minimax", "https://api.minimax.chat/v1"),
         ("Openrouter", "openrouter", "https://openrouter.ai/api/v1"),

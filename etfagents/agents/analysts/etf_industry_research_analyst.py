@@ -10,56 +10,25 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
-    ensure_title_lead_paragraph,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
-    normalize_chinese_section_headings,
     strip_report_title,
-    strip_meta_lead_prefixes,
+    strip_self_referential_meta_leads,
 )
+from etfagents.agents.utils.validate_refine import validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.tool_report_utils import run_tool_report_chain
 
-_DEFAULT_TITLE_LEAD_ZH = (
-    "该ETF的行业暴露强弱取决于重仓股指向的主导产业，是否同时具备景气延续、政策支撑与盈利兑现三重确认。"
-    "若主导产业的共识继续强化且分歧集中在节奏而非方向，配置逻辑更清晰；若行业分歧开始落到价格、供需和政策传导的根部，ETF暴露就需要重新评估。"
-)
-_DEFAULT_TITLE_LEAD_EN = (
-    "The strength of this ETF's industry exposure depends on whether the dominant industries indicated by its heavyweight holdings still have simultaneous confirmation from cycle, policy, and earnings transmission. "
-    "If broker consensus remains constructive and the disagreement is mostly about timing, the allocation case stays clearer; if the split reaches pricing, supply-demand, or policy transmission itself, the ETF exposure should be reassessed."
-)
-_REPORT_TITLE_ZH = "持仓行业研究分析"
-_REPORT_TITLE_EN = "Holdings Industry Research Analysis"
-_INDUSTRY_NOISE_PARAGRAPH_TERMS = (
-    "行业分类噪声",
-    "分类噪声",
-    "数据源中被归类",
-    "检索噪声",
-    "标签噪声",
-    "搜索关键词泄漏",
-    "搜索错配",
-    "检索错配",
-    "broker tagging noise",
-    "search mismatches",
-    "retrieval artifacts",
-    "classification slippage",
-    "metadata quirks",
-)
 
-
-def _strip_industry_noise_paragraphs(report: str) -> str:
-    if not report:
-        return ""
-    normalized = report.replace("\r\n", "\n").replace("\r", "\n")
-    paragraphs = normalized.split("\n\n")
-    kept: list[str] = []
-    for paragraph in paragraphs:
-        lower = paragraph.lower()
-        if any(term.lower() in lower for term in _INDUSTRY_NOISE_PARAGRAPH_TERMS):
-            continue
-        kept.append(paragraph)
-    return "\n\n".join(kept)
+_VALIDATION_RULES = (
+    "### 内容覆盖\n"
+    "- 是否逐份深度分析每份行业报告（而非仅凭标题判断）？\n"
+    "- 是否进行了跨报告交叉分析（共识、分歧、量化对比）？\n"
+    "- 是否将行业结论转化为ETF持仓影响和配置含义？\n"
+    "- 是否统计了机构态度分布（看多/谨慎/中性）？\n"
+    "- 末尾是否附研报总览表？"
+)
 
 
 def create_etf_industry_research_analyst(llm):
@@ -131,7 +100,9 @@ def create_etf_industry_research_analyst(llm):
             "- 直接以最重要的行业共识或分歧发现开篇。"
             "不得以'本报告将…'、'以下是…'、'本分析基于…'、'This report provides…'等元描述开头。\n"
             "- 标题导语与每个一级章节导语直接陈述结论。"
-            "不得使用'本部分结论表明'、'该部分说明'、'这一节意味着'、'This section shows'等元描述。\n"
+            "不得使用'本节''本部分''该部分''这一节'等自指式开头（如'本节核心结论指出''本部分结论表明''该部分说明'）。\n"
+            "- 当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用'分别为'连接，不得逐个单独陈述。\n"
+            "- 若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出'数据缺失''数据不足'等提示。\n"
             "- 导语段落必须高于子章节层面：综合更广泛的ETF暴露、风格、周期敏感度、估值/风险传导和配置含义。"
             "不得简单复述即将在子章节中出现的相同要点。\n"
             "- 每句话必须传达具体数据点、券商引用或配置含义。"
@@ -169,15 +140,9 @@ def create_etf_industry_research_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
-        report = strip_meta_lead_prefixes(report) if report else report
-        report = _strip_industry_noise_paragraphs(report) if report else report
+        report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
         report = strip_report_title(report) if report else report
-        report = normalize_chinese_section_headings(report) if report else report
-        report = ensure_title_lead_paragraph(
-            report,
-            _DEFAULT_TITLE_LEAD_ZH,
-            _DEFAULT_TITLE_LEAD_EN,
-        ) if report else report
+        report = strip_self_referential_meta_leads(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

@@ -583,6 +583,23 @@ def _sanitize_section(
     )
     if not content or _is_placeholder_like(content):
         return default_text
+    # Strip embedded recommendation labels (line-level and sentence-level)
+    lines = []
+    for line in re.split(r"\n+", content):
+        if _contains_explicit_rating_marker(line) and _is_recommendation_only_segment(line):
+            continue
+        # Also strip recommendation-only sentences within a line
+        kept_sentences = [
+            s for s in _split_sentences(line)
+            if not (_contains_explicit_rating_marker(s) and _is_recommendation_only_segment(s))
+        ]
+        joined = "".join(kept_sentences).strip()
+        if joined:
+            lines.append(joined)
+    content = "\n".join(lines).strip()
+    content = _strip_recommendation_restating_sentences(content)
+    if not content or _is_placeholder_like(content):
+        return default_text
     if check_action_conflict and _has_conflicting_primary_action(content, rating):
         return default_text
     if require_detail and _section_needs_detail(content):

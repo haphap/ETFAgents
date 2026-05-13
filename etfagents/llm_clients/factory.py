@@ -3,7 +3,7 @@ from typing import Optional
 
 from .base_client import BaseLLMClient
 
-_OPENAI_COMPATIBLE_PROVIDERS = ("openai", "xai", "openrouter", "ollama", "minimax", "vllm")
+_OPENAI_COMPATIBLE_PROVIDERS = ("openai", "xai", "openrouter", "ollama", "minimax", "vllm", "deepseek")
 
 
 def create_llm_client(

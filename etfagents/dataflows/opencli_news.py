@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import functools
 import json
+import logging
 import shutil
 import subprocess
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 
 from .exceptions import DataVendorUnavailable
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_date(date_str: str) -> datetime:
@@ -487,3 +491,55 @@ def get_global_news(curr_date: str, look_back_days: int = 7, limit: int = 10) ->
 
     header = f"## Global Market News and Social Signals, from {start_date} to {curr_date}:\n\n"
     return _date_cutoff_warning(curr_date) + header + "\n\n".join(sections)
+
+
+def get_news_for_queries(
+    queries: list[str],
+    start_date: str,
+    end_date: str,
+    *,
+    per_query_limit: int = 6,
+    max_workers: int = 4,
+) -> str:
+    """Fetch news for multiple search queries in parallel and combine results.
+
+    Each query runs ``get_news`` independently via a thread pool. Results are
+    concatenated with clear query labels. If some queries fail, the others
+    still contribute — the caller always gets a usable string.
+    """
+    if not queries:
+        return "<no search queries provided>"
+
+    _parse_date(start_date)
+    _parse_date(end_date)
+
+    results: dict[str, str] = {}
+    errors: list[str] = []
+
+    def _fetch(query: str) -> tuple[str, str]:
+        try:
+            return query, get_news(query, start_date, end_date)
+        except Exception as exc:
+            logger.warning("get_news_for_queries: query %r failed: %s", query, exc)
+            return query, ""
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {pool.submit(_fetch, q): q for q in queries[:max_workers * 2]}
+        for future in as_completed(futures):
+            query, text = future.result()
+            if text and not text.startswith("No relevant news found"):
+                results[query] = text
+            else:
+                errors.append(query)
+
+    if not results:
+        detail = f"No relevant news found for any of: {', '.join(queries)}."
+        if errors:
+            detail += f" Failed queries: {', '.join(errors)}."
+        return detail
+
+    blocks = []
+    for query, text in results.items():
+        blocks.append(f"#### Search: {query}\n\n{text}")
+
+    return "\n\n".join(blocks)

@@ -268,9 +268,39 @@ def _ensure_report_heading_spacing(content: str) -> str:
     return "\n".join(spaced)
 
 
+def _convert_plain_headings_to_markdown(content: str) -> str:
+    """Convert plain-text Chinese numbered headings (一、/（一）) to markdown headings."""
+    text = (content or "").strip()
+    if not text:
+        return ""
+
+    lines = text.split("\n")
+    result = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            result.append(line)
+            continue
+        # Skip lines that already have markdown heading tags
+        if stripped.startswith("#"):
+            result.append(line)
+            continue
+        # Convert top-level headings: 一、xxx → # 一、xxx
+        if re.match(r"^[一二三四五六七八九十]+、\s*\S", stripped):
+            result.append(f"# {stripped}")
+            continue
+        # Convert second-level headings: （一）xxx → ## （一）xxx
+        if re.match(r"^（[一二三四五六七八九十\d]+）\s*\S", stripped):
+            result.append(f"## {stripped}")
+            continue
+        result.append(line)
+    return "\n".join(result)
+
+
 def _prepare_report_markdown(content: str, target_min_level: Optional[int] = None) -> str:
     text = strip_exchange_only_pseudo_titles(content)
     text = _split_inline_section_headings(text)
+    text = _convert_plain_headings_to_markdown(text)
     text = _normalize_report_heading_numbering(text)
     text = _ensure_report_heading_spacing(text)
     if target_min_level is not None:
@@ -566,6 +596,7 @@ def _format_grouped_rounds(
     manager_content: str = "",
     manager_snapshot_path: str = "",
     manager_show_snapshot: bool = True,
+    show_round_snapshots: bool = True,
 ) -> str:
     is_chinese = _is_chinese_output()
     turns_by_speaker = {
@@ -599,7 +630,7 @@ def _format_grouped_rounds(
                     speaker_parts.append(argument_body)
                 if decision_summary:
                     speaker_parts.append(decision_summary)
-                if snapshot:
+                if snapshot and show_round_snapshots:
                     speaker_parts.append(snapshot)
                 round_parts.append(collapse_blank_lines("\n\n".join(speaker_parts)))
         if round_parts:
@@ -666,7 +697,8 @@ def format_research_team_history(debate_state: dict) -> str:
         manager_title=manager_title,
         manager_content=debate_state.get("judge_decision", ""),
         manager_snapshot_path=debate_state.get("judge_snapshot_path", ""),
-        manager_show_snapshot=True,
+        manager_show_snapshot=False,
+        show_round_snapshots=False,
     )
 
 
@@ -688,6 +720,7 @@ def format_risk_management_history(risk_state: dict, include_manager: bool = Tru
         manager_content=risk_state.get("judge_decision", "") if include_manager else "",
         manager_snapshot_path=risk_state.get("judge_snapshot_path", "") if include_manager else "",
         manager_show_snapshot=False,
+        show_round_snapshots=False,
     )
 
 
@@ -1268,7 +1301,7 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
                 _format_manager_decision(
                     debate["judge_decision"],
                     debate.get("judge_snapshot_path", ""),
-                    show_snapshot_summary=True,
+                    show_snapshot_summary=False,
                     nested_min_heading_level=None,
                 ),
                 encoding="utf-8",

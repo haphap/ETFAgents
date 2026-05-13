@@ -97,6 +97,17 @@ MODEL_OPTIONS: ProviderModeOptions = {
             ("Carnice-V2-27b-NVFP4 (vLLM local)", "sakamakismile/Carnice-V2-27b-NVFP4-TEXT-MTP"),
         ],
     },
+    "deepseek": {
+        "quick": [
+            ("DeepSeek V4 Flash - Fast, cost-efficient", "deepseek-v4-flash"),
+            ("DeepSeek Chat - General purpose", "deepseek-chat"),
+        ],
+        "deep": [
+            ("DeepSeek V4 Pro - Most capable reasoning model", "deepseek-v4-pro"),
+            ("DeepSeek Reasoner - Extended thinking (no tool_choice, no structured output)", "deepseek-reasoner"),
+            ("DeepSeek Chat - General purpose", "deepseek-chat"),
+        ],
+    },
     "ollama": {
         "quick": [
             ("Jackrong/Qwopus3.5-9B-v3-GGUF:Q4_K_M (llama.cpp local)", "Jackrong/Qwopus3.5-9B-v3-GGUF:Q4_K_M"),

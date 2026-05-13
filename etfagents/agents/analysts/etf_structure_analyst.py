@@ -9,27 +9,26 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
-    ensure_title_lead_paragraph,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
-    normalize_chinese_section_headings,
     strip_report_title,
-    strip_meta_lead_prefixes,
+    strip_self_referential_meta_leads,
 )
+from etfagents.agents.utils.validate_refine import validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.tool_report_utils import run_tool_report_chain
 
-_DEFAULT_TITLE_LEAD_ZH = (
-    "本期中观商品主线不在单一品种的涨跌，而在复苏预期能否穿透库存与成本倒逼，最终让中游形成“量增大于价压”的利润修复。"
-    "未来两周最关键的路标，是铜与热卷代表的需求改善能否继续传导到焦煤仓单去化；若去化迟滞，产业链负反馈更可能重新主导配置。"
+
+_VALIDATION_RULES = (
+    "### 内容覆盖\n"
+    "- 是否将报告锁定在一个可证伪的命题上？\n"
+    "- 是否按交易矛盾（而非商品品类）组织分析？\n"
+    "- 是否对每个矛盾给出方向倾向和确信度（低/中/高）？\n"
+    "- 是否验证了上下游成本转嫁是否完整？\n"
+    "- 是否设置了情景推演（基准/替代/尾部）并给出概率估计？\n"
+    "- 末尾是否附近期合约表现总览表？"
 )
-_DEFAULT_TITLE_LEAD_EN = (
-    "The key meso commodity question is not any single contract move, but whether recovery expectations can punch through inventory pressure and cost pushback strongly enough for midstream industries to achieve volume growth that outweighs margin compression. "
-    "Over the next two weeks, the main road marker is whether demand strength in copper and hot-rolled coil can transmit into coking-coal warehouse-receipt drawdown; if that destocking stalls, the negative feedback loop is more likely to retake control."
-)
-_REPORT_TITLE_ZH = "中观商品宏观策略报告"
-_REPORT_TITLE_EN = "Meso Commodity Macro Strategy Report"
 
 
 def create_etf_structure_analyst(llm):
@@ -62,7 +61,7 @@ def create_etf_structure_analyst(llm):
             "- 农产品链：豆粕 (M)、玉米 (C)、棕榈油 (P)\n"
             "- 软商品：纸浆 (SP)、天然橡胶 (RU)\n"
             "- 工业品：工业硅 (SI)、尿素 (UR)、PVC (V)、纯碱 (SA)\n\n"
-            "覆盖规则：所有发出异常信号的合约必须被提及并归入矛盾组。无异常信号的合约可省略以保持主线聚焦——不得为了填充'平稳观察组'而稀释叙述。\n\n"
+            "覆盖规则：所有发出异常信号的合约必须被提及。无异常信号的合约可省略以保持主线聚焦——不得为了填充内容而稀释叙述。\n\n"
             "## 报告结构\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
@@ -77,9 +76,9 @@ def create_etf_structure_analyst(llm):
             "整篇报告都围绕这一命题展开——下文所有内容都必须服务于它。\n\n"
             "二、矛盾推演\n"
             "按交易矛盾组织，而非按商品品类。每个子章节必须独占一行，前面有空行。"
-            "矛盾组之间必须有逻辑联系——解释它们如何相互强化或矛盾"
+            "各矛盾之间必须有逻辑联系——解释它们如何相互强化或矛盾"
             "（如'复苏驱动原材料需求 → 成本上升 → 中游利润压缩 → 最终抑制复苏'——一个反馈环）。\n"
-            "每个矛盾组的分析应为一个或多个连贯段落。在段落中自然编织：\n"
+            "每个矛盾的分析应为一个或多个连贯段落。在段落中自然编织：\n"
             "- 该组合约指向的共同信号\n"
             "- 价格/持仓量/仓单中的异常数据\n"
             "- 该信号是机会还是风险，对宏观/产业配置的含义\n"
@@ -90,11 +89,11 @@ def create_etf_structure_analyst(llm):
             "和PPI向CPI传导失败，从而支撑'成本推升型通胀被证伪'的宏观结论。\n"
             "当数据支撑时，还必须设置证伪检查点。例如，若白银强势被解读为工业需求，"
             "必须明确说仓单必须同步下降；价格、持仓与仓单的背离是区分投机与真实去库的关键检验。\n\n"
-            "（一）[矛盾名称，如'制造业复苏信号组']\n"
+            "（一）[矛盾名称，如'制造业复苏与上游需求']\n"
             "  - 以连贯段落书写，而非分段式标签。\n"
             "  - 矛盾、方向倾向、证据链、宏观含义和确信度融为一体。\n"
             "  - 以验证上游→中游→下游成本转嫁是否完整收尾。\n\n"
-            "（二）[下一矛盾，如'成本承压与利润压缩组']\n"
+            "（二）[下一矛盾，如'成本承压与利润压缩']\n"
             "  - 同样段落式结构，末尾含跨链验证。\n\n"
             "（三）[下一矛盾，如有]\n\n"
             "三、情景推演与策略启示\n"
@@ -112,13 +111,15 @@ def create_etf_structure_analyst(llm):
             "如最新水平、近期价格表现、持仓变化、仓单变化和简短信号备注。不得编造不可用的指标。\n\n"
             "## 风格要求\n"
             "- 直接以一中的核心矛盾论点开篇。不得以'本报告将…'、'以下是…'、'本分析基于…'等元描述开头。\n"
-            "- 标题导语与每个一级章节导语直接陈述结论。不得使用'本部分结论表明'、'该部分说明'、'这一节意味着'、'This section shows'等元描述。\n"
+            "- 当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用'分别为'连接，不得逐个单独陈述。\n"
+            "- 若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出'数据缺失''数据不足'等提示。\n"
+            "- 标题导语与每个一级章节导语直接陈述结论。不得使用'本节''本部分''该部分''这一节'等自指式开头（如'本节核心结论指出''本部分结论表明''该部分说明'）。\n"
             "- 不要写'本节锁定'、'本节聚焦'、'本节讨论'、'本节围绕'、'该节…'、'这一节…'等自我指代句式，直接把矛盾、证据链和配置含义写成结论句。\n"
             "- 导语段落必须高于子章节层面：综合主导矛盾、传导路径和ETF配置含义。"
             "不得简单复述即将在子章节中出现的相同合约观察。\n"
             "- 每句话必须传达具体数据点、异常或配置含义。删除'深度挂钩'、'全面覆盖'、'值得注意的是'、'it is worth noting'等填充语。\n"
             "- 连续出现三个以上裸数据片段后必须立即解释其揭示的矛盾和配置含义。\n"
-            "- 不得用平行句式逐一罗列合约。将它们归入2-3个矛盾组，解释为何这些矛盾对ETF配置重要。\n"
+            "- 不得用平行句式逐一罗列合约。将它们归入2-3个矛盾主题，解释为何这些矛盾对ETF配置重要。\n"
             "- 替换重复用词如'反噬'，使用'利润挤压'、'成本倒逼'、'负反馈'等精确替代表述。\n"
             "- 反面示例（禁止）：'判断：方向偏多。合约信号：沪铜30D +6.28%... 这意味着：价涨仓增形态...'\n"
             "- 正面示例（目标风格）：'本期沪铜以6.28%的涨幅配合近50%的仓单骤降，是典型的价量齐升去库组合，确认了下游实物需求的强劲接货意愿。这组信号整体偏多，确信度中等，但需留意高杠杆资金的短期扰动。'\n"
@@ -156,14 +157,9 @@ def create_etf_structure_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
-        report = strip_meta_lead_prefixes(report) if report else report
+        report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
         report = strip_report_title(report) if report else report
-        report = normalize_chinese_section_headings(report) if report else report
-        report = ensure_title_lead_paragraph(
-            report,
-            _DEFAULT_TITLE_LEAD_ZH,
-            _DEFAULT_TITLE_LEAD_EN,
-        ) if report else report
+        report = strip_self_referential_meta_leads(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

@@ -3,15 +3,7 @@ import re
 from etfagents.agents.utils.agent_utils import collapse_blank_lines
 
 _H1_TITLE_PATTERN = re.compile(r"^#\s+\S")
-_CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 _TITLE_PREFIX_PATTERN = re.compile(r"^(?:#{1,6}\s+)?(?:[一二三四五六七八九十]+、\s*|（[一二三四五六七八九十\d]+）\s*)?")
-_TOP_LEVEL_VISIBLE_HEADING_PATTERN = re.compile(r"^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+、")
-_VISIBLE_SECTION_HEADING_PATTERN = re.compile(
-    r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)"
-)
-_ENGLISH_HEADING_TRAILER_PATTERN = re.compile(
-    r"\s*[\(（][^()（）\n]*[A-Za-z][^()（）\n]*[\)）]\s*$"
-)
 _INVALID_DISPLAY_TICKERS = {"SH", "SZ", "BJ", "HK", "SS", "SSE", "SZSE", "BSE", "HKG", "SEHK"}
 _PSEUDO_TITLE_SUBJECTS = (
     "技术面与资金流综合诊断",
@@ -42,56 +34,6 @@ _EXCHANGE_ONLY_PSEUDO_TITLE_PATTERN = re.compile(
     + "|".join(re.escape(subject) for subject in _PSEUDO_TITLE_SUBJECTS)
     + r")\s*$"
 )
-_LEAD_META_PREFIX_PATTERN = re.compile(
-    r"(?m)^(?:"
-    r"本部分(?:的)?(?:结论|判断|核心结论|核心判断)?(?:表明|显示|意味着|在于|是)?"
-    r"|该部分(?:的)?(?:结论|判断|核心结论|核心判断)?(?:表明|显示|意味着|在于|是)?"
-    r"|这一部分(?:的)?(?:结论|判断|核心结论|核心判断)?(?:表明|显示|意味着|在于|是)?"
-    r"|本节(?:的)?(?:结论|判断|核心结论|核心判断)?(?:表明|显示|意味着|在于|是)?"
-    r"|该节(?:的)?(?:结论|判断|核心结论|核心判断)?(?:表明|显示|意味着|在于|是)?"
-    r"|这一节(?:的)?(?:结论|判断|核心结论|核心判断)?(?:表明|显示|意味着|在于|是)?"
-    r"|This section(?:'s)?\s+(?:conclusion|conclusions|key takeaway|key point)(?:\s+(?:shows|indicates|means|is))?"
-    r"|The key takeaway of this section(?:\s+(?:shows|indicates|means|is))?"
-    r")[：:，,\s]+"
-)
-_LEAD_META_PHRASE_PATTERN = re.compile(
-    r"(?m)^(?:"
-    r"本部分(?:结论)?直接(?:呈现|概括|说明)"
-    r"|该部分(?:结论)?直接(?:呈现|概括|说明)"
-    r"|这一部分(?:结论)?直接(?:呈现|概括|说明)"
-    r"|本节(?:结论)?直接(?:呈现|概括|说明)"
-    r"|该节(?:结论)?直接(?:呈现|概括|说明)"
-    r"|这一节(?:结论)?直接(?:呈现|概括|说明)"
-    r"|本部分通过"
-    r"|该部分通过"
-    r"|这一部分通过"
-    r"|本节通过"
-    r"|该节通过"
-    r"|这一节通过"
-    r"|本节(?:锁定|聚焦(?:于)?|关注|围绕|讨论|转向|观察|拆解|检验)"
-    r"|该节(?:锁定|聚焦(?:于)?|关注|围绕|讨论|转向|观察|拆解|检验)"
-    r"|这一节(?:锁定|聚焦(?:于)?|关注|围绕|讨论|转向|观察|拆解|检验)"
-    r"|This section directly (?:presents|states|summarizes)"
-    r"|This section (?:uses|through)"
-    r")\s*"
-)
-
-
-def strip_meta_lead_prefixes(report: str) -> str:
-    if not report:
-        return ""
-    stripped = _LEAD_META_PREFIX_PATTERN.sub("", report)
-    return _LEAD_META_PHRASE_PATTERN.sub("", stripped)
-
-
-def get_title_body_guard_instruction() -> str:
-    return (
-        " After the H1 title and its title lead, do NOT repeat the title anywhere in the body. "
-        "Never insert title-like lines such as '一、SH 科创50ETF华夏：技术面与资金流综合诊断', "
-        "'HK：科创50ETF华夏：技术面与资金流综合诊断', or similar exchange-only variants. "
-        "If the full exchange-qualified ticker is unavailable, omit the ticker rather than constructing a pseudo-title from only SH / SZ / HK / BJ or similar exchange suffixes."
-    )
-
 
 def get_no_title_instruction() -> str:
     return (
@@ -125,47 +67,6 @@ def strip_exchange_only_pseudo_titles(report: str) -> str:
     if not report:
         return ""
     return collapse_blank_lines(_EXCHANGE_ONLY_PSEUDO_TITLE_PATTERN.sub("", report))
-
-
-def _normalize_heading_key(line: str) -> str:
-    stripped = _ENGLISH_HEADING_TRAILER_PATTERN.sub("", (line or "").strip()).strip()
-    return re.sub(r"\s+", " ", stripped)
-
-
-def normalize_chinese_section_headings(
-    report: str,
-    *,
-    strip_english_for_subheadings: bool = True,
-) -> str:
-    if not report:
-        return ""
-
-    heading_pattern = (
-        _VISIBLE_SECTION_HEADING_PATTERN
-        if strip_english_for_subheadings
-        else _TOP_LEVEL_VISIBLE_HEADING_PATTERN
-    )
-    cleaned_lines: list[str] = []
-    pending_top_level_heading: str | None = None
-
-    for raw_line in report.replace("\r\n", "\n").replace("\r", "\n").splitlines():
-        line = raw_line
-        stripped = (line or "").strip()
-        if heading_pattern.match(stripped):
-            line = _ENGLISH_HEADING_TRAILER_PATTERN.sub("", line).rstrip()
-            stripped = line.strip()
-
-        if _TOP_LEVEL_VISIBLE_HEADING_PATTERN.match(stripped):
-            heading_key = _normalize_heading_key(stripped)
-            if pending_top_level_heading == heading_key:
-                continue
-            pending_top_level_heading = heading_key
-        elif stripped:
-            pending_top_level_heading = None
-
-        cleaned_lines.append(line)
-
-    return collapse_blank_lines("\n".join(cleaned_lines))
 
 
 def _looks_like_report_title_line(line: str) -> bool:
@@ -311,92 +212,19 @@ def _looks_like_section_heading(line: str) -> bool:
     )
 
 
-def ensure_title_lead_paragraph(
-    report: str,
-    chinese_default_lead: str,
-    english_default_lead: str,
-) -> str:
+_SELF_REFERENTIAL_META_LEAD_RE = re.compile(
+    r"(?m)^\s*(?:（[^）]*）)?\s*"
+    r"(?:本节|本部分|该部分|这一节|本段)"
+    r"(?:核心结论|锁定|聚焦|讨论|围绕|分析|探讨|旨在|将|主要|重点|结论|说明|指出|表明|认为|阐述|梳理|审视|检视)"
+    r"[^\n]*\n?"
+)
+
+
+def strip_self_referential_meta_leads(report: str) -> str:
+    """Remove self-referential meta-leads like '本节核心结论指出…' from report text."""
     if not report:
         return ""
-    text = collapse_blank_lines(report).strip()
-    lines = text.splitlines()
-    if not lines:
-        return text
-
-    first_body_line = 0
-    if _H1_TITLE_PATTERN.match(lines[0].strip()):
-        first_body_line = 1
-        while first_body_line < len(lines) and not lines[first_body_line].strip():
-            first_body_line += 1
-    if first_body_line >= len(lines) or not _looks_like_section_heading(lines[first_body_line]):
-        return text
-
-    default_lead = chinese_default_lead if _CJK_PATTERN.search(text) else english_default_lead
-    return collapse_blank_lines(
-        "\n".join(lines[:first_body_line] + [default_lead, ""] + lines[first_body_line:])
-    )
+    cleaned = _SELF_REFERENTIAL_META_LEAD_RE.sub("", report)
+    return collapse_blank_lines(cleaned)
 
 
-def strip_title_lead_paragraph(report: str) -> str:
-    if not report:
-        return ""
-    text = collapse_blank_lines(report).strip()
-    lines = text.splitlines()
-    if not lines or not _H1_TITLE_PATTERN.match(lines[0].strip()):
-        return text
-
-    first_body_line = 1
-    while first_body_line < len(lines) and not lines[first_body_line].strip():
-        first_body_line += 1
-    if first_body_line >= len(lines):
-        return text
-    if _looks_like_section_heading(lines[first_body_line]):
-        return text
-
-    first_heading_line = first_body_line
-    while first_heading_line < len(lines) and not _looks_like_section_heading(lines[first_heading_line]):
-        first_heading_line += 1
-    if first_heading_line >= len(lines):
-        return text
-
-    return collapse_blank_lines("\n".join([lines[0], ""] + lines[first_heading_line:]))
-
-
-def strip_first_section_lead_paragraph(report: str) -> str:
-    if not report:
-        return ""
-    text = collapse_blank_lines(report).strip()
-    lines = text.splitlines()
-    if not lines:
-        return text
-
-    top_level_visible_pattern = re.compile(r"^(?:#{1,6}\s*)?[一二三四五六七八九十]+、")
-    subheading_visible_pattern = re.compile(r"^(?:#{1,6}\s*)?（[一二三四五六七八九十\d]+）")
-    markdown_only_heading_pattern = re.compile(r"^#{1,6}\s*$")
-
-    first_top_level_visible = None
-    for index, line in enumerate(lines):
-        if top_level_visible_pattern.match((line or "").strip()):
-            first_top_level_visible = index
-            break
-    if first_top_level_visible is None:
-        return text
-
-    first_subheading_visible = None
-    for index in range(first_top_level_visible + 1, len(lines)):
-        if subheading_visible_pattern.match((lines[index] or "").strip()):
-            first_subheading_visible = index
-            break
-    if first_subheading_visible is None:
-        return text
-
-    heading_start = first_top_level_visible
-    probe = first_top_level_visible - 1
-    while probe >= 0 and not lines[probe].strip():
-        probe -= 1
-    if probe >= 0 and markdown_only_heading_pattern.match((lines[probe] or "").strip()):
-        heading_start = probe
-
-    preserved = lines[:first_top_level_visible + 1]
-    remainder = lines[first_subheading_visible:]
-    return collapse_blank_lines("\n".join(preserved + [""] + remainder))

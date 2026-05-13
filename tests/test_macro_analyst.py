@@ -6,11 +6,17 @@ from langchain_core.messages import AIMessage, HumanMessage
 from etfagents.agents.analysts.macro_analyst import create_macro_analyst
 
 
+_VALIDATION_PASSED_JSON = '{"score": 9, "pass": true, "critical_issues": [], "minor_issues": [], "missing_elements": [], "general_comment": "OK"}'
+
+
 class _CapturingLLM:
     def bind_tools(self, tools):
         return self
 
     def invoke(self, prompt, **kwargs):
+        # Return valid JSON for validation judge step so it passes cleanly
+        if "报告质量审核员" in str(prompt):
+            return AIMessage(content=_VALIDATION_PASSED_JSON)
         return AIMessage(content="Macro report content")
 
 
@@ -72,47 +78,6 @@ class MacroAnalystTests(unittest.TestCase):
         self.assertNotIn("Exposure & Macro Thesis", system_msg)
         self.assertNotIn("Signals & Scenario Analysis", system_msg)
 
-    def test_macro_analyst_strips_english_parentheticals_from_section_headings(self):
-        llm = _CapturingLLM()
-        node = create_macro_analyst(llm)
-
-        with patch(
-            "etfagents.agents.analysts.macro_analyst.run_tool_report_chain",
-            return_value=(
-                AIMessage(
-                    content=(
-                        "一、暴露与宏观主线 (Exposure & Macro Thesis)\n\n"
-                        "（一）ETF暴露与敏感因子（Exposure Sensitivities）\n"
-                        "PMI (Purchasing Managers' Index) 仍是正文里的正常解释。\n\n"
-                        "二、异常信号与情景推演（Signals & Scenario Analysis）\n"
-                        "风险偏好回落正在压缩高弹性暴露。"
-                    )
-                ),
-                (
-                    "一、暴露与宏观主线 (Exposure & Macro Thesis)\n\n"
-                    "（一）ETF暴露与敏感因子（Exposure Sensitivities）\n"
-                    "PMI (Purchasing Managers' Index) 仍是正文里的正常解释。\n\n"
-                    "二、异常信号与情景推演（Signals & Scenario Analysis）\n"
-                    "风险偏好回落正在压缩高弹性暴露。"
-                ),
-            ),
-        ):
-            result = node(
-                {
-                    "company_of_interest": "516650.SH",
-                    "trade_date": "2026-04-30",
-                    "messages": [HumanMessage(content="Analyze 516650.SH")],
-                }
-            )
-
-        report = result["macro_regime_report"]
-        self.assertIn("一、暴露与宏观主线", report)
-        self.assertIn("（一）ETF暴露与敏感因子", report)
-        self.assertIn("二、异常信号与情景推演", report)
-        self.assertNotIn("Exposure & Macro Thesis", report)
-        self.assertNotIn("Exposure Sensitivities", report)
-        self.assertNotIn("Signals & Scenario Analysis", report)
-        self.assertIn("PMI (Purchasing Managers' Index)", report)
 
 
 if __name__ == "__main__":

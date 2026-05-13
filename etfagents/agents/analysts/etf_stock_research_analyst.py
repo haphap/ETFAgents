@@ -10,27 +10,25 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
-    ensure_title_lead_paragraph,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
-    normalize_chinese_section_headings,
     strip_report_title,
-    strip_meta_lead_prefixes,
+    strip_self_referential_meta_leads,
 )
+from etfagents.agents.utils.validate_refine import validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.tool_report_utils import run_tool_report_chain
 
-_DEFAULT_TITLE_LEAD_ZH = (
-    "该ETF头部持仓的盈利修复、估值分化与权重集中度共同决定组合的收益来源与回撤来源。"
-    "当前更需要辨别哪些龙头仍能贡献业绩上修，哪些高权重个股正在放大估值压力，并据此判断ETF的配置弹性与风险暴露。"
+
+_VALIDATION_RULES = (
+    "### 内容覆盖\n"
+    "- 是否逐份分析每份个股报告的论点、数据和评级？\n"
+    "- 是否进行了跨报告交叉分析（共识分歧、盈利预测、估值对比）？\n"
+    "- 是否将个股结论转化为ETF权重、归因和组合风险含义？\n"
+    "- 是否统计了机构评级分布？\n"
+    "- 末尾是否附研报总览表？"
 )
-_DEFAULT_TITLE_LEAD_EN = (
-    "The earnings path, valuation dispersion, and weight concentration of this ETF's top holdings jointly determine where returns come from and where drawdown risk sits. "
-    "The key task is to separate the holdings still delivering earnings upgrades from the heavyweight names increasing valuation pressure, then translate that into ETF sizing and risk exposure."
-)
-_REPORT_TITLE_ZH = "头部持仓研究分析"
-_REPORT_TITLE_EN = "Top Holdings Research Analysis"
 
 
 def create_etf_stock_research_analyst(llm):
@@ -102,7 +100,9 @@ def create_etf_stock_research_analyst(llm):
             "- 直接以券商对ETF头部持仓最重要的共识或分歧开篇。"
             "不得以'本报告将…'、'以下是…'、'本分析基于…'、'This report provides…'等元描述开头。\n"
             "- 标题导语与每个一级章节导语直接陈述结论。"
-            "不得使用'本部分结论表明'、'该部分说明'、'这一节意味着'、'This section shows'等元描述。\n"
+            "不得使用'本节''本部分''该部分''这一节'等自指式开头（如'本节核心结论指出''本部分结论表明''该部分说明'）。\n"
+            "- 当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用'分别为'连接，不得逐个单独陈述。\n"
+            "- 若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出'数据缺失''数据不足'等提示。\n"
             "- 导语段落必须高于子章节层面：综合集中度风险、盈利修正广度、估值压力和ETF归因含义。"
             "不得简单复述即将在子章节中出现的相同要点。\n"
             "- 每句话必须传达具体数据点、券商引用或组合含义。"
@@ -140,14 +140,9 @@ def create_etf_stock_research_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
-        report = strip_meta_lead_prefixes(report) if report else report
+        report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
         report = strip_report_title(report) if report else report
-        report = normalize_chinese_section_headings(report) if report else report
-        report = ensure_title_lead_paragraph(
-            report,
-            _DEFAULT_TITLE_LEAD_ZH,
-            _DEFAULT_TITLE_LEAD_EN,
-        ) if report else report
+        report = strip_self_referential_meta_leads(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

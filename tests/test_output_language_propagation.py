@@ -180,8 +180,9 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("成交量", system_prompt)
         self.assertIn("份额变化", system_prompt)
         self.assertIn("若没有上方报告里的具体价位、均线数值、量能基数或份额/溢折价数据，就不要下加仓、减仓或回补指令", system_prompt)
-        self.assertIn("do not simply restate the execution steps", system_prompt)
-        self.assertIn("do not repeat the thesis sentence verbatim", system_prompt)
+        self.assertIn("The three sections must open with DIFFERENT sentences", system_prompt)
+        self.assertIn("do not mention sizing, levels, or execution steps", system_prompt)
+        self.assertIn("do not restate the thesis rationale", system_prompt)
         self.assertIn("failure conditions, rebalance triggers, cut or restore rules", system_prompt)
 
     def test_research_manager_prompt_respects_output_language(self):
@@ -241,8 +242,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("- 评级: 持有", formatted)
         self.assertNotIn("##### 本轮复盘", formatted)
         self.assertNotIn("##### 自动复盘", formatted)
-        self.assertIn("- 立场: x", formatted)
-        self.assertIn("- 本轮新增与反驳: y；z；r", formatted)
+        self.assertNotIn("- 立场: x", formatted)
+        self.assertNotIn("反馈快照", formatted)
         self.assertNotIn("决策摘要", investment_debate_state["current_bull_response"])
         self.assertNotIn("反馈快照", investment_debate_state["current_bull_response"])
 
@@ -350,8 +351,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("- 评级: 持有", formatted)
         self.assertNotIn("##### 本轮复盘", formatted)
         self.assertNotIn("##### 自动复盘", formatted)
-        self.assertIn("- 立场: x", formatted)
-        self.assertIn("- 本轮新增与反驳: y；z；r", formatted)
+        self.assertNotIn("- 立场: x", formatted)
+        self.assertNotIn("反馈快照", formatted)
         self.assertNotIn("决策摘要", risk_debate_state["current_aggressive_response"])
         self.assertNotIn("反馈快照", risk_debate_state["current_aggressive_response"])
 

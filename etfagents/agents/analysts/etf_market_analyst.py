@@ -1,5 +1,4 @@
 import logging
-import re
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -16,19 +15,29 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
-    ensure_title_lead_paragraph,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
-    normalize_chinese_section_headings,
     strip_report_title,
-    strip_meta_lead_prefixes,
+    strip_self_referential_meta_leads,
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
+from etfagents.agents.utils.validate_refine import validate_and_refine
 from etfagents.tool_report_utils import run_tool_report_chain
 
 logger = logging.getLogger(__name__)
 
+
+_VALIDATION_RULES = (
+    "### 内容覆盖\n"
+    "- 是否包含三个一级章节：一、市场结构与量价诊断；二、交易确认与执行计划；三、关键价位与条件情景推演？\n"
+    "- 每个一级章节（一、二、三）是否以2-3句导语开头总结该节核心结论？\n"
+    "- 是否覆盖趋势指标（SMA/EMA）、动量（MACD）、超买超卖（RSI）、波动率（Bollinger）和量能确认（VWMA）？\n"
+    "- 是否结合份额变化、NAV溢价/折价和换手率分析资金积累/分配/拥挤状态？\n"
+    "- 第三部分是否使用连贯段落而非标签式清单？\n"
+    "- 末尾是否附指标总览表（含指标、数值、位置、交易含义、关键阈值列）？\n"
+    "- 末尾是否附综合结论段落（含配置方向、关键价位、资金状态）？"
+)
 
 _ETF_MARKET_INDICATORS = {
     "close_10_ema": "short-term trend and pullback timing",
@@ -52,150 +61,6 @@ def _etf_indicator_catalog() -> str:
         f"- {indicator}: {purpose}" for indicator, purpose in _ETF_MARKET_INDICATORS.items()
     )
 
-
-_ETF_COVERAGE_GROUPS = [
-    ("trend", ("sma", "ema")),
-    ("momentum", ("macd",)),
-    ("overbought_oversold", ("rsi",)),
-    ("volatility", ("boll", "布林")),
-    ("volume_confirm", ("vwma", "成交量加权移动平均线", "volume weighted")),
-]
-
-_INTRO_BOILERPLATE_MARKERS = (
-    "本报告将", "本报告基于", "以下是一份", "structured breakdown",
-    "raw outputs", "以下是对", "本分析将",
-)
-
-_ACTIONABLE_INTRO_TERMS = (
-    "偏多", "偏空", "承压", "支撑", "突破", "回落", "震荡", "强势", "弱势",
-    "bullish", "bearish", "trend", "support", "resistance", "breakout",
-    "hold", "add", "reduce", "wait", "accumulate", "distribute",
-)
-
-_DEPTH_KEYWORD_GROUPS = [
-    ("above", "below", "高于", "低于", "crossover", "cross"),
-    ("支撑", "压力", "support", "resistance", "stop", "add", "reduce"),
-    ("若", "如果", "if ", "unless", "when"),
-    ("超买", "超卖", "金叉", "死叉", "divergence", "overbought", "oversold"),
-]
-_EXPLANATION_TERMS = (
-    "意味着", "说明", "也就是说", "换句话说", "对交易而言", "交易含义",
-    "which means", "that means", "in other words", "for trading",
-)
-_TRADING_IMPLICATION_TERMS = (
-    "加仓", "减仓", "持有", "等待", "追高", "回踩", "止损", "仓位", "入场", "离场",
-    "add", "reduce", "hold", "wait", "entry", "exit", "stop", "position",
-)
-_JARGON_TERMS = (
-    "多头排列", "空头排列", "金叉", "死叉", "背离", "发散", "缩量", "放量", "钝化",
-    "bullish crossover", "bearish crossover", "divergence", "dispersion",
-)
-_DEFAULT_TITLE_LEAD_ZH = (
-    "该ETF当前量价结构更接近趋势延续还是震荡回撤，取决于均线斜率、动量强弱与资金流是否同向。"
-    "若价格、波动率与成交确认继续共振，交易上更适合顺势持有或回踩加仓；若量价背离扩大，则应优先等待确认而非追高。"
-)
-_DEFAULT_TITLE_LEAD_EN = (
-    "Whether this ETF is set up for trend continuation or a choppy pullback depends on whether moving-average slope, momentum, and fund flow are aligned. "
-    "If price, volatility, and volume confirmation keep reinforcing each other, the setup favors holding or buying pullbacks; if price-flow divergence widens, waiting for confirmation is better than chasing."
-)
-_REPORT_TITLE_ZH = "技术面与资金流综合诊断"
-_REPORT_TITLE_EN = "Technical & Flow Diagnosis"
-_MARKET_STRUCTURE_TITLES = (
-    ("市场结构与量价诊断", "Market Structure & Price-Flow Diagnosis"),
-    ("交易确认与执行计划", "Trade Confirmation & Execution Plan"),
-    ("关键价位与条件情景推演", "Key Levels & Conditional Scenario Analysis"),
-)
-_MARKET_SCAFFOLD_LABEL_PATTERN = re.compile(
-    r"(?m)^(\s*(?:[-*]\s*)?)\*{0,2}结论依据\*{0,2}[:：]\s*"
-)
-_SECOND_SECTION_SUBHEADING_PATTERN = re.compile(
-    r"(?m)^\s*#{1,6}\s*(?:（一）\s*)?(?:信号确认与决策|Confirmation & Decision)\s*\n+"
-)
-
-
-def _etf_report_has_full_coverage(report: str) -> bool:
-    lower = report.lower()
-    return all(
-        any(kw in lower for kw in group)
-        for _, group in _ETF_COVERAGE_GROUPS
-    )
-
-
-def _etf_report_has_actionable_intro(report: str) -> bool:
-    lines = [line.strip() for line in report.split("\n") if line.strip()]
-    if not lines:
-        return False
-    first_para = ""
-    for line in lines:
-        if line.startswith("#"):
-            continue
-        first_para = line.lower()
-        break
-    if not first_para:
-        return False
-    if any(marker in first_para for marker in _INTRO_BOILERPLATE_MARKERS):
-        return False
-    return any(term in first_para for term in _ACTIONABLE_INTRO_TERMS)
-
-
-def _etf_report_has_actionable_depth(report: str) -> bool:
-    if len(report) < 400:
-        return False
-    lower = report.lower()
-    matched = sum(
-        1 for group in _DEPTH_KEYWORD_GROUPS
-        if any(kw in lower for kw in group)
-    )
-    return matched >= 3
-
-
-def _etf_report_has_explanatory_clarity(report: str) -> bool:
-    if not report:
-        return False
-    lower = report.lower()
-    explanation_hits = sum(lower.count(term.lower()) for term in _EXPLANATION_TERMS)
-    implication_hits = sum(lower.count(term.lower()) for term in _TRADING_IMPLICATION_TERMS)
-    jargon_hits = sum(lower.count(term.lower()) for term in _JARGON_TERMS)
-    if jargon_hits:
-        return explanation_hits >= 2 and implication_hits >= 2
-    return explanation_hits >= 1 and implication_hits >= 2
-
-
-def _etf_report_has_compact_structure(report: str) -> bool:
-    if not report:
-        return False
-    return all(
-        chinese in report or english in report
-        for chinese, english in _MARKET_STRUCTURE_TITLES
-    )
-
-
-def _strip_etf_market_scaffold_labels(report: str) -> str:
-    if not report:
-        return ""
-    return _MARKET_SCAFFOLD_LABEL_PATTERN.sub(r"\1", report)
-
-
-def _strip_etf_market_second_section_subheading(report: str) -> str:
-    if not report:
-        return ""
-    return _SECOND_SECTION_SUBHEADING_PATTERN.sub("", report)
-
-
-def _etf_market_report_needs_rewrite(report: str) -> bool:
-    if not report:
-        return True
-    if not _etf_report_has_compact_structure(report):
-        return True
-    if not _etf_report_has_full_coverage(report):
-        return True
-    if not _etf_report_has_actionable_intro(report):
-        return True
-    if not _etf_report_has_actionable_depth(report):
-        return True
-    if not _etf_report_has_explanatory_clarity(report):
-        return True
-    return False
 
 
 def create_etf_market_analyst(llm):
@@ -226,20 +91,27 @@ def create_etf_market_analyst(llm):
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
             "Use EXACTLY three top-level sections (一、二、三). Do NOT create additional top-level sections.\n"
-            "Section one must begin with a 2-3 sentence lead paragraph summarizing the key conclusions of that section, then a blank line before sub-sections.\n"
-            "Section two must NOT have a separate lead paragraph or hat paragraph; write the body directly under the heading.\n\n"
+            "每个一级章节（一、二、三）以2-3句导语开头总结该节核心结论，然后空行进入子章节或正文。\n\n"
             "一、市场结构与量价诊断\n"
-            "  （一）趋势与动量: 10 EMA / 20 SMA / 50 SMA / 200 SMA comparisons, MACD, signal line, histogram, RSI\n\n"
-            "  （二）波动与流动性: Bollinger bands, ATR, share change, NAV / premium-discount clues, VWMA, turnover\n\n"
+            "  （一）趋势与动量\n"
+            "    覆盖10 EMA / 20 SMA / 50 SMA / 200 SMA对比、MACD、信号线、柱状图、RSI。\n\n"
+            "  （二）波动与流动性\n"
+            "    覆盖布林带、ATR、份额变化、NAV/溢折价线索、VWMA、换手率。\n\n"
             "二、交易确认与执行计划\n"
             "  Write the body of this section directly without any sub-heading. Explain why the judgment is bullish / bearish / neutral, whether flow confirms or contradicts the setup, and the exact add / hold / reduce / wait conditions, support / resistance, and risk controls.\n\n"
             "三、关键价位与条件情景推演\n"
-            "  （一）关键价位与触发条件: explain the most important support / resistance / add / reduce / stop levels in coherent paragraphs rather than a checklist.\n"
-            "  （二）条件情景推演: use coherent paragraphs to connect those levels to the core scenario path, confirmation or falsification conditions, and the reason you assign higher weight to that scenario.\n\n"
+            "  （一）关键价位与触发条件\n"
+            "    用连贯段落而非清单，说明最重要的支撑/阻力/加仓/减仓/止损价位。\n"
+            "  （二）条件情景推演\n"
+            "    用连贯段落将价位与核心情景路径、确认或证伪条件、以及赋予该情景更高权重的理由联系起来。\n\n"
+            "在所有分析章节之后，报告最末附一个标题为'指标总览'的markdown表格，"
+            "包含指标、数值、位置、交易含义和关键阈值五列，覆盖本报告讨论的所有主要技术指标与资金指标。"
+            "表格之后附一段综合结论，明确配置方向（偏多/偏空/中性）、关键价位区间和资金状态判断。\n\n"
             "## 风格要求\n"
-            '- 标题导语与第一部分导语直接陈述结论，不得使用"本部分结论表明"、"该部分说明"、"This section shows"等元描述。\n'
+            '- 当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用"分别为"连接，例如"10日均线、20日均线、50日均线值分别为2.01元、2.02元、2.03元"，不得逐个单独陈述。\n'
+            '- 若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出"数据缺失""数据不足"等提示。\n'
+            '- 标题导语与每个一级章节导语直接陈述结论，不得使用"本节""本部分""该部分""这一节"等自指式开头（如"本节核心结论指出""本部分结论表明""该部分说明"）。\n'
             "- 导语段落必须高于小节层面：综合方向、动量质量、资金确认与交易含义，不得简单复述下方小节内容。\n"
-            "- 第二部分直接写正文，不得在标题下插入独立导语或帽段。\n"
             '- 使用上述精确的三段章节结构，不得引入"核心交易信号"、"结论依据"等额外标题。\n'
             '- 若使用"多头排列"、"金叉"、"发散"、"背离"、"放量突破"等技术术语，必须立即用通俗语言解释并说明交易含义，不得出现"标准多头发散形态"等未解释行话。\n'
             '- 每个主要信号之后必须回答两个问题："这意味着什么"和"对交易应该怎么做"。\n'
@@ -251,7 +123,7 @@ def create_etf_market_analyst(llm):
             "一、市场结构与量价诊断\n\n"
             "趋势、动量与资金流三者仍在同向确认偏多结构，短期回踩风险可控但需关注RSI超买信号。\n\n"
             "（一）趋势与动量\n\n"
-            "10日均线452元、20日均线448元、50日均线443元、200日均线425元，短中长期均线全部向上发散——这意味着不同时间维度的买盘力量都在主导。MACD的DIF为1.05、DEA为0.78，两者均在零轴上方且差值持续扩大，柱状图连续五天走高，说明上涨动能正在增强。RSI读数64，距超买区70尚有余地，未出现顶背离信号。综合来看，趋势与动量同步确认偏多方向。\n\n"
+            "10日均线、20日均线、50日均线、200日均线值分别为452元、448元、443元、425元，短中长期均线全部向上发散——这意味着不同时间维度的买盘力量都在主导。MACD的DIF为1.05、DEA为0.78，两者均在零轴上方且差值持续扩大，柱状图连续五天走高，说明上涨动能正在增强。RSI读数64，距超买区70尚有余地，未出现顶背离信号。综合来看，趋势与动量同步确认偏多方向。\n\n"
             "（二）波动与流动性\n\n"
             "布林带中轨449元、上轨462元，价格在中轨与上轨之间运行，带宽扩张但方向向上，说明波动率上升有利于趋势延续。ATR为1.8元，约占价格4%，若以ATR设置止损可参考446元（中轨下方）。份额近一周增长2.3%，NAV溢价率0.18%处于正常范围，换手率1.3%未见异常拥挤信号。VWMA稳步上行，确认放量突破有效，资金持续流入。\n\n"
             "二、交易确认与执行计划\n\n"
@@ -301,46 +173,9 @@ def create_etf_market_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
-        report = strip_meta_lead_prefixes(report) if report else report
-        report = _strip_etf_market_scaffold_labels(report) if report else report
-        report = _strip_etf_market_second_section_subheading(report) if report else report
-
-        # Quality validation: rewrite if coverage/intro/depth checks fail
-        if report and not getattr(result, "tool_calls", None) and _etf_market_report_needs_rewrite(report):
-            logger.info("ETF market report failed quality checks; rewriting")
-            rewrite_prompt = (
-                "你上一份ETF市场报告不够完整或缺乏可操作深度。请严格按照以下要求重新生成：\n"
-                "- 不要使用报告标题或H1标题，直接以2-4句概述段落开头\n"
-                "- 恰好使用三个一级章节：一、市场结构与量价诊断（含趋势与动量、波动与流动性两个二级标题）、二、交易确认与执行计划（直接正文，无子标题）、三、关键价位与条件情景推演（含关键价位与触发条件、条件情景推演两个二级标题）\n"
-                "- 必须覆盖趋势(SMA/EMA)、动量(MACD)、超买超卖(RSI)、波动率(Bollinger)和量能确认(VWMA)\n"
-                "- 以清晰的可操作信号开头（偏多/偏空/中性及原因）\n"
-                "- 结合份额变化、NAV溢价/折价和换手率判断资金积累/分配/拥挤状态\n"
-                "- 每个技术术语用通俗语言解释并说明交易含义\n"
-                '- 导语直接陈述结论，不得使用"本部分结论表明"等元描述\n'
-                '- 第三部分使用段落式表达，不得使用"判断："、"证据："等标签\n'
-                "- 以markdown摘要表结尾\n\n"
-                f"Previous report:\n{report}"
-            )
-            try:
-                rewrite_response = llm.invoke(rewrite_prompt)
-                from etfagents.content_utils import extract_text_content
-                rewritten = extract_text_content(rewrite_response.content)
-                if rewritten and not _etf_market_report_needs_rewrite(rewritten):
-                    report = normalize_chinese_role_terms(rewritten)
-                    report = strip_meta_lead_prefixes(report)
-                    report = _strip_etf_market_scaffold_labels(report)
-                    report = _strip_etf_market_second_section_subheading(report)
-                    result = AIMessage(content=report)
-            except Exception as exc:
-                logger.warning("ETF market report rewrite failed: %s", exc)
-
+        report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
         report = strip_report_title(report) if report else report
-        report = normalize_chinese_section_headings(report) if report else report
-        report = ensure_title_lead_paragraph(
-            report,
-            _DEFAULT_TITLE_LEAD_ZH,
-            _DEFAULT_TITLE_LEAD_EN,
-        ) if report else report
+        report = strip_self_referential_meta_leads(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

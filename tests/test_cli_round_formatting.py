@@ -68,26 +68,13 @@ class CliRoundFormattingTests(unittest.TestCase):
 
         self.assertIn("### 第 1 轮", formatted)
         self.assertIn("#### 多头分析师\n\n第一轮多头观点", formatted)
-        self.assertIn("反馈快照:\n- 立场: 买入", formatted)
-        self.assertIn("- 本轮新增与反驳: 强化多头", formatted)
-        self.assertIn("金价走强", formatted)
-        self.assertIn("估值担忧可控", formatted)
-        self.assertIn("- 待验证: 跟踪量价", formatted)
+        self.assertNotIn("反馈快照", formatted)
         self.assertIn("#### 空头分析师\n\n第一轮空头观点", formatted)
         self.assertIn("### 第 2 轮", formatted)
         self.assertIn("#### 多头分析师\n\n第二轮多头补充", formatted)
-        self.assertIn("更激进", formatted)
-        self.assertIn("避险升级", formatted)
-        self.assertIn("回撤是买点", formatted)
-        self.assertIn("- 待验证: 盯并购兑现", formatted)
         self.assertIn("#### 空头分析师\n\n第二轮空头反驳", formatted)
-        self.assertIn("转向更谨慎", formatted)
-        self.assertIn("风险升高", formatted)
-        self.assertIn("高位放量", formatted)
-        self.assertIn("- 待验证: 盯库存", formatted)
         self.assertIn("### 研究经理结论\n研究经理: 最终结论", formatted)
-        self.assertIn("#### 反馈快照摘要", formatted)
-        self.assertLess(formatted.index("研究经理: 最终结论"), formatted.index("#### 反馈快照摘要"))
+        self.assertNotIn("#### 反馈快照摘要", formatted)
         self.assertNotIn("\n\n\n", formatted)
 
     def test_prepare_report_markdown_inserts_blank_line_after_visible_heading(self):
@@ -105,7 +92,7 @@ class CliRoundFormattingTests(unittest.TestCase):
             "一、总体研判\n\n本部分通过量化数据比对、机构情绪拆解与产业链传导机制，量化评估ETF持仓品种的风险收益比。二、深度分析\n\n后续正文。"
         )
 
-        self.assertIn("风险收益比。\n\n二、深度分析", formatted)
+        self.assertIn("风险收益比。\n\n# 二、深度分析", formatted)
         self.assertIn("后续正文。", formatted)
 
     def test_prepare_report_markdown_strips_exchange_only_pseudo_title_line(self):
@@ -166,11 +153,8 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("### 第 1 轮", formatted)
         self.assertIn("#### 激进风险分析师\n\nRound 1 aggressive case", formatted)
         self.assertIn("决策摘要:\n- 评级: SELL", formatted)
-        self.assertIn("FEEDBACK SNAPSHOT:\n- Stance: Sell", formatted)
-        self.assertIn("- New this round & rebuttal: More defensive", formatted)
-        self.assertIn("Momentum broke", formatted)
-        self.assertIn("Upside is capped", formatted)
-        self.assertIn("- To verify: Watch liquidity", formatted)
+        self.assertNotIn("FEEDBACK SNAPSHOT", formatted)
+        self.assertNotIn("反馈快照", formatted)
         self.assertIn("#### 保守风险分析师\n\nRound 1 conservative case", formatted)
         self.assertIn("#### 中性风险分析师\n\nRound 1 neutral case", formatted)
         self.assertIn("### 第 2 轮", formatted)
@@ -195,7 +179,7 @@ class CliRoundFormattingTests(unittest.TestCase):
 
         formatted = format_research_team_history(debate_state)
 
-        self.assertIn("反馈快照:\n- 立场:", formatted)
+        self.assertNotIn("反馈快照", formatted)
         self.assertNotIn("##### 自动复盘", formatted)
         self.assertNotIn("##### 本轮复盘", formatted)
 
@@ -225,12 +209,8 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("#### 一、辩论结论", formatted)
         self.assertIn("#### 二、行为逻辑", formatted)
         self.assertIn("#### 三、持仓建议", formatted)
-        self.assertIn("#### 反馈快照摘要", formatted)
-        self.assertIn("本轮新增与反驳", formatted)
-        self.assertIn("需求验证节奏的约束", formatted)
-        self.assertIn("空头高估了估值压缩速度", formatted)
-        self.assertNotIn("(完整内容见:", formatted)
-        self.assertLess(formatted.index("#### 一、辩论结论"), formatted.index("#### 反馈快照摘要"))
+        self.assertNotIn("#### 反馈快照摘要", formatted)
+        self.assertNotIn("反馈快照", formatted)
 
     def test_research_manager_dedupes_repeated_feedback_snapshots(self):
         repeated_snapshot = (
@@ -256,7 +236,7 @@ class CliRoundFormattingTests(unittest.TestCase):
         formatted = format_research_team_history(debate_state)
 
         self.assertEqual(formatted.count("反馈快照:"), 0)
-        self.assertEqual(formatted.count("#### 反馈快照摘要"), 1)
+        self.assertEqual(formatted.count("#### 反馈快照摘要"), 0)
 
     def test_research_manager_normalizes_judicial_wording_to_debate_conclusion(self):
         debate_state = {
