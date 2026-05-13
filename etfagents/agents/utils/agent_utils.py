@@ -223,7 +223,6 @@ ROLE_LOCALIZATION_MAP: dict[str, str] = {
     "Market & Flow Analyst": "市场与资金流分析师",
     "Sentiment & Catalyst Analyst": "舆情与事件分析师",
     "Social Analyst": "社交情绪分析师",
-    "News Analyst": "新闻分析师",
     "Macro Analyst": "宏观分析师",
     "Macro Regime Analyst": "宏观框架分析师",
     "ETF Structure Analyst": "ETF结构分析师",
@@ -255,8 +254,8 @@ ROLE_VARIANT_NAMES: dict[str, set[str]] = {
     "Neutral Analyst": {"Neutral Analyst", "中性分析师", "中性风险分析师"},
     "Market & Flow Analyst": {"Market & Flow Analyst", "Market Analyst", "市场与资金流分析师", "市场分析师"},
     "Sentiment & Catalyst Analyst": {"Sentiment & Catalyst Analyst", "Social Analyst", "舆情与事件分析师", "社交情绪分析师"},
-    "Macro Analyst": {"Macro Analyst", "News Analyst", "宏观分析师", "新闻分析师"},
-    "Macro Regime Analyst": {"Macro Regime Analyst", "Macro Analyst", "News Analyst", "宏观框架分析师", "宏观分析师", "新闻分析师"},
+    "Macro Analyst": {"Macro Analyst", "宏观分析师"},
+    "Macro Regime Analyst": {"Macro Regime Analyst", "Macro Analyst", "宏观框架分析师", "宏观分析师"},
     "Commodity Analyst": {"Commodity Analyst", "Meso Commodity Analyst", "ETF Structure Analyst", "商品集群分析师", "中观大宗商品分析师", "ETF结构分析师"},
     "Meso Commodity Analyst": {"Commodity Analyst", "Meso Commodity Analyst", "ETF Structure Analyst", "商品集群分析师", "中观大宗商品分析师", "ETF结构分析师"},
     "ETF Structure Analyst": {"ETF Structure Analyst", "ETF结构分析师"},
@@ -269,6 +268,7 @@ ROLE_VARIANT_NAMES: dict[str, set[str]] = {
         "Broker Research Analyst",
         "行业研究分析师",
         "ETF行业研究分析师",
+        "ETF持仓行业研究分析师",
         "ETF持仓映射行业研究分析师",
         "券商研报分析师",
     },
@@ -2109,6 +2109,21 @@ _VISIBLE_DEBATE_LIST_RE = re.compile(
 )
 
 
+_NUMERIC_BOLD_RE = re.compile(
+    r"^[\d\s.,%＋+\-—~≈≤≥<>=元美元港元点bpbps亿万千百倍x]+"
+    r"(?:[日周月年均线布林上下中轨]|SMA|EMA|ATR|VWMA|MACD|RSI)?"
+    r"[\d\s.,%＋+\-—~≈≤≥<>=元美元港元点bpbps亿万千百倍x]*$",
+    re.IGNORECASE,
+)
+
+
+def _strip_bold_if_not_numeric(match: re.Match) -> str:
+    inner = match.group(1)
+    if _NUMERIC_BOLD_RE.match(inner.strip()):
+        return match.group(0)
+    return inner
+
+
 def normalize_visible_debate_body(text: str) -> str:
     """Normalize visible debate bodies for display without touching structured blocks."""
     content = (text or "").strip()
@@ -2124,7 +2139,7 @@ def normalize_visible_debate_body(text: str) -> str:
             if not line:
                 continue
             line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line)
-            line = re.sub(r"(?<!\*)\*\*(.+?)\*\*(?!\*)", r"\1", line)
+            line = re.sub(r"(?<!\*)\*\*(.+?)\*\*(?!\*)", _strip_bold_if_not_numeric, line)
             line = re.sub(r"(?<!_)__(.+?)__(?!_)", r"\1", line)
             line = re.sub(r"^\s*>+\s*", "", line)
             line = line.strip()
@@ -2256,25 +2271,18 @@ def strip_all_feedback_snapshots(text: str) -> str:
         cleaned = updated
 
 
-_MANAGER_INSTRUCTION_MARKERS = (
-    "这一部分必须写成",
-    "必须引用报告中的具体数据",
-    "Give a clear, actionable ETF",
-    "Include concrete execution guidance",
-    "When writing in Chinese, avoid mixed English labels",
-    "The rating, the positioning recommendation text, and the final transaction proposal",
-    "Keep exactly one explicit final recommendation label",
-)
-
 _MANAGER_INSTRUCTION_INLINE_PATTERNS = (
-    re.compile(r"这一部分必须写成连贯分析段落[^。]*。?"),
-    re.compile(r"这一部分必须写成详细推理段落[^。]*。?"),
+    re.compile(r"这一部分必须写成(?:连贯分析|详细推理|详细执行)段落[^。]*。?"),
     re.compile(r"必须引用报告中的具体数据来支撑判断[^。]*。?"),
-    re.compile(r"Give a clear, actionable ETF(?: portfolio)? recommendation[^.\n]*\.?"),
-    re.compile(r"Include concrete execution guidance:[^\n]*"),
-    re.compile(r"When writing in Chinese, avoid mixed English labels[^\n]*"),
-    re.compile(r"The rating, the positioning recommendation text, and the final transaction proposal[^\n]*"),
-    re.compile(r"Keep exactly one explicit final recommendation label[^\n]*"),
+    re.compile(r"(?:必须|需要)引用[^。]{0,30}(?:具体数据|数据支撑)[^。]*。?"),
+    re.compile(r"Give a clear, actionable ETF(?: portfolio)? recommendation[^.\n]*\.?", re.IGNORECASE),
+    re.compile(r"Include concrete execution guidance[^\n]*", re.IGNORECASE),
+    re.compile(r"When writing in Chinese, avoid mixed English labels[^\n]*", re.IGNORECASE),
+    re.compile(r"The rating, the positioning recommendation text, and the final transaction proposal[^\n]*", re.IGNORECASE),
+    re.compile(r"Keep exactly one explicit (?:final )?recommendation label[^\n]*", re.IGNORECASE),
+    re.compile(r"Output only the finished report[^\n]*", re.IGNORECASE),
+    re.compile(r"Never copy, quote, or paraphrase (?:the )?writing rules[^\n]*", re.IGNORECASE),
+    re.compile(r"do not repeat a section heading once it has already appeared[^\n]*", re.IGNORECASE),
 )
 
 
@@ -2284,11 +2292,6 @@ def strip_manager_instruction_leakage(text: str) -> str:
     if not cleaned:
         return ""
 
-    cleaned = "\n".join(
-        line
-        for line in cleaned.splitlines()
-        if not any(marker in line for marker in _MANAGER_INSTRUCTION_MARKERS)
-    )
     for pattern in _MANAGER_INSTRUCTION_INLINE_PATTERNS:
         cleaned = pattern.sub("", cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
@@ -2697,7 +2700,7 @@ def build_report_title(
         normalized_ticker = ""
     elif "." in normalized_ticker:
         code, suffix = normalized_ticker.rsplit(".", 1)
-        if not code.strip() or suffix.upper() in invalid_display_tickers and code.upper() in invalid_display_tickers:
+        if not code.strip() or (suffix.upper() in invalid_display_tickers and code.upper() in invalid_display_tickers):
             normalized_ticker = ""
     name = (instrument_name or "").strip()
     if not name and normalized_ticker and normalized_ticker.lower() != "unknown":
@@ -2742,6 +2745,8 @@ CHINESE_ROLE_TERM_REPLACEMENTS = {
     "中性分析师": "中性风险分析师",
     "根本分析": "基本面分析",
     "根本面分析": "基本面分析",
+    "新闻分析师": "宏观分析师",
+    "ETF持仓行业研究分析师": "行业研究分析师",
     "ETF持仓映射行业研究分析师": "行业研究分析师",
     "ETF头部企业研究分析师": "个股研究分析师",
     "ETF头部成分股研究分析师": "个股研究分析师",

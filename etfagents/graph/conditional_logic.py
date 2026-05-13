@@ -19,10 +19,6 @@ class ConditionalLogic:
             return tool_node
         return clear_node
 
-    def should_continue_market(self, state: AgentState):
-        """Determine if market analysis should continue."""
-        return self.should_continue_market_flow(state)
-
     def should_continue_market_flow(self, state: AgentState):
         return self._analyst_route(state, "tools_market_flow", "Msg Clear Market Flow")
 
@@ -44,10 +40,6 @@ class ConditionalLogic:
     def should_continue_macro_regime(self, state: AgentState):
         return self._analyst_route(state, "tools_macro_regime", "Msg Clear Macro Regime")
 
-    def should_continue_fundamentals(self, state: AgentState):
-        """Determine if fundamentals analysis should continue."""
-        return self._analyst_route(state, "tools_fundamentals", "Msg Clear Fundamentals")
-
     def should_continue_etf_structure(self, state: AgentState):
         return self.should_continue_meso_commodity(state)
 
@@ -64,20 +56,12 @@ class ConditionalLogic:
     def should_continue_etf_macro(self, state: AgentState):
         return self.should_continue_holdings_industry(state)
 
-    def should_continue_broker_research(self, state: AgentState):
-        """Determine if broker research analysis should continue."""
-        return self.should_continue_holdings_industry(state)
-
     def should_continue_holdings_industry(self, state: AgentState):
         return self._analyst_route(
             state,
             "tools_holdings_industry",
             "Msg Clear Holdings-Industry Research",
         )
-
-    def should_continue_stock_research(self, state: AgentState):
-        """Determine if stock research analysis should continue."""
-        return self.should_continue_top_holdings(state)
 
     def should_continue_top_holdings(self, state: AgentState):
         return self._analyst_route(

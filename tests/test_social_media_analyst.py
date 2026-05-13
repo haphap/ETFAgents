@@ -66,10 +66,10 @@ class SocialMediaAnalystTests(unittest.TestCase):
             ["get_etf_info", "get_etf_holdings", "get_news", "get_global_news"],
         )
         system_msg = captured["system_message"]
-        self.assertIn("not limited to the ETF product itself", system_msg)
-        self.assertIn("dominant industries", system_msg)
-        self.assertIn("top-weight holdings", system_msg)
-        self.assertIn("macro events", system_msg)
-        self.assertIn("support, cap, or drag ETF price action", system_msg)
+        self.assertIn("不限于ETF产品本身", system_msg)
+        self.assertIn("主导行业", system_msg)
+        self.assertIn("最高权重持仓", system_msg)
+        self.assertIn("宏观事件", system_msg)
+        self.assertIn("支撑、压制还是拖累ETF价格", system_msg)
         self.assertIn("真实支撑与短期噪声", system_msg)
-        self.assertIn("do not use English labels like 'Genuine Support'", system_msg)
+        self.assertIn("不得使用英文标签", system_msg)

@@ -20,6 +20,7 @@ from etfagents.agents.utils.report_leads import (
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    normalize_chinese_section_headings,
     strip_report_title,
     strip_meta_lead_prefixes,
 )
@@ -206,49 +207,68 @@ def create_etf_market_analyst(llm):
         tools = [get_etf_price_data, get_etf_indicators, get_etf_share, get_etf_nav, get_etf_universe]
 
         system_message = (
-            "You are an ETF market and flow analyst focused on entry timing, liquidity, and implementation quality."
-            " Build a combined technical-and-flow report for the target ETF using price action, moving averages, momentum,"
-            " volatility, share changes, NAV clues, and execution depth.\n\n"
-            "You should normally pull 3-6 months of ETF price history and explicitly cover:\n\n"
-            "Write a 2-4 sentence overview paragraph before any section headings "
-            "that summarizes the current directional bias, the most important confirming or contradicting signal, and the trading implication. "
-            "This lead paragraph must appear before any section headings.\n"
+            "你是一名ETF市场与资金流分析师，聚焦入场时机、流动性与执行质量。"
+            "基于价格走势、均线、动量、波动率、份额变化、NAV线索与执行深度，为目标ETF构建一份技术面与资金流综合诊断报告。\n\n"
+            "## 数据获取\n"
+            "1. 先调用 get_etf_price_data 获取价格数据，通常拉取3-6个月历史。\n"
+            "2. 再调用 get_etf_indicators 获取技术指标，必须使用下方精确的指标ID，"
+            "不得使用 MA、SMA、EMA 等通用别名。若需通用均线基准，请使用 close_20_sma。\n"
+            "3. 调用 get_etf_share 与 get_etf_nav 获取份额与NAV数据，用于追踪资金流向。\n"
+            "工具调用顺序：get_etf_price_data → get_etf_indicators → get_etf_share / get_etf_nav。"
+            "若某个工具失败则跳过并继续，但至少确保价格数据与趋势、动量指标的覆盖。\n\n"
+            f"可用指标ID：\n{_etf_indicator_catalog()}\n\n"
+            "份额变化解读：份额增长代表资金净流入，份额下降代表赎回流出。"
+            "份额持续增长且换手率适中，表明资金在积累；换手率急升但份额持平或下降，则暗示拥挤或投机。"
+            "NAV溢价/折价也是资金信号：持续溢价说明需求旺盛，持续折价说明赎回压力，溢价收窄说明热情降温。\n\n"
+            "Write a 2-4 sentence overview paragraph that summarizes the current directional bias, "
+            "the most important confirming or contradicting signal, and the trading implication before section one.\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
             "Use EXACTLY three top-level sections (一、二、三). Do NOT create additional top-level sections.\n"
             "Section one must begin with a 2-3 sentence lead paragraph summarizing the key conclusions of that section, then a blank line before sub-sections.\n"
             "Section two must NOT have a separate lead paragraph or hat paragraph; write the body directly under the heading.\n\n"
-            "一、市场结构与量价诊断 (Market Structure & Price-Flow Diagnosis)\n"
-            "  （一）趋势与动量 (Trend & Momentum): 10 EMA / 20 SMA / 50 SMA / 200 SMA comparisons, MACD, signal line, histogram, RSI\n\n"
-            "  （二）波动与流动性 (Volatility & Liquidity): Bollinger bands, ATR, share change, NAV / premium-discount clues, VWMA, turnover\n\n"
-            "二、交易确认与执行计划 (Trade Confirmation & Execution Plan)\n"
+            "一、市场结构与量价诊断\n"
+            "  （一）趋势与动量: 10 EMA / 20 SMA / 50 SMA / 200 SMA comparisons, MACD, signal line, histogram, RSI\n\n"
+            "  （二）波动与流动性: Bollinger bands, ATR, share change, NAV / premium-discount clues, VWMA, turnover\n\n"
+            "二、交易确认与执行计划\n"
             "  Write the body of this section directly without any sub-heading. Explain why the judgment is bullish / bearish / neutral, whether flow confirms or contradicts the setup, and the exact add / hold / reduce / wait conditions, support / resistance, and risk controls.\n\n"
-            "三、关键价位与条件情景推演 (Key Levels & Conditional Scenario Analysis)\n"
-            "  （一）关键价位与触发条件 (Key Levels & Trigger Conditions): explain the most important support / resistance / add / reduce / stop levels in coherent paragraphs rather than a checklist.\n"
-            "  （二）条件情景推演 (Conditional Scenario Analysis): use coherent paragraphs to connect those levels to the core scenario path, confirmation or falsification conditions, and the reason you assign higher weight to that scenario.\n\n"
-            "When using `get_etf_indicators`, you must call the tool with the exact supported indicator IDs below."
-            " Do not use generic aliases such as `MA`, `SMA`, `EMA`, or natural-language indicator names unless they"
-            " exactly match one of these tool parameters:\n"
-            f"{_etf_indicator_catalog()}\n\n"
-            "If you need a generic moving-average baseline, use `close_20_sma` rather than `MA`.\n\n"
-            "The final report must explain what current readings imply for ETF allocation timing and whether capital is accumulating, distributing, or crowding the product."
-            " End with a compact markdown summary table.\n\n"
-            "STYLE RULES — strictly follow:\n"
-            "- For the title lead and the 2-3 sentence lead under section one, state the conclusion directly. "
-            "Do NOT use lead-ins such as '本部分结论表明', '该部分说明', '这一节意味着', 'This section shows', or similar meta phrasing.\n"
-            "- Section two is direct body only: do NOT insert a separate lead paragraph, hat paragraph, or mini-summary before the main analysis.\n"
-            "- Section three must restore the former '关键价位与条件情景推演' function, but now organize it into exactly two sub-sections: （一）关键价位与触发条件 and （二）条件情景推演.\n"
-            "- Use the exact three-section hierarchy above. Do NOT introduce headings like '核心交易信号', '结论依据', emojis, or extra first-level sections.\n"
-            "- Those lead paragraphs must sit one level above the sub-sections: synthesize direction, momentum quality, flow confirmation, and trading implication. "
-            "Do NOT simply restate the same indicator observations that will appear immediately below under the sub-sections.\n"
-            "- If you use technical jargon such as '多头排列', '金叉', '发散', '背离', '放量突破', or similar shorthand, immediately explain it in plain language and state the trading meaning. "
-            "Do NOT write unexplained phrases such as '标准多头发散形态'.\n"
-            "- After every major signal, answer both questions: '这意味着什么' and '对交易应该怎么做'.\n"
-            "- Paragraph-based expression: in section three, do NOT use quiz-like labels such as '判断：', '证据：', '关键价位：', '条件情景：', or '这意味着什么：'. "
-            "Instead, let the signal, judgment, evidence, confidence, and trigger path flow naturally inside complete strategy paragraphs.\n"
-            "- Anti-example (forbidden): '判断：偏多。关键价位：448-450。条件情景：若放量突破则继续加仓。'\n"
-            "- Positive example (target style): '当前448-450一带既是20日均线与前期密集成交区重叠的支撑带，也是判断这轮偏多结构是否仍有效的第一道关口。若价格回踩后成交量没有明显失速、且VWMA继续向上抬升，说明资金承接并未破坏，基准情景仍是震荡后继续上攻；反之，一旦跌破该区间且量能放大为抛压主导，就应把情景切换为结构转弱并优先减仓。'\n"
+            "三、关键价位与条件情景推演\n"
+            "  （一）关键价位与触发条件: explain the most important support / resistance / add / reduce / stop levels in coherent paragraphs rather than a checklist.\n"
+            "  （二）条件情景推演: use coherent paragraphs to connect those levels to the core scenario path, confirmation or falsification conditions, and the reason you assign higher weight to that scenario.\n\n"
+            "## 风格要求\n"
+            '- 标题导语与第一部分导语直接陈述结论，不得使用"本部分结论表明"、"该部分说明"、"This section shows"等元描述。\n'
+            "- 导语段落必须高于小节层面：综合方向、动量质量、资金确认与交易含义，不得简单复述下方小节内容。\n"
+            "- 第二部分直接写正文，不得在标题下插入独立导语或帽段。\n"
+            '- 使用上述精确的三段章节结构，不得引入"核心交易信号"、"结论依据"等额外标题。\n'
+            '- 若使用"多头排列"、"金叉"、"发散"、"背离"、"放量突破"等技术术语，必须立即用通俗语言解释并说明交易含义，不得出现"标准多头发散形态"等未解释行话。\n'
+            '- 每个主要信号之后必须回答两个问题："这意味着什么"和"对交易应该怎么做"。\n'
+            '- 第三部分采用段落式表达，不得使用"判断："、"证据："、"关键价位："、"条件情景："等标签。信号、判断、证据、信心水平与触发路径应融入完整的策略段落中。\n'
+            "- 反面示例（禁止）：'判断：偏多。关键价位：448-450。条件情景：若放量突破则继续加仓。'\n"
+            "- 正面示例（目标风格）：'当前448-450一带既是20日均线与前期密集成交区重叠的支撑带，也是判断这轮偏多结构是否仍有效的第一道关口。若价格回踩后成交量没有明显失速、且VWMA继续向上抬升，说明资金承接并未破坏，基准情景仍是震荡后继续上攻；反之，一旦跌破该区间且量能放大为抛压主导，就应把情景切换为结构转弱并优先减仓。'\n\n"
+            "## 完整报告示例（仅作风格参考，实际内容以目标ETF数据为准）\n\n"
+            "价格站稳50日均线上方，短中期均线同步向上，MACD柱状图持续扩张，量价结构偏多，但RSI接近超买区需要警惕短期回踩。\n\n"
+            "一、市场结构与量价诊断\n\n"
+            "趋势、动量与资金流三者仍在同向确认偏多结构，短期回踩风险可控但需关注RSI超买信号。\n\n"
+            "（一）趋势与动量\n\n"
+            "10日均线452元、20日均线448元、50日均线443元、200日均线425元，短中长期均线全部向上发散——这意味着不同时间维度的买盘力量都在主导。MACD的DIF为1.05、DEA为0.78，两者均在零轴上方且差值持续扩大，柱状图连续五天走高，说明上涨动能正在增强。RSI读数64，距超买区70尚有余地，未出现顶背离信号。综合来看，趋势与动量同步确认偏多方向。\n\n"
+            "（二）波动与流动性\n\n"
+            "布林带中轨449元、上轨462元，价格在中轨与上轨之间运行，带宽扩张但方向向上，说明波动率上升有利于趋势延续。ATR为1.8元，约占价格4%，若以ATR设置止损可参考446元（中轨下方）。份额近一周增长2.3%，NAV溢价率0.18%处于正常范围，换手率1.3%未见异常拥挤信号。VWMA稳步上行，确认放量突破有效，资金持续流入。\n\n"
+            "二、交易确认与执行计划\n\n"
+            "趋势、动量、波动率与资金流四维共振偏多，执行上以回踩支撑加仓为主、条件化风控为辅。若RSI进入超买区后出现死叉，应优先收缩仓位而非追高；若份额从净流入转为净流出，则说明资金在撤退，需重新评估偏多逻辑。当前建议维持偏多配置，仓位控制在5-6成，回踩448-450区间可加至7成，止损设在446元下方。\n\n"
+            "三、关键价位与条件情景推演\n\n"
+            "当前448-450一带既是20日均线与前期密集成交区重叠的支撑带，也是判断这轮偏多结构是否仍有效的第一道关口。若价格回踩后成交量没有明显失速、且VWMA继续向上抬升，说明资金承接并未破坏，基准情景仍是震荡后继续上攻462-465阻力带。操作上，若回踩448-450不破且量能未失速，可加仓至6-7成，止损446元下方；若放量跌破448则先减至3-4成，进一步跌破440则止损离场。最乐观情景下，若放量突破462元可追加至8成，目标470元以上。基于当前信号强度，基准情景权重约65%，最乐观情景约25%，转弱情景约10%。需警惕的风险包括：RSI进入超买区后死叉可能触发短期回调，份额从净流入转为净流出将否定偏多逻辑。\n\n"
+            "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| 10/20/50/200 SMA | 452/448/443/425 | 上方 | 多头排列，趋势偏多 | 跌破448则短期转弱 |\n"
+            "| MACD | DIF 1.05, DEA 0.78 | 零轴上方 | 动能增强 | DIF下穿DEA则动能衰减 |\n"
+            "| RSI | 64 | 中性偏强 | 尚有空间但接近超买 | 上穿70则警惕回踩 |\n"
+            "| 布林带 | 中轨449, 上轨462 | 中轨与上轨之间 | 波动率扩张，方向向上 | 跌破中轨则趋势减弱 |\n"
+            "| 份额变化 | +2.3% | — | 资金净流入 | 连续下降则资金撤退 |\n"
+            "| 换手率 | 1.3% | 正常 | 未见拥挤 | 超过3%则拥挤加剧 |\n\n"
+            "综合结论：偏多配置，回踩448-450加仓，止损446，目标462-465。资金状态：份额增长+溢价正常+换手率适中=资金积累中。\n\n"
+            "## 语言\n"
+            "分析文本使用中文。工具名称、指标ID与行情代码保持英文。\n"
             + get_language_instruction()
         )
 
@@ -289,30 +309,16 @@ def create_etf_market_analyst(llm):
         if report and not getattr(result, "tool_calls", None) and _etf_market_report_needs_rewrite(report):
             logger.info("ETF market report failed quality checks; rewriting")
             rewrite_prompt = (
-                "Your previous ETF market report was incomplete or lacked actionable depth. "
-                "Please produce a new report that:\n"
-                "- Does NOT use any report title or H1 heading; start directly with a 2-4 sentence overview paragraph before any section headings\n"
-                "- Do NOT repeat the report subject in the body or create pseudo-title lines from exchange-only suffixes such as SH / SZ / HK\n"
-                "- Uses EXACTLY these three top-level sections and no others:\n"
-                "  一、市场结构与量价诊断\n"
-                "    [starts with a 2-3 sentence lead paragraph]\n"
-                "    （一）趋势与动量\n"
-                "    （二）波动与流动性\n"
-                "  二、交易确认与执行计划\n"
-                "    [direct body only; no sub-heading and no separate lead paragraph under section two]\n"
-                "  三、关键价位与条件情景推演\n"
-                "    （一）关键价位与触发条件\n"
-                "    （二）条件情景推演\n"
-                "- Covers ALL of: trend (SMA/EMA), momentum (MACD), overbought/oversold (RSI), "
-                "volatility (Bollinger), and volume confirmation (VWMA)\n"
-                "- Opens with a clear actionable signal (bullish/bearish/neutral and why)\n"
-                "- Restores the original '关键价位与条件情景推演' purpose with specific support/resistance levels and conditional scenarios\n"
-                "- Explains every technical term in plain language and immediately states the trading implication; "
-                "do not leave phrases like '标准多头发散形态' unexplained\n"
-                "- For the title lead and each top-level section lead, state the conclusion directly instead of using meta phrases like '本部分结论表明'\n"
-                "- In section three, do NOT use labels such as '判断：', '证据：', '关键价位：', '条件情景：' or similar scaffolding; write flowing paragraphs instead\n"
-                "- Do NOT add headings or labels such as '核心交易信号', '结论依据', emoji banners, or similar scaffolding\n"
-                "- Ends with a compact markdown summary table\n\n"
+                "你上一份ETF市场报告不够完整或缺乏可操作深度。请严格按照以下要求重新生成：\n"
+                "- 不要使用报告标题或H1标题，直接以2-4句概述段落开头\n"
+                "- 恰好使用三个一级章节：一、市场结构与量价诊断（含趋势与动量、波动与流动性两个二级标题）、二、交易确认与执行计划（直接正文，无子标题）、三、关键价位与条件情景推演（含关键价位与触发条件、条件情景推演两个二级标题）\n"
+                "- 必须覆盖趋势(SMA/EMA)、动量(MACD)、超买超卖(RSI)、波动率(Bollinger)和量能确认(VWMA)\n"
+                "- 以清晰的可操作信号开头（偏多/偏空/中性及原因）\n"
+                "- 结合份额变化、NAV溢价/折价和换手率判断资金积累/分配/拥挤状态\n"
+                "- 每个技术术语用通俗语言解释并说明交易含义\n"
+                '- 导语直接陈述结论，不得使用"本部分结论表明"等元描述\n'
+                '- 第三部分使用段落式表达，不得使用"判断："、"证据："等标签\n'
+                "- 以markdown摘要表结尾\n\n"
                 f"Previous report:\n{report}"
             )
             try:
@@ -329,6 +335,7 @@ def create_etf_market_analyst(llm):
                 logger.warning("ETF market report rewrite failed: %s", exc)
 
         report = strip_report_title(report) if report else report
+        report = normalize_chinese_section_headings(report) if report else report
         report = ensure_title_lead_paragraph(
             report,
             _DEFAULT_TITLE_LEAD_ZH,

@@ -9,8 +9,8 @@ from etfagents.agents.analysts.etf_industry_research_analyst import (
 from etfagents.agents.analysts.etf_market_analyst import (
     create_etf_market_analyst,
 )
-from etfagents.agents.analysts.news_analyst import (
-    create_news_analyst,
+from etfagents.agents.analysts.macro_analyst import (
+    create_macro_analyst,
 )
 from etfagents.agents.analysts.social_media_analyst import (
     create_social_media_analyst,
@@ -24,6 +24,7 @@ from etfagents.agents.analysts.etf_stock_research_analyst import (
 from etfagents.agents.utils.agent_utils import build_report_title
 from etfagents.agents.utils.report_leads import (
     ensure_h1_title,
+    normalize_chinese_section_headings,
     strip_meta_lead_prefixes,
     strip_report_title,
 )
@@ -61,18 +62,21 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("Per-Report Deep Analysis", system_msg)
-        self.assertIn("Cross-Report Comparative Analysis", system_msg)
+        self.assertIn("逐份深度分析", system_msg)
+        self.assertIn("跨报告比较分析", system_msg)
         self.assertIn("ETF Exposure Read-Through", system_msg)
         self.assertIn("Supply-Chain Implications", system_msg)
         self.assertIn("一、行业主线与分歧焦点", system_msg)
-        self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
+        self.assertNotIn("一、行业主线与分歧焦点 (", system_msg)
+        self.assertIn("（一）共识主线", system_msg)
+        self.assertNotIn("（一）共识主线 (", system_msg)
+        self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
         self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)
-        self.assertIn("Summary Table", system_msg)
-        self.assertIn("Do NOT just list numbers", system_msg)
-        self.assertIn("industry allocation timing", system_msg)
-        self.assertIn("Never discuss data-source classification noise", system_msg)
-        self.assertIn("Exclude them entirely", system_msg)
+        self.assertIn("研报总览表", system_msg)
+        self.assertIn("不得仅罗列数字", system_msg)
+        self.assertIn("行业配置节奏", system_msg)
+        self.assertIn("数据源分类噪声", system_msg)
+        self.assertIn("应完全排除", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
@@ -102,22 +106,25 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("Per-Report Deep Analysis", system_msg)
-        self.assertIn("Cross-Report Comparative Analysis", system_msg)
+        self.assertIn("逐份深度分析", system_msg)
+        self.assertIn("跨报告比较分析", system_msg)
         self.assertIn("Earnings Estimate Consensus", system_msg)
         self.assertIn("Valuation Analysis", system_msg)
         self.assertIn("ETF Portfolio Impact", system_msg)
         self.assertIn("一、核心持仓共识与分歧", system_msg)
-        self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
-        self.assertIn("Do NOT just list numbers", system_msg)
-        self.assertIn("ETF return attribution", system_msg)
-        self.assertIn("retrieval artifacts", system_msg)
-        self.assertIn("Write a 2-4 sentence overview paragraph before any section headings", system_msg)
+        self.assertNotIn("一、核心持仓共识与分歧 (", system_msg)
+        self.assertIn("（一）共识主线", system_msg)
+        self.assertNotIn("（一）共识主线 (", system_msg)
+        self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
+        self.assertIn("不得仅罗列数字", system_msg)
+        self.assertIn("ETF收益归因", system_msg)
+        self.assertIn("检索伪影", system_msg)
+        self.assertIn("每项论点必须引用", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
-        self.assertIn("Do NOT use lead-ins such as '本部分结论表明'", system_msg)
+        self.assertIn("不得使用'本部分结论表明'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
-        self.assertIn("keep the original numbering hierarchy", system_msg)
+        self.assertIn("If the structure does not provide a heading, write one that is brief, forceful, and immediately usable", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
 
@@ -149,29 +156,31 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
             "近期合约表现总览",
             system_msg,
         )
-        self.assertIn("At the very end of the report, after all analytical sections", system_msg)
+        self.assertIn("在所有分析章节之后", system_msg)
         self.assertIn(
-            "within two weeks, can demand strength in copper and hot-rolled coil drive coking-coal warehouse-receipt drawdown",
+            "两周内，铜与热卷的需求强势能否驱动焦煤仓单去化",
             system_msg,
         )
         self.assertIn(
-            "failed PPI-to-CPI transmission",
+            "PPI向CPI传导失败",
             system_msg,
         )
         self.assertIn(
-            "warehouse receipts must fall with it",
+            "仓单必须同步下降",
             system_msg,
         )
-        self.assertIn("Paragraph-based expression", system_msg)
-        self.assertIn("Do NOT use quiz-like labels such as", system_msg)
-        self.assertIn("Anti-example (forbidden)", system_msg)
-        self.assertIn("Positive example (target style)", system_msg)
-        self.assertIn("Do NOT write a report title. Start directly with a 2-4 sentence overview paragraph", system_msg)
-        self.assertIn("Do NOT use lead-ins such as '本部分结论表明'", system_msg)
+        self.assertIn("段落式表达", system_msg)
+        self.assertIn("（一）基准情景 — 概率估计 (%)", system_msg)
+        self.assertNotIn("（一）基准情景 (", system_msg)
+        self.assertIn("不得使用'判断：'", system_msg)
+        self.assertIn("反面示例（禁止）", system_msg)
+        self.assertIn("正面示例（目标风格）", system_msg)
+        self.assertIn("冲突驱动", system_msg)
+        self.assertIn("不得使用'本部分结论表明'", system_msg)
+        self.assertIn("不要写'本节锁定'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
-        self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
-        self.assertIn("Forbidden example: `_HEADING_MAP =", system_msg)
+        self.assertIn("Do NOT output code blocks", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
 
@@ -199,25 +208,31 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("overview paragraph before any section headings", system_msg)
-        self.assertIn("Do NOT write unexplained phrases such as '标准多头发散形态'", system_msg)
+        self.assertIn("overview paragraph that summarizes", system_msg)
+        self.assertIn("标准多头发散形态", system_msg)
         self.assertIn("这意味着什么", system_msg)
         self.assertIn("对交易应该怎么做", system_msg)
         self.assertIn("Use EXACTLY three top-level sections (一、二、三)", system_msg)
+        self.assertIn("一、市场结构与量价诊断", system_msg)
+        self.assertNotIn("一、市场结构与量价诊断 (", system_msg)
+        self.assertIn("（一）趋势与动量", system_msg)
+        self.assertNotIn("（一）趋势与动量 (", system_msg)
         self.assertIn("关键价位与条件情景推演", system_msg)
         self.assertIn("（一）关键价位与触发条件", system_msg)
         self.assertIn("（二）条件情景推演", system_msg)
-        self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
-        self.assertIn("Do NOT introduce headings like '核心交易信号', '结论依据'", system_msg)
+        self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
+        self.assertIn("核心交易信号", system_msg)
+        self.assertIn("结论依据", system_msg)
         self.assertIn("without any sub-heading", system_msg)
         self.assertIn("must NOT have a separate lead paragraph or hat paragraph", system_msg)
-        self.assertIn("Paragraph-based expression: in section three", system_msg)
-        self.assertIn("Anti-example (forbidden)", system_msg)
-        self.assertIn("Positive example (target style)", system_msg)
+        self.assertIn("段落式表达", system_msg)
+        self.assertIn("反面示例（禁止）", system_msg)
+        self.assertIn("正面示例（目标风格）", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
+        self.assertIn("完整报告示例", system_msg)
 
 
 class ReportTitleNormalizationTests(unittest.TestCase):
@@ -287,19 +302,37 @@ class ReportTitleNormalizationTests(unittest.TestCase):
     def test_strip_meta_lead_prefixes_removes_direct_present_and_through_phrases(self):
         report = (
             "本部分结论直接呈现全市场主流机构对工业有色核心品种供需格局的基准判断。\n"
-            "本部分通过量化数据比对、机构情绪拆解与产业链传导机制，量化评估ETF持仓品种的风险收益比。"
+            "本部分通过量化数据比对、机构情绪拆解与产业链传导机制，量化评估ETF持仓品种的风险收益比。\n"
+            "本节锁定制造业复苏与成本倒逼的剪刀差，判断利润修复能否落到中游。"
         )
         cleaned = strip_meta_lead_prefixes(report)
         self.assertNotIn("本部分结论直接呈现", cleaned)
         self.assertNotIn("本部分通过", cleaned)
+        self.assertNotIn("本节锁定", cleaned)
         self.assertIn("全市场主流机构对工业有色核心品种供需格局的基准判断。", cleaned)
         self.assertIn("量化数据比对、机构情绪拆解与产业链传导机制，量化评估ETF持仓品种的风险收益比。", cleaned)
+        self.assertIn("制造业复苏与成本倒逼的剪刀差，判断利润修复能否落到中游。", cleaned)
+
+    def test_normalize_chinese_section_headings_dedupes_top_level_and_strips_english(self):
+        report = (
+            "一、核心持仓共识与分歧 (Consensus & Divergence in Core Holdings)\n\n"
+            "一、核心持仓共识与分歧 (Consensus & Divergence in Core Holdings)\n\n"
+            "（一）共识主线 (Consensus Thesis)\n\n"
+            "高权重个股盈利分化继续扩大。"
+        )
+
+        cleaned = normalize_chinese_section_headings(report)
+
+        self.assertEqual(cleaned.count("一、核心持仓共识与分歧"), 1)
+        self.assertNotIn("Consensus & Divergence in Core Holdings", cleaned)
+        self.assertNotIn("（一）共识主线 (Consensus Thesis)", cleaned)
+        self.assertIn("（一）共识主线", cleaned)
 
 
 class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
     def test_news_prompt_requires_title_lead_before_first_section(self):
         llm = _CapturingLLM()
-        node = create_news_analyst(llm)
+        node = create_macro_analyst(llm)
 
         captured = {}
 
@@ -308,7 +341,7 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
-            "etfagents.agents.analysts.news_analyst.run_tool_report_chain",
+            "etfagents.agents.analysts.macro_analyst.run_tool_report_chain",
             side_effect=_mock_run,
         ):
             node(
@@ -320,18 +353,17 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("overview paragraph before any section headings", system_msg)
-        self.assertIn("Do NOT use lead-ins such as '本部分结论表明'", system_msg)
+        self.assertIn("不得使用'本部分结论表明'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、暴露与宏观主线", system_msg)
-        self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
-        self.assertIn("keep the original numbering hierarchy", system_msg)
+        self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
+        self.assertIn("If the structure does not provide a heading, write one that is brief, forceful, and immediately usable", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
     def test_news_report_strips_malformed_suffix_only_title_inside_body(self):
         llm = _CapturingLLM()
-        node = create_news_analyst(llm)
+        node = create_macro_analyst(llm)
 
         raw_report = (
             "# 宏观框架分析\n\n"
@@ -342,10 +374,10 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         )
 
         with patch(
-            "etfagents.agents.analysts.news_analyst.run_tool_report_chain",
+            "etfagents.agents.analysts.macro_analyst.run_tool_report_chain",
             return_value=(AIMessage(content=raw_report), raw_report),
         ), patch(
-            "etfagents.agents.analysts.news_analyst.build_instrument_context",
+            "etfagents.agents.analysts.macro_analyst.build_instrument_context",
             return_value="",
         ), patch(
             "etfagents.agents.utils.agent_utils._is_chinese_output",
@@ -386,12 +418,12 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("overview paragraph before any section headings", system_msg)
-        self.assertIn("Do NOT use lead-ins such as '本部分结论表明'", system_msg)
+        self.assertIn("不得使用'本部分结论表明'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、情绪主线与权重影响", system_msg)
-        self.assertIn("Avoid generic labels such as '总体研判'", system_msg)
+        self.assertNotIn("一、情绪主线与权重影响 (", system_msg)
+        self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
         self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 
@@ -403,7 +435,7 @@ class EtfAnalystTitleLeadBackfillTests(unittest.TestCase):
 
         raw_report = (
             "# ETF头部持仓研究分析报告\n\n"
-            "## 一、总体研判\n\n"
+            "## 一、核心持仓共识与分歧\n\n"
             "高权重个股盈利分化继续扩大。"
         )
 
@@ -426,6 +458,35 @@ class EtfAnalystTitleLeadBackfillTests(unittest.TestCase):
             rendered.index("该ETF头部持仓的盈利修复、估值分化与权重集中度共同决定组合的收益来源与回撤来源。"),
             rendered.index("一、核心持仓共识与分歧"),
         )
+
+    def test_stock_report_dedupes_repeated_top_level_heading_and_strips_english(self):
+        llm = _CapturingLLM()
+        node = create_etf_stock_research_analyst(llm)
+
+        raw_report = (
+            "一、核心持仓共识与分歧 (Consensus & Divergence in Core Holdings)\n\n"
+            "一、核心持仓共识与分歧 (Consensus & Divergence in Core Holdings)\n\n"
+            "（一）共识主线 (Consensus Thesis)\n\n"
+            "高权重个股盈利分化继续扩大。"
+        )
+
+        with patch(
+            "etfagents.agents.analysts.etf_stock_research_analyst.run_tool_report_chain",
+            return_value=(AIMessage(content=raw_report), raw_report),
+        ):
+            result = node(
+                {
+                    "company_of_interest": "516650.SH",
+                    "trade_date": "2026-04-30",
+                    "messages": [HumanMessage(content="Analyze 516650.SH")],
+                }
+            )
+
+        rendered = result["top_holdings_report"]
+        self.assertEqual(rendered.count("一、核心持仓共识与分歧"), 1)
+        self.assertNotIn("Consensus & Divergence in Core Holdings", rendered)
+        self.assertNotIn("（一）共识主线 (Consensus Thesis)", rendered)
+        self.assertIn("（一）共识主线", rendered)
 
     def test_structure_report_missing_title_lead_is_backfilled(self):
         llm = _CapturingLLM()
@@ -455,6 +516,35 @@ class EtfAnalystTitleLeadBackfillTests(unittest.TestCase):
             rendered.index("本期中观商品主线不在单一品种的涨跌，而在复苏预期能否穿透库存与成本倒逼"),
             rendered.index("一、核心矛盾与主线判断"),
         )
+
+    def test_structure_report_strips_section_self_reference_phrases(self):
+        llm = _CapturingLLM()
+        node = create_etf_structure_analyst(llm)
+
+        raw_report = (
+            "一、核心矛盾与主线判断\n\n"
+            "本节锁定制造业复苏与成本倒逼的剪刀差，铜与热卷强势能否传导到焦煤去库决定利润修复能否成立。\n\n"
+            "二、矛盾推演\n\n"
+            "本节讨论化工链负反馈如何压制中游盈利。"
+        )
+
+        with patch(
+            "etfagents.agents.analysts.etf_structure_analyst.run_tool_report_chain",
+            return_value=(AIMessage(content=raw_report), raw_report),
+        ):
+            result = node(
+                {
+                    "company_of_interest": "159980.SZ",
+                    "trade_date": "2026-04-30",
+                    "messages": [HumanMessage(content="Analyze 159980.SZ")],
+                }
+            )
+
+        rendered = result["meso_commodity_report"]
+        self.assertNotIn("本节锁定", rendered)
+        self.assertNotIn("本节讨论", rendered)
+        self.assertIn("制造业复苏与成本倒逼的剪刀差，铜与热卷强势能否传导到焦煤去库决定利润修复能否成立。", rendered)
+        self.assertIn("化工链负反馈如何压制中游盈利。", rendered)
 
     def test_market_report_missing_title_lead_is_backfilled(self):
         llm = _CapturingLLM()
@@ -490,16 +580,16 @@ class EtfAnalystTitleLeadBackfillTests(unittest.TestCase):
 
     def test_news_report_missing_title_lead_is_backfilled(self):
         llm = _CapturingLLM()
-        node = create_news_analyst(llm)
+        node = create_macro_analyst(llm)
 
         raw_report = (
             "# ETF宏观框架分析报告\n\n"
-            "## 一、总体研判\n\n"
+            "## 一、暴露与宏观主线\n\n"
             "利率与政策预期继续主导配置方向。"
         )
 
         with patch(
-            "etfagents.agents.analysts.news_analyst.run_tool_report_chain",
+            "etfagents.agents.analysts.macro_analyst.run_tool_report_chain",
             return_value=(AIMessage(content=raw_report), raw_report),
         ):
             result = node(
@@ -525,7 +615,7 @@ class EtfAnalystTitleLeadBackfillTests(unittest.TestCase):
 
         raw_report = (
             "# ETF舆情与事件影响分析报告\n\n"
-            "## 一、总体研判\n\n"
+            "## 一、情绪主线与权重影响\n\n"
             "主导板块事件催化仍强于产品层面噪声。"
         )
 

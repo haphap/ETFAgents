@@ -25,7 +25,7 @@ class PortfolioRating(str, Enum):
 class ResearchPlan(BaseModel):
     debate_conclusion: str = Field(description="A detailed synthesis paragraph comparing both sides, naming the strongest evidence from each, and explaining the decisive weakness in the losing view for ETF allocation.")
     action_logic: str = Field(description="A detailed evidence-to-allocation paragraph linking ETF structure, flows, catalysts, downside boundaries, and confirmation or invalidation triggers to the final decision.")
-    positioning_recommendation: str = Field(description="Actionable ETF allocation guidance with execution details, exposure sizing, concrete add or reduce conditions, rebalance triggers, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language.")
+    positioning_recommendation: str = Field(description="Actionable ETF allocation guidance with execution details, exposure sizing, concrete add or reduce conditions, rebalance triggers, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate the numeric level inline in the same sentence instead of referring readers back to an earlier report.")
     rating: PortfolioRating = Field(description="Final research-manager rating for ETF allocation.")
     snapshot_stance: str = Field(description="Concise stance for the feedback snapshot.")
     snapshot_new_and_rebuttal: str = Field(description="What was newly added this round and how it rebuts the opposing case.")
@@ -34,7 +34,7 @@ class ResearchPlan(BaseModel):
 
 class TraderProposal(BaseModel):
     thesis: str = Field(description="Concise ETF allocation thesis explaining the proposed action.")
-    execution_plan: str = Field(description="Concrete ETF allocation plan with support or resistance references, exact price or moving-average levels, volume or fund-flow thresholds, catalyst triggers, ETF share or premium-discount checks, and explicit add, reduce, rotate, or exit conditions. Do not say 'wait for confirmation' without numeric thresholds.")
+    execution_plan: str = Field(description="Concrete ETF allocation plan with support or resistance references, exact price or moving-average levels, volume or fund-flow thresholds, catalyst triggers, ETF share or premium-discount checks, and explicit add, reduce, rotate, or exit conditions. Do not say 'wait for confirmation' without numeric thresholds. Write the numeric level inline instead of saying 'the key level in the market report'.")
     risk_management: str = Field(description="Risk controls, rebalance or invalidation signals, monitoring thresholds, and the actions to take when those thresholds are breached.")
     rating: PortfolioRating = Field(description="Trader recommendation for ETF exposure.")
 
@@ -42,7 +42,7 @@ class TraderProposal(BaseModel):
 class PortfolioDecision(BaseModel):
     debate_conclusion: str = Field(description="A detailed synthesis of the full risk debate across all perspectives, explicitly comparing aggressive, conservative, and neutral cases and stating why the losing view was overruled for ETF allocation.")
     action_logic: str = Field(description="A detailed portfolio-manager paragraph showing how ETF evidence leads to sizing, hedging, rebalance triggers, and risk controls.")
-    positioning_recommendation: str = Field(description="Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language.")
+    positioning_recommendation: str = Field(description="Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate those numeric levels inline rather than telling the reader to look back at the market report.")
     rating: PortfolioRating = Field(description="Final portfolio-manager rating for ETF allocation.")
     snapshot_stance: str = Field(description="Concise stance for the feedback snapshot.")
     snapshot_new_and_rebuttal: str = Field(description="What was newly added this round and how it rebutted competing views.")
@@ -347,31 +347,15 @@ def _sanitize_positioning_recommendation(text: str, rating: PortfolioRating) -> 
     return cleaned or _default_positioning_guidance(rating)
 
 
-def _default_positioning_guidance(rating: PortfolioRating) -> str:
+def _default_research_positioning_guidance(rating: PortfolioRating, context_text: str = "") -> str:
     if _is_chinese_output():
-        mapping = {
-            PortfolioRating.BUY: "以分批建仓为主，并持续跟踪验证信号、仓位节奏与风险边界。",
-            PortfolioRating.OVERWEIGHT: "在保留现有仓位基础上择机加仓，并持续跟踪验证信号、仓位节奏与风险边界。",
-            PortfolioRating.HOLD: "维持当前仓位，等待新增验证信号后再决定是否加仓或减仓。",
-            PortfolioRating.UNDERWEIGHT: "以降低敞口为主，分批减仓，并持续跟踪反弹强度与风险释放节奏。",
-            PortfolioRating.SELL: "以退出仓位或避免入场为主，并持续跟踪风险是否重新定价。",
-        }
-        return mapping[rating]
-    mapping = {
-        PortfolioRating.BUY: "Build the position in stages while monitoring validation signals, sizing pace, and risk boundaries.",
-        PortfolioRating.OVERWEIGHT: "Add selectively from an existing position while monitoring validation signals, sizing pace, and risk boundaries.",
-        PortfolioRating.HOLD: "Maintain the current position and wait for stronger confirmation before changing exposure.",
-        PortfolioRating.UNDERWEIGHT: "Reduce exposure in stages while monitoring rebound strength and the pace of risk release.",
-        PortfolioRating.SELL: "Prioritize exiting or avoiding entry while monitoring whether risks are being repriced.",
-    }
-    return mapping[rating]
-
-
-def _default_research_positioning_guidance(rating: PortfolioRating) -> str:
-    if _is_chinese_output():
+        support_anchor = _market_level_anchor_clause(
+            context_text,
+            "关键支撑与均线",
+        )
         mapping = {
             PortfolioRating.BUY: (
-                "先按目标仓位的50%—60%建立底仓，确认价格站稳关键均线、成交量连续高于近20日均量且份额继续净申购后，再把仓位逐步提升到目标上沿。"
+                f"先按目标仓位的50%—60%建立底仓，确认价格站稳{support_anchor}、成交量连续高于近20日均量且份额继续净申购后，再把仓位逐步提升到目标上沿。"
                 "若溢折价异常扩大、主要支撑失守或行业盈利验证不再改善，则暂停加仓并把仓位收回到底仓。"
                 "执行上按周度复核价格、量能、份额变化与宏观验证链条，任一环节失效都不追高扩仓。"
             ),
@@ -381,13 +365,13 @@ def _default_research_positioning_guidance(rating: PortfolioRating) -> str:
                 "再平衡上优先看价格确认、产品层验证和行业盈利线索是否仍保持同向共振。"
             ),
             PortfolioRating.HOLD: (
-                "维持现有基准仓位，不新增方向性敞口，新增资金优先等待价格重新站稳关键支撑与均线、成交量回到近期均量上方、份额或资金流同步改善后再考虑上调一个档位。"
+                f"维持现有基准仓位，不新增方向性敞口，新增资金优先等待价格重新站稳{support_anchor}、成交量回到近期均量上方、份额或资金流同步改善后再考虑上调一个档位。"
                 "若价格跌破主要支撑、资金流重新转负或产品层指标恶化，则先把仓位降回更保守区间而不是被动承受回撤。"
                 "执行上按周度复核量价、份额变化、溢折价和宏观/行业验证信号，只有验证链条继续强化时才从持有转向增配。"
             ),
             PortfolioRating.UNDERWEIGHT: (
                 "先把仓位压回风险预算下沿或目标仓位的30%—40%，反弹只有在价格修复、量能放大和份额恢复净流入同时出现时才允许暂缓减仓。"
-                "若反弹无法收复关键均线、溢折价走弱或行业盈利线索继续下修，则继续分批削减敞口并收缩风险预算。"
+                f"若反弹无法收复{support_anchor}、溢折价走弱或行业盈利线索继续下修，则继续分批削减敞口并收缩风险预算。"
                 "再平衡重点盯住价格修复质量、产品层承接与风险释放节奏，而不是仅凭单日反弹回补仓位。"
             ),
             PortfolioRating.SELL: (
@@ -397,9 +381,13 @@ def _default_research_positioning_guidance(rating: PortfolioRating) -> str:
             ),
         }
         return mapping[rating]
+    support_anchor = _market_level_anchor_clause(
+        context_text,
+        "key support and moving-average anchors",
+    )
     mapping = {
         PortfolioRating.BUY: (
-            "Start with roughly 50% to 60% of target exposure, then scale toward the upper bound only after price, volume, and ETF flow confirmation improve together. "
+            f"Start with roughly 50% to 60% of target exposure, then scale toward the upper bound only after price reclaims {support_anchor}, volume improves, and ETF flow confirmation improve together. "
             "If support breaks, premium-discount widens abnormally, or earnings confirmation stalls, pause the build and cut back to the starter size. "
             "Rebalance weekly against price structure, volume, product-level checks, and macro confirmation rather than chasing a single strong session."
         ),
@@ -409,13 +397,13 @@ def _default_research_positioning_guidance(rating: PortfolioRating) -> str:
             "Rebalance around confirmation quality, not just around a headline-driven rally."
         ),
         PortfolioRating.HOLD: (
-            "Keep benchmark exposure in place and avoid adding directional risk until price reclaims key levels, volume recovers versus its recent average, and ETF flows improve at the same time. "
+            f"Keep benchmark exposure in place and avoid adding directional risk until price reclaims {support_anchor}, volume recovers versus its recent average, and ETF flows improve at the same time. "
             "If support fails again or product-level indicators deteriorate, reduce back to a more defensive baseline instead of passively absorbing drawdown. "
             "Review price, volume, flows, premium-discount, and macro or industry confirmation weekly before shifting from hold to add."
         ),
         PortfolioRating.UNDERWEIGHT: (
             "Cut the position back toward the low end of the risk budget, roughly 30% to 40% of target exposure, and only pause the reduction if price repair, stronger volume, and ETF flow stabilization arrive together. "
-            "If rebounds fail at key averages or earnings signals keep weakening, continue trimming in stages and keep risk budget tight. "
+            f"If rebounds fail at {support_anchor} or earnings signals keep weakening, continue trimming in stages and keep risk budget tight. "
             "Rebalance around repair quality and risk-release cadence rather than short-term relief rallies."
         ),
         PortfolioRating.SELL: (
@@ -425,6 +413,12 @@ def _default_research_positioning_guidance(rating: PortfolioRating) -> str:
         ),
     }
     return mapping[rating]
+
+
+def _default_positioning_guidance(rating: PortfolioRating, context_text: str = "") -> str:
+    detailed = _default_research_positioning_guidance(rating, context_text)
+    first_sentence = re.split(r"(?<=[。.])\s*", detailed, maxsplit=1)[0]
+    return first_sentence if first_sentence else detailed
 
 
 def _default_debate_conclusion(rating: PortfolioRating) -> str:
@@ -487,14 +481,22 @@ def _default_trading_thesis(rating: PortfolioRating) -> str:
     return mapping[rating]
 
 
-def _default_execution_plan(rating: PortfolioRating) -> str:
+def _default_execution_plan(rating: PortfolioRating, context_text: str = "") -> str:
     if _is_chinese_output():
+        primary_anchor = _primary_market_level_anchor(
+            context_text,
+            "首个关键位（优先是50日均线、布林中轨、前高突破位或前低回踩位的具体数值）",
+        )
+        support_anchor = _market_level_anchor_clause(
+            context_text,
+            "50日均线、布林中轨、前低或密集成交区",
+        )
         mapping = {
-            PortfolioRating.BUY: "先以计划目标仓位的20%—30%建立试探仓，后续每一笔只增加10%—15%。只有当价格重新站回市场报告已经写明的首个关键位——优先是50日均线、布林中轨、前高突破位或前低回踩位的具体数值——且日成交量连续2个交易日达到近20日均量的1.2—1.3倍，同时 ETF 份额继续净申购或溢折价不再走阔，才继续加仓。若催化只是消息预期而未兑现为订单、业绩指引、份额扩张或放量突破，就暂停追价，等待回踩该关键位不破后再执行下一笔。",
-            PortfolioRating.OVERWEIGHT: "在保留现有底仓的前提下择机增配，但每一笔加仓都要绑定清晰的关键数据：价格至少守住市场报告中的主支撑位或50日均线，日成交量回到近20日均量的1.1—1.2倍以上，且 ETF 份额、净申购或溢折价改善没有转弱。单笔增配宜控制在目标仓位的10%—15%，只有当新增催化从“预期”变成“可验证进展”并连续两个交易时段保持量价承接时，才继续上调；若量价配合不足或催化兑现延迟，就把超配部分压回到底仓。",
-            PortfolioRating.HOLD: "维持当前仓位，不主动追涨或杀跌。这里的关键支撑必须优先落到市场分析里已经给出的具体数据，例如50日均线、布林中轨、前低或密集成交区的实际位置；只有当价格在该位置附近连续2个交易时段止跌企稳，日成交量至少较近5日均量放大15%—20%且明显回到20日均量附近，同时份额或资金流不再恶化，才考虑把持有转为试探性加仓。若新增催化只是消息层面的预期而未带来份额扩张、溢折价改善、资金流确认或放量突破，则继续维持仓位，不提前放大敞口。",
-            PortfolioRating.UNDERWEIGHT: "优先分2—3笔降低敞口，每一笔先减掉目标仓位的10%—15%，第一笔先处理高弹性但验证最弱的仓位。若反弹连市场报告中的50日均线、20日均线或上一压力位都收不回，且日成交量仍低于近20日均量的0.9—1.0倍或 ETF 份额继续净赎回，就继续执行减仓；只有当价格重新收复主要均线、日成交量回到20日均量的1.1—1.2倍、份额转为连续净申购，才考虑小比例回补，而不是在缩量反弹里抢跑。",
-            PortfolioRating.SELL: "以退出仓位或避免入场为主，执行上不要等待模糊修复信号。若价格已跌破市场报告中的主支撑/止损位，且单日放量达到近20日均量的1.3倍以上，或 ETF 溢折价继续恶化、份额净赎回扩大，就应直接完成清仓；即便后续出现技术性反弹，也要先看到基本面修复、价格重新站回关键均线、日成交量恢复到20日均量上方以及催化兑现三者同时出现，才考虑重新纳入观察名单。",
+            PortfolioRating.BUY: f"先以计划目标仓位的20%—30%建立试探仓，后续每一笔只增加10%—15%。只有当价格重新站回{primary_anchor}，且日成交量连续2个交易日达到近20日均量的1.2—1.3倍，同时 ETF 份额继续净申购或溢折价不再走阔，才继续加仓。若催化只是消息预期而未兑现为订单、业绩指引、份额扩张或放量突破，就暂停追价，等待回踩{primary_anchor}不破后再执行下一笔。",
+            PortfolioRating.OVERWEIGHT: f"在保留现有底仓的前提下择机增配，但每一笔加仓都要绑定清晰的关键数据：价格至少守住{support_anchor}，日成交量回到近20日均量的1.1—1.2倍以上，且 ETF 份额、净申购或溢折价改善没有转弱。单笔增配宜控制在目标仓位的10%—15%，只有当新增催化从“预期”变成“可验证进展”并连续两个交易时段保持量价承接时，才继续上调；若量价配合不足或催化兑现延迟，就把超配部分压回到底仓。",
+            PortfolioRating.HOLD: f"维持当前仓位，不主动追涨或杀跌。这里优先看的关键支撑直接写成{support_anchor}；只有当价格在该位置附近连续2个交易时段止跌企稳，日成交量至少较近5日均量放大15%—20%且明显回到20日均量附近，同时份额或资金流不再恶化，才考虑把持有转为试探性加仓。若新增催化只是消息层面的预期而未带来份额扩张、溢折价改善、资金流确认或放量突破，则继续维持仓位，不提前放大敞口。",
+            PortfolioRating.UNDERWEIGHT: f"优先分2—3笔降低敞口，每一笔先减掉目标仓位的10%—15%，第一笔先处理高弹性但验证最弱的仓位。若反弹连{support_anchor}都收不回，且日成交量仍低于近20日均量的0.9—1.0倍或 ETF 份额继续净赎回，就继续执行减仓；只有当价格重新收复主要均线、日成交量回到20日均量的1.1—1.2倍、份额转为连续净申购，才考虑小比例回补，而不是在缩量反弹里抢跑。",
+            PortfolioRating.SELL: f"以退出仓位或避免入场为主，执行上不要等待模糊修复信号。若价格已跌破{support_anchor}，且单日放量达到近20日均量的1.3倍以上，或 ETF 溢折价继续恶化、份额净赎回扩大，就应直接完成清仓；即便后续出现技术性反弹，也要先看到基本面修复、价格重新站回关键均线、日成交量恢复到20日均量上方以及催化兑现三者同时出现，才考虑重新纳入观察名单。",
         }
         return mapping[rating]
     mapping = {
@@ -631,7 +633,11 @@ def _sentence_similarity(left: str, right: str) -> float:
         return 0.0
     if left_key == right_key:
         return 1.0
-    if min(len(left_key), len(right_key)) >= 12 and (
+    min_len = min(len(left_key), len(right_key))
+    max_len = max(len(left_key), len(right_key))
+    if max_len > 0 and min_len / max_len < 0.4:
+        return 0.0
+    if min_len >= 12 and (
         left_key in right_key or right_key in left_key
     ):
         return 0.9
@@ -663,16 +669,156 @@ def _trader_thesis_needs_detail(text: str) -> bool:
     return word_count < 30 or sentence_count < 3
 
 
+_MARKET_LEVEL_LABEL_PATTERN = (
+    r"(?:50日均线|20日均线|10日均线|200日均线|布林中轨|布林上轨|布林下轨|"
+    r"布林带中轨|布林带上轨|布林带下轨|前高突破位|前低回踩位|前低|前高|"
+    r"主支撑位|主支撑|主阻力位|主阻力|支撑位|阻力位|支撑带|阻力带|"
+    r"密集成交区|上一压力位|压力位|止损位|"
+    r"50-day(?:\s+(?:moving average|SMA))?|20-day(?:\s+(?:moving average|SMA))?|"
+    r"10-day(?:\s+(?:moving average|SMA))?|200-day(?:\s+(?:moving average|SMA))?|"
+    r"Bollinger mid-band|Bollinger middle band|Bollinger upper band|Bollinger lower band|"
+    r"prior breakout level|prior retest level|swing low|swing high|support(?: zone)?|"
+    r"resistance(?: zone)?|stop(?:-loss)? level|VWMA|ATR|NAV|SMA|EMA)"
+)
+_MARKET_LEVEL_VALUE_PATTERN = (
+    r"\d+(?:\.\d+)?(?:\s*[-—~至to]+\s*\d+(?:\.\d+)?)?\s*(?:元|美元|港元|点|bp|bps|USD|HKD|pts?|points?)?"
+)
+_MARKET_LEVEL_PATTERNS = (
+    re.compile(
+        rf"({_MARKET_LEVEL_LABEL_PATTERN})(?:位于|在|约|为|处于|落在|落于|对应|回踩至|上移至|下移至|看至|约在|：|:)?\s*({_MARKET_LEVEL_VALUE_PATTERN})"
+    ),
+    re.compile(
+        rf"({_MARKET_LEVEL_VALUE_PATTERN})(?:的)?\s*({_MARKET_LEVEL_LABEL_PATTERN})"
+    ),
+)
+
+
+def _extract_market_level_anchors(text: str, limit: int = 3) -> list[str]:
+    content = (text or "").strip()
+    if not content or limit <= 0:
+        return []
+
+    anchors: list[str] = []
+    seen: set[str] = set()
+    for pattern in _MARKET_LEVEL_PATTERNS:
+        for match in pattern.finditer(content):
+            left, right = match.group(1).strip(), match.group(2).strip()
+            if re.fullmatch(_MARKET_LEVEL_LABEL_PATTERN, left):
+                separator = "" if re.search(r"[\u4e00-\u9fff]", left) else " "
+                anchor = f"{left}{separator}{right}".strip()
+            else:
+                separator = "的" if re.search(r"[\u4e00-\u9fff]", right) else " "
+                anchor = f"{left}{separator}{right}".strip()
+            normalized = _compact_text(anchor)
+            if not normalized or normalized in seen:
+                continue
+            anchors.append(anchor)
+            seen.add(normalized)
+            if len(anchors) >= limit:
+                return anchors
+    return anchors
+
+
+def _market_level_priority(anchor: str) -> int:
+    normalized = (anchor or "").lower()
+    priorities = (
+        ("50日均线", 0),
+        ("50-day", 0),
+        ("布林中轨", 1),
+        ("布林带中轨", 1),
+        ("bollinger mid-band", 1),
+        ("bollinger middle band", 1),
+        ("前高突破位", 2),
+        ("prior breakout level", 2),
+        ("前低回踩位", 3),
+        ("prior retest level", 3),
+        ("前低", 4),
+        ("swing low", 4),
+        ("前高", 5),
+        ("swing high", 5),
+        ("支撑", 6),
+        ("support", 6),
+        ("阻力", 7),
+        ("resistance", 7),
+        ("20日均线", 8),
+        ("20-day", 8),
+        ("10日均线", 9),
+        ("10-day", 9),
+        ("200日均线", 10),
+        ("200-day", 10),
+    )
+    for token, priority in priorities:
+        if token in normalized:
+            return priority
+    return 99
+
+
+def _prioritize_market_level_anchors(anchors: list[str], limit: int) -> list[str]:
+    ranked = sorted(
+        enumerate(anchors),
+        key=lambda item: (_market_level_priority(item[1]), item[0]),
+    )
+    return [anchor for _, anchor in ranked[:limit]]
+
+
+def _primary_market_level_anchor(context_text: str, fallback: str) -> str:
+    anchors = _prioritize_market_level_anchors(
+        _extract_market_level_anchors(context_text, limit=6),
+        1,
+    )
+    return anchors[0] if anchors else fallback
+
+
+def _market_level_anchor_clause(context_text: str, fallback: str, *, limit: int = 2) -> str:
+    anchors = _prioritize_market_level_anchors(
+        _extract_market_level_anchors(context_text, limit=6),
+        limit,
+    )
+    if not anchors:
+        return fallback
+    if len(anchors) == 1:
+        return anchors[0]
+    return "或".join(anchors)
+
+
+def _extract_market_level_anchor_map(context_text: str) -> dict[str, str]:
+    anchor_map: dict[str, str] = {}
+    for anchor in _prioritize_market_level_anchors(
+        _extract_market_level_anchors(context_text, limit=8),
+        8,
+    ):
+        match = re.search(_MARKET_LEVEL_LABEL_PATTERN, anchor, re.IGNORECASE)
+        if not match:
+            continue
+        label = match.group(0)
+        anchor_map.setdefault(label, anchor)
+    return anchor_map
+
+
+def _inline_contextual_market_levels(text: str, context_text: str) -> str:
+    content = (text or "").strip()
+    if not content or not context_text or not _is_chinese_output():
+        return content
+
+    primary_anchor = _primary_market_level_anchor(context_text, "")
+    support_anchor = _market_level_anchor_clause(context_text, "", limit=2)
+    if primary_anchor:
+        content = content.replace("市场分析中给出的首个关键阻力/支撑转换位", primary_anchor)
+        content = content.replace("市场报告已经写明的首个关键位", primary_anchor)
+    if support_anchor:
+        content = content.replace("市场报告中的主支撑位或50日均线", support_anchor)
+        content = content.replace("主支撑位或50日均线", support_anchor)
+
+    for label, anchor in _extract_market_level_anchor_map(context_text).items():
+        content = re.sub(rf"{re.escape(label)}(?!\s*\d)", anchor, content)
+    return content
+
+
 def _has_market_level_anchor(text: str) -> bool:
     stripped = (text or "").strip()
     if not stripped:
         return False
-    patterns = (
-        r"\d+(?:\.\d+)?\s*(?:元|美元|港元|点|bp|bps)[^。\n]{0,28}(?:50日均线|20日均线|10日均线|200日均线|均线|布林中轨|布林上轨|布林下轨|布林|支撑|阻力|前低|前高|密集成交区|VWMA|ATR|净值|SMA|EMA)",
-        r"(?:50日均线|20日均线|10日均线|200日均线|均线|布林中轨|布林上轨|布林下轨|布林|支撑|阻力|前低|前高|密集成交区|VWMA|ATR|净值|SMA|EMA)[^。\n]{0,28}\d+(?:\.\d+)?\s*(?:元|美元|港元|点|bp|bps)",
-        r"(?:50日均线|20日均线|10日均线|200日均线|布林中轨|布林上轨|布林下轨|VWMA|ATR|SMA|EMA)",
-    )
-    return any(re.search(pattern, stripped, re.IGNORECASE) for pattern in patterns)
+    return bool(_extract_market_level_anchors(stripped, limit=1))
 
 
 def _has_volume_or_flow_threshold(text: str) -> bool:
@@ -820,7 +966,7 @@ def render_research_plan(plan: ResearchPlan) -> str:
     return collapse_blank_lines(f"{body}\n\n{snapshot}")
 
 
-def render_trader_proposal(plan: TraderProposal) -> str:
+def render_trader_proposal(plan: TraderProposal, context_text: str = "") -> str:
     heading_aliases = (
         "ETF配置逻辑",
         "配置核心逻辑",
@@ -836,19 +982,22 @@ def render_trader_proposal(plan: TraderProposal) -> str:
         "Rebalance and Risk Control",
     )
     recommendation = localize_rating_term(plan.rating.value)
+    default_execution_plan = _default_execution_plan(plan.rating, context_text)
     execution_plan = _sanitize_section(
         plan.execution_plan,
-        _default_execution_plan(plan.rating),
+        default_execution_plan,
         plan.rating,
         check_action_conflict=True,
         require_detail=True,
         strip_headings=heading_aliases,
     )
-    if _missing_execution_thresholds(execution_plan):
+    execution_plan = _inline_contextual_market_levels(execution_plan, context_text)
+    if _missing_execution_thresholds(execution_plan) and _compact_text(default_execution_plan) not in _compact_text(execution_plan):
         execution_plan = _merge_sparse_section_with_default(
             execution_plan,
-            _default_execution_plan(plan.rating),
+            default_execution_plan,
         )
+        execution_plan = _inline_contextual_market_levels(execution_plan, context_text)
     thesis = _sanitize_trader_thesis(
         plan.thesis,
         execution_plan,
@@ -883,7 +1032,7 @@ def render_trader_proposal(plan: TraderProposal) -> str:
     )
 
 
-def render_portfolio_decision(plan: PortfolioDecision) -> str:
+def render_portfolio_decision(plan: PortfolioDecision, context_text: str = "") -> str:
     recommendation = localize_rating_term(plan.rating.value)
     debate_conclusion = _strip_recommendation_restating_sentences(_normalize_portfolio_chinese_phrasing(_sanitize_section(
         plan.debate_conclusion,
@@ -901,17 +1050,24 @@ def render_portfolio_decision(plan: PortfolioDecision) -> str:
     positioning_recommendation = _sanitize_positioning_recommendation(
         plan.positioning_recommendation, plan.rating
     )
-    detailed_positioning = _default_research_positioning_guidance(plan.rating)
+    detailed_positioning = _default_research_positioning_guidance(plan.rating, context_text)
     if _compact_text(positioning_recommendation) == _compact_text(
         _default_positioning_guidance(plan.rating)
+    ) or _compact_text(positioning_recommendation) == _compact_text(
+        _default_positioning_guidance(plan.rating, context_text)
     ):
         positioning_recommendation = detailed_positioning
-    elif _section_needs_detail(positioning_recommendation) or _missing_execution_thresholds(
-        positioning_recommendation
-    ):
+    elif (
+        _section_needs_detail(positioning_recommendation)
+        or _missing_execution_thresholds(positioning_recommendation)
+    ) and _compact_text(detailed_positioning) not in _compact_text(positioning_recommendation):
         positioning_recommendation = _merge_sparse_section_with_default(
             positioning_recommendation, detailed_positioning
         )
+    positioning_recommendation = _inline_contextual_market_levels(
+        positioning_recommendation,
+        context_text,
+    )
     if _is_chinese_output():
         final_line = f"最终配置建议: **{recommendation}**"
     else:

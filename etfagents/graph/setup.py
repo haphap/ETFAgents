@@ -7,18 +7,14 @@ from etfagents.agents import (
     AgentState,
     create_aggressive_debator,
     create_bear_researcher,
-    create_broker_research_analyst,
     create_bull_researcher,
     create_conservative_debator,
-    create_fundamentals_analyst,
-    create_market_analyst,
     create_msg_delete,
     create_neutral_debator,
-    create_news_analyst,
+    create_macro_analyst,
     create_portfolio_manager,
     create_research_manager,
     create_social_media_analyst,
-    create_stock_research_analyst,
     create_trader,
 )
 
@@ -29,21 +25,13 @@ class GraphSetup:
     """Handles the setup and configuration of the agent graph."""
 
     DEFAULT_SELECTED_ANALYSTS = (
-        "market",
         "social",
         "news",
-        "fundamentals",
-        "broker_research",
-        "stock_research",
     )
 
     ANALYST_BUILDERS: Dict[str, Callable[[Any], Any]] = {
-        "market": create_market_analyst,
         "social": create_social_media_analyst,
-        "news": create_news_analyst,
-        "fundamentals": create_fundamentals_analyst,
-        "broker_research": create_broker_research_analyst,
-        "stock_research": create_stock_research_analyst,
+        "news": create_macro_analyst,
     }
 
     def __init__(
@@ -60,25 +48,18 @@ class GraphSetup:
         self.conditional_logic = conditional_logic
 
     # Display names for analysts with underscores in their keys
-    _ANALYST_DISPLAY_NAMES = {
-        "broker_research": "Industry Research",
-        "stock_research": "Stock Research",
-    }
-    _CLEAR_ROUTE_ALIASES = {
-        "market": ("Msg Clear Market",),
-        "market_flow": ("Msg Clear Market", "Msg Clear Market Flow", "Msg Clear ETF Flow"),
+    _ANALYST_DISPLAY_NAMES: Dict[str, str] = {}
+    _CLEAR_ROUTE_ALIASES: Dict[str, tuple[str, ...]] = {
         "social": ("Msg Clear Social",),
         "catalyst_sentiment": ("Msg Clear Social",),
         "news": ("Msg Clear News",),
         "macro_regime": ("Msg Clear News", "Msg Clear ETF Macro"),
-        "fundamentals": ("Msg Clear Fundamentals",),
         "etf_structure": ("Msg Clear ETF Structure",),
         "meso_commodity": ("Msg Clear ETF Structure",),
+        "market_flow": ("Msg Clear Market", "Msg Clear Market Flow", "Msg Clear ETF Flow"),
         "etf_flow": ("Msg Clear ETF Flow",),
         "etf_macro": ("Msg Clear ETF Macro",),
-        "broker_research": ("Msg Clear Industry Research",),
         "holdings_industry": ("Msg Clear Industry Research", "Msg Clear Holdings-Industry Research", "Msg Clear ETF Industry Research"),
-        "stock_research": ("Msg Clear Stock Research",),
         "top_holdings": ("Msg Clear Stock Research", "Msg Clear Top Holdings Research", "Msg Clear ETF Top Holdings Research"),
     }
 
@@ -110,12 +91,8 @@ class GraphSetup:
 
         Args:
             selected_analysts (list): List of analyst types to include. Options are:
-                - "market": Market analyst
                 - "social": Social media analyst
-                - "news": News analyst
-                - "fundamentals": Fundamentals analyst
-                - "broker_research": Industry research analyst — industry reports (A-share only)
-                - "stock_research": Stock research analyst — individual stock reports (A-share only)
+                - "news": Macro analyst
         """
         if selected_analysts is None:
             selected_analysts = list(self.DEFAULT_SELECTED_ANALYSTS)

@@ -16,8 +16,8 @@ from etfagents.agents.utils.report_leads import (
     ensure_title_lead_paragraph,
     get_concise_heading_instruction,
     get_no_title_instruction,
-    normalize_section_headings,
     get_topic_and_term_style_instruction,
+    normalize_chinese_section_headings,
     strip_report_title,
     strip_meta_lead_prefixes,
 )
@@ -36,22 +36,8 @@ _DEFAULT_TITLE_LEAD_EN = (
 )
 _REPORT_TITLE_ZH = "宏观框架分析"
 _REPORT_TITLE_EN = "Macro Regime Analysis"
-_NEWS_HEADING_MAP = {
-    "一、总体研判": "一、暴露与宏观主线",
-    "（一）ETF暴露分析": "（一）ETF暴露与敏感因子",
-    "（二）核心宏观驱动": "（二）利率信用与政策主驱动",
-    "二、深度分析": "二、异常信号与情景推演",
-    "（一）关键异常与传导链": "（一）异常信号与传导链",
-    "（二）情景敏感性": "（二）情景敏感性与再平衡含义",
-    "三、风险与催化": "三、催化窗口与失效条件",
-    "（一）下一个再平衡窗口催化": "（一）下个窗口关键催化",
-    "（二）关键宏观风险与失效点": "（二）基准情景失效点",
-    "四、总结": "四、配置结论与跟踪表",
-}
-
-
-def create_news_analyst(llm):
-    def news_analyst_node(state):
+def create_macro_analyst(llm):
+    def macro_analyst_node(state):
         current_date = state.get("trade_date") or state.get("analysis_date")
         if not current_date:
             raise KeyError("trade_date")
@@ -67,32 +53,28 @@ def create_news_analyst(llm):
         ]
 
         system_message = (
-            "You are an ETF macro analyst. Your job is to merge ETF exposure structure, global macro pricing, Chinese macro release calendar data, and verified news catalysts into one coherent allocation framework. "
-            "Start with get_etf_info and get_etf_holdings to identify benchmark/style/sector exposure, then call get_macro_regime_data(curr_date, look_back_days) to build the cross-asset regime map including the Tushare eco-calendar feed (implemented with cn_schedule). "
-            "Use get_global_news and targeted get_news only to verify or challenge the drivers already suggested by the data.\n\n"
-            "Do not produce a disconnected checklist. Build one logical chain from ETF exposure -> macro and policy regime -> anomalies -> scenario sensitivity -> next rebalance-window catalysts -> allocation implication.\n\n"
-            "The final markdown report must follow this unified framework:\n"
-            "Write a 2-4 sentence overview paragraph before any section headings "
-            "that summarizes the dominant macro driver, the main transmission path, and the ETF allocation implication. "
-            "This lead paragraph must appear before any section headings.\n"
+            "你是一名ETF宏观分析师。你的任务是将ETF暴露结构、全球宏观定价、中国宏观发布日历数据和已验证的新闻催化剂整合为一个连贯的配置框架。"
+            "先调用 get_etf_info 和 get_etf_holdings 识别基准/风格/行业暴露，再调用 get_macro_regime_data(curr_date, look_back_days) 构建跨资产制度图谱（含Tushare经济日历，通过cn_schedule实现）。"
+            "仅使用 get_global_news 和针对性 get_news 验证或挑战数据已暗示的驱动因素。\n\n"
+            "不得产出割裂的清单。建立一条逻辑链：ETF暴露 → 宏观与政策制度 → 异常信号 → 情景敏感性 → 下个再平衡窗口催化剂 → 配置含义。\n\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
-            "Each top-level section (一、二、三、四) must begin with 2-3 sentences summarizing the key conclusions "
-            "of that section, then a blank line before sub-sections.\n\n"
-            "一、暴露与宏观主线 (Exposure & Macro Thesis)\n"
-            "  （一）ETF暴露与敏感因子: identify the ETF's dominant sleeves, top holdings concentration, and which macro variables each sleeve is sensitive to\n"
-            "  （二）利率信用与政策主驱动: integrate global rates, real yields, credit pricing, geopolitics, China policy context, and the Tushare eco-calendar\n"
-            "二、异常信号与情景推演 (Signals & Scenario Analysis)\n"
-            "  （一）异常信号与传导链: explain which spread, real-rate, credit, safe-haven, or calendar/event anomalies are abnormal versus the recent baseline and how they transmit into this ETF\n"
-            "  （二）情景敏感性与再平衡含义: explain which macro scenarios favor or hurt the ETF's main exposure mix and what that means for the next rebalance\n"
-            "三、催化窗口与失效条件 (Catalysts & Invalidation)\n"
-            "  （一）下个窗口关键催化: highlight the most important scheduled macro releases and policy events to watch next\n"
-            "  （二）基准情景失效点: state what evidence would break the current base case\n"
-            "四、配置结论与跟踪表 (Allocation Conclusion & Tracking Table)\n\n"
-            "End with a markdown summary table. Keep the framework coherent and ETF-specific rather than generic macro commentary.\n\n"
-            "For the title lead and the 2-3 sentence lead under each top-level section, state the conclusion directly. "
-            "Do NOT use lead-ins such as '本部分结论表明', '该部分说明', '这一节意味着', 'This section shows', or similar meta phrasing."
+            "一级和二级标题只写中文标题，不要在括号中追加英文标题、英文翻译或英文注释。\n"
+            "每个一级章节（一、二、三、四）以2-3句导语开头总结该节核心结论，然后空行进入子章节。\n\n"
+            "一、暴露与宏观主线\n"
+            "  （一）ETF暴露与敏感因子: 识别ETF主导仓位、头部持仓集中度及各仓位对哪些宏观变量敏感\n"
+            "  （二）利率信用与政策主驱动: 整合全球利率、实际收益率、信用定价、地缘政治、中国政策背景和Tushare经济日历\n"
+            "二、异常信号与情景推演\n"
+            "  （一）异常信号与传导链: 解释哪些利差、实际利率、信用、避险或日历/事件异常相对近期基线偏离，以及如何传导至本ETF\n"
+            "  （二）情景敏感性与再平衡含义: 解释哪些宏观情景有利或不利ETF主要暴露组合，以及对下次再平衡的含义\n"
+            "三、催化窗口与失效条件\n"
+            "  （一）下个窗口关键催化: 列出下一个再平衡窗口最重要的宏观发布与政策事件\n"
+            "  （二）基准情景失效点: 说明哪些证据会打破当前基准判断\n"
+            "四、配置结论与跟踪表\n\n"
+            "末尾附markdown摘要表。保持框架连贯且ETF特定，而非泛泛的宏观评论。\n\n"
+            "标题导语与每个一级章节导语直接陈述结论。"
+            "不得使用'本部分结论表明'、'该部分说明'、'这一节意味着'、'This section shows'等元描述。"
             + get_language_instruction()
         )
 
@@ -127,7 +109,10 @@ def create_news_analyst(llm):
         report = normalize_chinese_role_terms(report) if report else report
         report = strip_meta_lead_prefixes(report) if report else report
         report = strip_report_title(report) if report else report
-        report = normalize_section_headings(report, _NEWS_HEADING_MAP) if report else report
+        report = normalize_chinese_section_headings(
+            report,
+            strip_english_for_subheadings=True,
+        ) if report else report
         report = ensure_title_lead_paragraph(
             report,
             _DEFAULT_TITLE_LEAD_ZH,
@@ -141,4 +126,4 @@ def create_news_analyst(llm):
             "macro_regime_report": report,
         })
 
-    return news_analyst_node
+    return macro_analyst_node

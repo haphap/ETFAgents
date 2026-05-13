@@ -13,8 +13,8 @@ from etfagents.agents.utils.report_leads import (
     ensure_title_lead_paragraph,
     get_concise_heading_instruction,
     get_no_title_instruction,
-    normalize_section_headings,
     get_topic_and_term_style_instruction,
+    normalize_chinese_section_headings,
     strip_report_title,
     strip_meta_lead_prefixes,
 )
@@ -32,17 +32,6 @@ _DEFAULT_TITLE_LEAD_EN = (
 )
 _REPORT_TITLE_ZH = "舆情与事件影响分析"
 _REPORT_TITLE_EN = "Sentiment & Catalyst Impact Analysis"
-_SOCIAL_HEADING_MAP = {
-    "一、总体研判": "一、情绪主线与权重影响",
-    "（一）ETF产品情绪与讨论": "（一）产品情绪与讨论强弱",
-    "（二）行业与重仓股舆情": "（二）行业与重仓股事件主线",
-    "二、深度分析": "二、事件传导与定价辨别",
-    "（一）宏观事件传导": "（一）宏观事件传导",
-    "（二）真实支撑、真实拖累与噪声区分": "（二）真实支撑与短期噪声",
-    "三、风险与催化": "三、后续触发与验证要点",
-    "（一）后续监控要点": "（一）后续监控要点",
-    "四、总结": "四、结论与跟踪表",
-}
 
 
 def create_social_media_analyst(llm):
@@ -61,42 +50,36 @@ def create_social_media_analyst(llm):
         # NOTE: This agent uses news tools (get_news, get_global_news), not social media APIs.
         # Social media data sources (e.g. Reddit, Twitter/X) are not yet integrated.
         system_message = (
-            "You are an ETF catalyst and sentiment analyst. Your job is not limited to the ETF product itself: "
-            "you must analyze how public discussion, recent news, and macro events affect the ETF's price support or drag through its "
-            "benchmark exposure, dominant industries, and top-weight holdings.\n\n"
-            "Required workflow:\n"
-            f"1. First call get_etf_info(ticker='{asset_symbol}', curr_date='{current_date}') and get_etf_holdings(ticker='{asset_symbol}', curr_date='{current_date}') "
-            "to identify the ETF's benchmark, dominant industries, and highest-weight holdings.\n"
-            "2. Then use get_news(query, start_date, end_date) multiple times to search:\n"
-            "   - the ETF ticker / product itself,\n"
-            "   - the benchmark or dominant exposure theme,\n"
-            "   - the ETF's main industries,\n"
-            "   - the highest-weight holdings that materially drive ETF performance.\n"
-            "3. Also call get_global_news(curr_date, look_back_days, limit) to capture macro events that could transmit into those industries or holdings.\n"
-            "4. Judge whether each development is likely to support, cap, or drag ETF price action, and explain the transmission path from news / sentiment / macro event -> holdings / industry impact -> ETF price implication.\n\n"
-            "The final markdown report must explicitly cover:\n"
-            "Write a 2-4 sentence overview paragraph before any section headings "
-            "that summarizes the main sentiment driver, the key event transmission path, and the ETF allocation implication. "
-            "This lead paragraph must appear before any section headings.\n"
+            "你是一名ETF催化剂与情绪分析师。你的工作不限于ETF产品本身："
+            "必须分析公众讨论、近期新闻和宏观事件如何通过基准暴露、主导行业和高权重持仓影响ETF价格支撑或拖累。\n\n"
+            "工作流程：\n"
+            f"1. 先调用 get_etf_info(ticker='{asset_symbol}', curr_date='{current_date}') 和 get_etf_holdings(ticker='{asset_symbol}', curr_date='{current_date}') "
+            "识别ETF的基准、主导行业和最高权重持仓。\n"
+            "2. 多次使用 get_news(query, start_date, end_date) 搜索：\n"
+            "   - ETF代码/产品本身\n"
+            "   - 基准或主导暴露主题\n"
+            "   - ETF的主要行业\n"
+            "   - 对ETF表现有实质驱动的最高权重持仓\n"
+            "3. 调用 get_global_news(curr_date, look_back_days, limit) 捕捉可能传导至这些行业或持仓的宏观事件。\n"
+            "4. 判断每个事件可能支撑、压制还是拖累ETF价格，解释传导路径：新闻/情绪/宏观事件 → 持仓/行业影响 → ETF价格含义。\n\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
-            "Each top-level section (一、二、三、四) must begin with 2-3 sentences summarizing the key conclusions "
-            "of that section, then a blank line before sub-sections.\n\n"
-            "一、情绪主线与权重影响 (Sentiment Thesis & Exposure Impact)\n"
-            "  （一）产品情绪与讨论强弱: ETF-specific sentiment and product-level discussion\n"
-            "  （二）行业与重仓股事件主线: News and sentiment around dominant industries and top holdings\n"
-            "二、事件传导与定价辨别 (Transmission & Pricing Signal)\n"
-            "  （一）宏观事件传导: Relevant macro events and whether they amplify or offset the ETF thesis\n"
-            "  （二）真实支撑与短期噪声: which developments truly support ETF price, which ones drag on it, and which are just noise\n"
-            "三、后续触发与验证要点 (Next Triggers & Validation)\n"
-            "  （一）后续监控要点: What the allocator should monitor next for confirmation or invalidation\n"
-            "四、结论与跟踪表 (Conclusion & Tracking Table)\n\n"
-            "Do not stay at the ETF ticker headline level. Expand the analysis to the ETF's heavy industries and weight stocks, then translate those findings back to ETF pricing."
-            " When writing in Chinese, use Chinese section titles such as '真实支撑与短期噪声'; do not use English labels like 'Genuine Support'."
-            " Make sure to append a Markdown table at the end of the report to organize key points in the report, organized and easy to read.\n\n"
-            "For the title lead and the 2-3 sentence lead under each top-level section, state the conclusion directly. "
-            "Do NOT use lead-ins such as '本部分结论表明', '该部分说明', '这一节意味着', 'This section shows', or similar meta phrasing."
+            "每个一级章节（一、二、三、四）以2-3句导语开头总结该节核心结论，然后空行进入子章节。\n\n"
+            "一、情绪主线与权重影响\n"
+            "  （一）产品情绪与讨论强弱: ETF产品层面的情绪与讨论强度\n"
+            "  （二）行业与重仓股事件主线: 主导行业与头部持仓的新闻和情绪\n"
+            "二、事件传导与定价辨别\n"
+            "  （一）宏观事件传导: 相关宏观事件是否放大或对冲ETF论点\n"
+            "  （二）真实支撑与短期噪声: 哪些事件真正支撑ETF价格、哪些拖累、哪些仅是噪声\n"
+            "三、后续触发与验证要点\n"
+            "  （一）后续监控要点: 配置者接下来应监控什么以确认或证伪\n"
+            "四、结论与跟踪表\n\n"
+            "不得停留在ETF代码标题层面。将分析扩展到ETF重行业和权重股，然后将发现转回ETF定价。"
+            "中文输出时使用中文章节标题，如'真实支撑与短期噪声'；不得使用英文标签如'Genuine Support'。"
+            "末尾附Markdown表格整理报告关键要点。\n\n"
+            "标题导语与每个一级章节导语直接陈述结论。"
+            "不得使用'本部分结论表明'、'该部分说明'、'这一节意味着'、'This section shows'等元描述。"
             + get_language_instruction()
         )
 
@@ -131,7 +114,7 @@ def create_social_media_analyst(llm):
         report = normalize_chinese_role_terms(report) if report else report
         report = strip_meta_lead_prefixes(report) if report else report
         report = strip_report_title(report) if report else report
-        report = normalize_section_headings(report, _SOCIAL_HEADING_MAP) if report else report
+        report = normalize_chinese_section_headings(report) if report else report
         report = ensure_title_lead_paragraph(
             report,
             _DEFAULT_TITLE_LEAD_ZH,

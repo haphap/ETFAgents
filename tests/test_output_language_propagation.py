@@ -197,7 +197,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("持有", prompt)
         self.assertIn("市场与资金流分析", prompt)
         self.assertIn("舆情与事件影响分析", prompt)
-        self.assertIn("ETF持仓映射行业研究", prompt)
+        self.assertIn("ETF持仓行业研究", prompt)
         self.assertIn("ETF头部持仓研究", prompt)
         self.assertIn("催化节奏", prompt)
         self.assertNotIn("catalyst timing", prompt)
@@ -399,7 +399,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("保守风险分析师", prompt)
         self.assertIn("中性风险分析师", prompt)
         self.assertIn("市场与资金流分析", prompt)
-        self.assertIn("ETF持仓映射行业研究", prompt)
+        self.assertIn("ETF持仓行业研究", prompt)
         self.assertIn("ETF头部持仓研究", prompt)
         self.assertIn("评级体系", prompt)
         self.assertIn("买入", prompt)
@@ -624,11 +624,14 @@ class OutputLanguagePropagationTests(unittest.TestCase):
                 ),
                 risk_management="若跌破关键支撑且放量，则及时收缩仓位。",
                 rating=PortfolioRating.BUY,
-            )
+            ),
+            context_text="10日均线452元、20日均线448元、50日均线443元。布林中轨449元。",
         )
 
+        self.assertIn("50日均线443元", rendered)
         self.assertIn("日成交量连续2个交易日达到近20日均量的1.2—1.3倍", rendered)
         self.assertIn("ETF 份额继续净申购或溢折价不再走阔", rendered)
+        self.assertNotIn("市场分析中给出的首个关键阻力/支撑转换位", rendered)
 
     def test_portfolio_decision_rendering_expands_vague_execution_guidance(self):
         rendered = render_portfolio_decision(
@@ -719,7 +722,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
                 snapshot_stance="增持",
                 snapshot_new_and_rebuttal="新增了对量价与份额验证的约束。",
                 snapshot_to_verify="继续跟踪50日均线、成交量和份额变化。",
-            )
+            ),
+            context_text="10日均线452元、20日均线448元、50日均线443元。布林中轨449元。",
         )
 
         self.assertEqual(rendered.count("最终配置建议: **增持**"), 1)
@@ -728,6 +732,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("明确建议为增持", rendered)
         self.assertIn("当前组合更适合维持增配节奏", rendered)
         self.assertIn("目标仓位先控制在20%至25%", rendered)
+        self.assertIn("50日均线443元", rendered)
 
     def test_portfolio_decision_rendering_strips_prompt_leakage(self):
         rendered = render_portfolio_decision(

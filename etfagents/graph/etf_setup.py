@@ -48,3 +48,9 @@ class ETFGraphSetup(GraphSetup):
         "stock_research": "ETF Top Holdings Research",
         "etf_macro": "ETF Holdings-Industry Research",
     }
+    _CLEAR_ROUTE_ALIASES = {
+        **GraphSetup._CLEAR_ROUTE_ALIASES,
+        "market": ("Msg Clear Market", "Msg Clear Market Flow", "Msg Clear ETF Flow"),
+        "broker_research": ("Msg Clear Industry Research", "Msg Clear Holdings-Industry Research", "Msg Clear ETF Industry Research"),
+        "stock_research": ("Msg Clear Stock Research", "Msg Clear Top Holdings Research", "Msg Clear ETF Top Holdings Research"),
+    }

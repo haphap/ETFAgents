@@ -66,7 +66,7 @@ CLI_SECTION_TITLES = {
     "catalyst_sentiment_report": ("Sentiment & Catalyst Impact Analysis", "舆情与事件影响分析"),
     "macro_regime_report": ("Macro Regime Analysis", "宏观框架分析"),
     "meso_commodity_report": ("Meso Commodity Analysis", "中观大宗商品分析"),
-    "holdings_industry_report": ("ETF Holdings-Industry Research", "ETF持仓映射行业研究"),
+    "holdings_industry_report": ("ETF Holdings-Industry Research", "ETF持仓行业研究"),
     "top_holdings_report": ("ETF Top Holdings Research", "ETF头部持仓研究"),
     "research_allocation_plan": ("Research Team Allocation View", "研究团队配置观点"),
     "trader_allocation_plan": ("ETF Allocation Plan", "ETF配置计划"),
@@ -88,7 +88,6 @@ ANALYST_KEY_ALIASES = {
 AGENT_NAME_ALIASES = {
     "Market Analyst": "Market & Flow Analyst",
     "Social Analyst": "Sentiment & Catalyst Analyst",
-    "News Analyst": "Macro Regime Analyst",
     "Macro Analyst": "Macro Regime Analyst",
     "Sentiment & Catalyst Analyst": "Sentiment & Catalyst Analyst",
     "Macro Regime Analyst": "Macro Regime Analyst",

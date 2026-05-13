@@ -1,3 +1,5 @@
+import functools
+
 from etfagents.agents.utils.agent_utils import (
     build_debate_brief,
     build_instrument_context,
@@ -32,6 +34,7 @@ def _portfolio_action_logic_instruction() -> str:
             "- 说明 ETF 结构、资金流、催化节奏、下行边界、仓位大小以及加仓 / 减仓 / 轮动 / 对冲触发条件如何共同导向你的决策。"
             " 每个触发条件必须引用上方报告中的具体数据——如价格、均线、成交量、份额变化、溢折价、持仓集中度、宏观指标等——并给出明确阈值。"
             ' 不能只写\u201c等待确认\u201d\u201c观察成交量\u201d\u201c关注资金流\u201d这类泛化表述，必须写明\u201c达到什么数值才算确认\u201d。'
+            ' 不要写“市场报告中的关键位”或“前文提到的50日均线”这种回指句式，必须把具体数值直接重写在当前句子里。'
             ' 若没有上方报告中的具体价位、均线数值、量能基数或份额/溢折价数据，就不要直接给出加减仓动作。'
         )
     return (
@@ -56,6 +59,7 @@ def _portfolio_detail_instruction(section: str) -> str:
             '  (b) 成交量或资金流改善的具体阈值（相对近5日或20日均量达到什么倍数，如\u201c成交量需达到近20日均量的1.3倍以上\u201d）；\n'
             "  (c) ETF 结构验证的具体指标（如份额变化幅度、溢折价偏离、跟踪误差、前十大持仓集中度百分比）；\n"
             '  (d) 宏观、风格或政策催化确认的具体条件（如利率决议时间、指数成分调整窗口、资金流向阈值）。\n'
+            ' 不要写“参考市场报告中的50日均线”这种表述，而要直接写成“50日均线 2.08 元、布林中轨 2.05 元”这类可执行句子。\n'
             ' 若缺少这些具体数值，就不要把“回踩确认后加仓”“等待放量后减仓”写成最终执行结论。'
         )
     if section == "conclusion":
@@ -169,7 +173,7 @@ Use this exact output order with Markdown headings:
         {localize_label("Market and flow analysis:", "市场与资金流分析:")}
         {market_flow_report}
 
-        {localize_label("ETF holdings-industry research:", "ETF持仓映射行业研究:")}
+        {localize_label("ETF holdings-industry research:", "ETF持仓行业研究:")}
         {holdings_industry_report}
 
         {localize_label("ETF top holdings research:", "ETF头部持仓研究:")}
@@ -185,7 +189,18 @@ Only after the three sections above and the final transaction proposal line, app
                 structured_llm,
                 llm,
                 prompt,
-                render_portfolio_decision,
+                functools.partial(
+                    render_portfolio_decision,
+                    context_text="\n".join(
+                        part
+                        for part in (
+                            market_flow_report,
+                            research_plan,
+                            trader_plan,
+                        )
+                        if part
+                    ),
+                ),
                 "Portfolio Manager",
             )
         )

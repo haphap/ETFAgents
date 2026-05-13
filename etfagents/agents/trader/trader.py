@@ -20,6 +20,7 @@ def _trader_detail_instruction() -> str:
             '对于 ETF 配置执行计划和风险控制，不能只写”等待支撑””观察成交量””关注资金流”这类泛化表述而不给解释。'
             '每个论据必须引用上方报告中的具体数据，不能只写泛化判断。请明确什么算关键支撑或阻力，并优先引用市场报告中的具体类型和数值'
             '（例如50日均线位于X元、布林中轨位于Y元、前低位于Z元）；'
+            '不要写“市场报告中的关键位”“前文提到的50日均线”这类让读者回头查找的表述，必须把数值直接重写在当前句子里。'
             '同时说明成交量或资金流改善应相对近5日或20日均量达到什么程度（如”成交量需达到近20日均量的1.3倍以上”）；'
             '以及什么样的宏观、风格或结构催化确认才足以支持加仓、持有、减仓、轮动或退出（如利率决议时间、指数成分调整窗口、资金流向阈值）；'
             '还需要说明 ETF 结构验证的具体指标（如份额变化幅度、溢折价偏离百分比、跟踪误差、前十大持仓集中度百分比）。'
@@ -31,6 +32,7 @@ def _trader_detail_instruction() -> str:
         "For the ETF allocation execution plan and risk controls, do not use generic phrases such as 'wait for support', 'watch volume', or 'monitor fund flows' without explanation. "
         "Every argument must quote specific data from the reports above — do not rely on generic judgments. "
         "Spell out what counts as key support or resistance by referencing the market report with exact numbers (e.g., 50-day SMA at X, Bollinger mid-band at Y, prior swing low at Z), "
+        "and restate those numbers inline in the same sentence instead of telling the reader to look back at the market report. "
         "what level of volume or fund-flow recovery counts as improvement (e.g., 'volume must reach 1.3x the 20-day average of N shares'), "
         "what specific macro, style, or structure catalyst confirmation would justify adding, holding, reducing, rotating, or exiting (e.g., rate decision dates, index rebalancing windows, fund-flow thresholds), "
         "and what ETF structure checks matter (e.g., share change magnitude, premium-discount deviation percentage, tracking error, top-10 holdings concentration percentage). "
@@ -83,7 +85,7 @@ def create_trader(llm):
                 structured_llm,
                 llm,
                 messages,
-                render_trader_proposal,
+                functools.partial(render_trader_proposal, context_text=market_flow_report),
                 "Trader",
             )
         )

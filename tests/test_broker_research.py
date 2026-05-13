@@ -4,9 +4,7 @@ from unittest.mock import patch, MagicMock
 
 from langchain_core.messages import AIMessage, HumanMessage
 
-from etfagents.agents.analysts.broker_research_analyst import create_broker_research_analyst
 from etfagents.agents.analysts.etf_industry_research_analyst import create_etf_industry_research_analyst
-from etfagents.agents.analysts.stock_research_analyst import create_stock_research_analyst
 from etfagents.agents.utils.agent_utils import localize_role_name, normalize_chinese_role_terms
 from etfagents.agents.utils.agent_states import AgentState
 from etfagents.agents.utils.research_report_tools import get_broker_research, get_stock_research
@@ -69,22 +67,13 @@ class BrokerResearchRoutingTests(unittest.TestCase):
 
 
 class AnalystSelectionCompatibilityTests(unittest.TestCase):
-    def test_resolve_selected_analysts_skips_a_share_only_research_for_non_a_share(self):
+    def test_resolve_selected_analysts_returns_all_analysts(self):
         selected, skipped = TradingAgentsGraph.resolve_selected_analysts(
-            ["market", "broker_research", "stock_research"],
+            ["social", "news"],
             "AAPL",
         )
 
-        self.assertEqual(["market"], selected)
-        self.assertEqual(["broker_research", "stock_research"], skipped)
-
-    def test_resolve_selected_analysts_keeps_research_for_a_share_raw_digits(self):
-        selected, skipped = TradingAgentsGraph.resolve_selected_analysts(
-            ["market", "broker_research", "stock_research"],
-            "601899",
-        )
-
-        self.assertEqual(["market", "broker_research", "stock_research"], selected)
+        self.assertEqual(["social", "news"], selected)
         self.assertEqual([], skipped)
 
 
@@ -102,7 +91,7 @@ class IndustryResearchNamingTests(unittest.TestCase):
             self.assertEqual("个股研究分析师", localize_role_name("ETF Top Holdings Research Analyst"))
             self.assertEqual(
                 "行业研究分析师与个股研究分析师",
-                normalize_chinese_role_terms("ETF持仓映射行业研究分析师与ETF头部企业研究分析师"),
+                normalize_chinese_role_terms("ETF持仓行业研究分析师与ETF头部企业研究分析师"),
             )
         finally:
             set_config(original_config)
@@ -142,128 +131,14 @@ class StockResearchToolTests(unittest.TestCase):
         self.assertIn("Stock Research Reports", result)
 
 
-class BrokerResearchAnalystTests(unittest.TestCase):
-    """Tests for the broker research analyst node."""
-
-    def test_analyst_returns_research_report_field(self):
-        llm = _CapturingLLM(
-            "# Broker Research Cross-Analysis\n\n"
-            "Consensus: Most brokers are bullish on growth prospects."
-        )
-        node = create_broker_research_analyst(llm)
-
-        with patch(
-            "etfagents.agents.analysts.broker_research_analyst.run_tool_report_chain",
-            return_value=(
-                AIMessage(content="# Broker Research Cross-Analysis\n\nConsensus view."),
-                "# Broker Research Cross-Analysis\n\nConsensus view.",
-            ),
-        ):
-            result = node(
-                {
-                    "company_of_interest": "601899.SH",
-                    "trade_date": "2026-04-01",
-                    "messages": [HumanMessage(content="Analyze 601899.SH")],
-                }
-            )
-
-        self.assertIn("research_report", result)
-        self.assertIn("Broker Research Cross-Analysis", result["research_report"])
-        self.assertEqual(result["messages"][0].content, result["research_report"])
-
-    def test_analyst_prompt_includes_cross_analysis_instruction(self):
-        llm = _CapturingLLM("Report content")
-        node = create_broker_research_analyst(llm)
-
-        captured_args = {}
-        original_run = "etfagents.agents.analysts.broker_research_analyst.run_tool_report_chain"
-
-        def mock_run(*args, **kwargs):
-            captured_args["system_message"] = kwargs.get("system_message", "")
-            captured_args["prompt_template"] = args[0]
-            return (AIMessage(content="Report content"), "Report content")
-
-        with patch(original_run, side_effect=mock_run):
-            node(
-                {
-                    "company_of_interest": "300750.SZ",
-                    "trade_date": "2026-04-01",
-                    "messages": [HumanMessage(content="Analyze 300750.SZ")],
-                }
-            )
-
-        system_msg = captured_args.get("system_message", "")
-        self.assertIn("cross-analys", system_msg.lower())
-        self.assertIn("consensus", system_msg.lower())
-        self.assertIn("divergence", system_msg.lower())
-
-
-class StockResearchAnalystTests(unittest.TestCase):
-    """Tests for the stock research analyst node."""
-
-    def test_analyst_returns_stock_report_field(self):
-        llm = _CapturingLLM(
-            "# Stock Research Cross-Analysis\n\n"
-            "Consensus: Most brokers rate the stock as Buy."
-        )
-        node = create_stock_research_analyst(llm)
-
-        with patch(
-            "etfagents.agents.analysts.stock_research_analyst.run_tool_report_chain",
-            return_value=(
-                AIMessage(content="# Stock Research Cross-Analysis\n\nConsensus view."),
-                "# Stock Research Cross-Analysis\n\nConsensus view.",
-            ),
-        ):
-            result = node(
-                {
-                    "company_of_interest": "601899.SH",
-                    "trade_date": "2026-04-01",
-                    "messages": [HumanMessage(content="Analyze 601899.SH")],
-                }
-            )
-
-        self.assertIn("stock_report", result)
-        self.assertIn("Stock Research Cross-Analysis", result["stock_report"])
-        self.assertEqual(result["messages"][0].content, result["stock_report"])
-
-    def test_analyst_prompt_includes_cross_analysis_instruction(self):
-        llm = _CapturingLLM("Report content")
-        node = create_stock_research_analyst(llm)
-
-        captured_args = {}
-        original_run = "etfagents.agents.analysts.stock_research_analyst.run_tool_report_chain"
-
-        def mock_run(*args, **kwargs):
-            captured_args["system_message"] = kwargs.get("system_message", "")
-            captured_args["prompt_template"] = args[0]
-            return (AIMessage(content="Report content"), "Report content")
-
-        with patch(original_run, side_effect=mock_run):
-            node(
-                {
-                    "company_of_interest": "300750.SZ",
-                    "trade_date": "2026-04-01",
-                    "messages": [HumanMessage(content="Analyze 300750.SZ")],
-                }
-            )
-
-        system_msg = captured_args.get("system_message", "")
-        self.assertIn("cross-analys", system_msg.lower())
-        self.assertIn("consensus", system_msg.lower())
-        self.assertIn("divergence", system_msg.lower())
-        self.assertIn("earnings", system_msg.lower())
-        self.assertIn("valuation", system_msg.lower())
-
-
 class ETFIndustryResearchAnalystTests(unittest.TestCase):
     def test_title_lead_before_first_section_is_backfilled(self):
         llm = _CapturingLLM("Report content")
         node = create_etf_industry_research_analyst(llm)
 
         raw_report = (
-            "# ETF持仓映射行业研究分析报告\n\n"
-            "## 一、总体研判\n\n"
+            "# ETF持仓行业研究分析报告\n\n"
+            "## 一、行业主线与分歧焦点\n\n"
             "行业景气回升，重仓暴露集中。"
         )
 
@@ -293,15 +168,15 @@ class ETFIndustryResearchAnalystTests(unittest.TestCase):
         node = create_etf_industry_research_analyst(llm)
 
         raw_report = (
-            "# ETF持仓映射行业研究分析报告\n\n"
+            "# ETF持仓行业研究分析报告\n\n"
             "重仓行业景气仍在扩散，高权重板块对估值弹性贡献更大。\n\n"
-            "## 一、总体研判\n\n"
+            "## 一、行业主线与分歧焦点\n\n"
             "本部分结论表明，该ETF重仓新能源与金融科技，对无风险利率下行更敏感。\n\n"
-            "### （一）共识观点\n\n"
+            "### （一）共识主线\n\n"
             "多数机构看多景气延续。\n\n"
-            "## 二、深度分析\n\n"
+            "## 二、景气、政策与产业链验证\n\n"
             "本部分结论表明，政策催化仍在延续，行业景气尚未逆转。\n\n"
-            "### （一）量化对比\n\n"
+            "### （一）景气与价格对比\n\n"
             "盈利预期仍在修复。"
         )
 
@@ -377,11 +252,10 @@ class ETFIndustryResearchAnalystTests(unittest.TestCase):
             )
 
         system_msg = captured_args.get("system_message", "")
-        self.assertIn("overview paragraph before any section headings", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
-        self.assertIn("Do NOT use lead-ins such as '本部分结论表明'", system_msg)
-        self.assertIn("compact 1-2 sentence lead paragraph", system_msg)
-        self.assertIn("Never discuss data-source classification noise", system_msg)
+        self.assertIn("不得使用'本部分结论表明'", system_msg)
+        self.assertIn("1-2句导语开头", system_msg)
+        self.assertIn("数据源分类噪声", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
 

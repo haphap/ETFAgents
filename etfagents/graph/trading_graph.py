@@ -14,21 +14,10 @@ from etfagents.default_config import DEFAULT_CONFIG
 from etfagents.agents.utils.memory import TradingMemoryLog
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value
 from etfagents.dataflows.config import set_config
-from etfagents.dataflows.interface import is_a_share_ticker
-
-# Import the new abstract tool methods from agent_utils
 from etfagents.agents.utils.agent_utils import (
-    get_stock_data,
-    get_indicators,
-    get_fundamentals,
-    get_balance_sheet,
-    get_cashflow,
-    get_income_statement,
     get_news,
     get_insider_transactions,
     get_global_news,
-    get_broker_research,
-    get_stock_research,
 )
 
 from .checkpointer import checkpoint_step, clear_checkpoint, get_checkpointer, thread_id
@@ -44,7 +33,6 @@ logger = logging.getLogger(__name__)
 class TradingAgentsGraph:
     """Main class that orchestrates the trading agents framework."""
 
-    A_SHARE_ONLY_ANALYSTS = ("broker_research", "stock_research")
     DEFAULT_SELECTED_ANALYSTS = GraphSetup.DEFAULT_SELECTED_ANALYSTS
     DEFAULT_GRAPH_CONFIG = DEFAULT_CONFIG
     GRAPH_SETUP_CLASS = GraphSetup
@@ -148,18 +136,7 @@ class TradingAgentsGraph:
         selected_analysts: list[str],
         ticker: str,
     ) -> tuple[list[str], list[str]]:
-        ordered = list(dict.fromkeys(selected_analysts))
-        if not ticker or is_a_share_ticker(ticker):
-            return ordered, []
-
-        compatible: list[str] = []
-        skipped: list[str] = []
-        for analyst in ordered:
-            if analyst in cls.A_SHARE_ONLY_ANALYSTS:
-                skipped.append(analyst)
-            else:
-                compatible.append(analyst)
-        return compatible, skipped
+        return list(dict.fromkeys(selected_analysts)), []
 
     def _get_provider_kwargs(self) -> Dict[str, Any]:
         """Get provider-specific kwargs for LLM client creation."""
@@ -186,14 +163,6 @@ class TradingAgentsGraph:
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:
         """Create tool nodes for different data sources using abstract methods."""
         return {
-            "market": ToolNode(
-                [
-                    # Core stock data tools
-                    get_stock_data,
-                    # Technical indicators
-                    get_indicators,
-                ]
-            ),
             "social": ToolNode(
                 [
                     # News tools for social media analysis
@@ -206,27 +175,6 @@ class TradingAgentsGraph:
                     get_news,
                     get_global_news,
                     get_insider_transactions,
-                ]
-            ),
-            "fundamentals": ToolNode(
-                [
-                    # Fundamental analysis tools
-                    get_fundamentals,
-                    get_balance_sheet,
-                    get_cashflow,
-                    get_income_statement,
-                ]
-            ),
-            "broker_research": ToolNode(
-                [
-                    # Broker research report tools
-                    get_broker_research,
-                ]
-            ),
-            "stock_research": ToolNode(
-                [
-                    # Individual stock research report tools
-                    get_stock_research,
                 ]
             ),
         }
@@ -266,25 +214,6 @@ class TradingAgentsGraph:
         self.ticker = asset_symbol
         trade_date_str = str(trade_date)
         resumed = False
-        resolved_analysts, skipped_analysts = self.resolve_selected_analysts(
-            self.requested_analysts,
-            asset_symbol,
-        )
-        if not resolved_analysts:
-            raise ValueError(
-                f"No compatible analysts selected for '{asset_symbol}'. "
-                "Industry Research Analyst and Stock Research Analyst are available for A-share tickers only."
-            )
-        if resolved_analysts != self.selected_analysts:
-            if skipped_analysts:
-                logger.info(
-                    "Skipping A-share-only analysts for %s: %s",
-                    asset_symbol,
-                    ", ".join(skipped_analysts),
-                )
-            self.selected_analysts = resolved_analysts
-            self.workflow = self.graph_setup.setup_graph(self.selected_analysts)
-            self.graph = self.workflow.compile()
         self._resolve_pending_entries(asset_symbol)
 
         if self.config.get("checkpoint_enabled"):

@@ -5,19 +5,26 @@ from etfagents.agents.utils.agent_utils import collapse_blank_lines
 _H1_TITLE_PATTERN = re.compile(r"^#\s+\S")
 _CJK_PATTERN = re.compile(r"[\u4e00-\u9fff]")
 _TITLE_PREFIX_PATTERN = re.compile(r"^(?:#{1,6}\s+)?(?:[一二三四五六七八九十]+、\s*|（[一二三四五六七八九十\d]+）\s*)?")
+_TOP_LEVEL_VISIBLE_HEADING_PATTERN = re.compile(r"^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+、")
+_VISIBLE_SECTION_HEADING_PATTERN = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)"
+)
+_ENGLISH_HEADING_TRAILER_PATTERN = re.compile(
+    r"\s*[\(（][^()（）\n]*[A-Za-z][^()（）\n]*[\)）]\s*$"
+)
 _INVALID_DISPLAY_TICKERS = {"SH", "SZ", "BJ", "HK", "SS", "SSE", "SZSE", "BSE", "HKG", "SEHK"}
 _PSEUDO_TITLE_SUBJECTS = (
     "技术面与资金流综合诊断",
     "舆情与事件影响分析",
     "宏观框架分析",
     "中观商品宏观策略报告",
-    "持仓映射行业研究分析",
+    "持仓行业研究分析",
     "头部持仓研究分析",
     "Technical & Flow Diagnosis",
     "Sentiment & Catalyst Impact Analysis",
     "Macro Regime Analysis",
     "Meso Commodity Macro Strategy Report",
-    "Holdings-Mapped Industry Research Analysis",
+    "Holdings Industry Research Analysis",
     "Top Holdings Research Analysis",
 )
 _INVALID_EXCHANGE_ONLY_PREFIX_PATTERN = re.compile(
@@ -61,6 +68,9 @@ _LEAD_META_PHRASE_PATTERN = re.compile(
     r"|本节通过"
     r"|该节通过"
     r"|这一节通过"
+    r"|本节(?:锁定|聚焦(?:于)?|关注|围绕|讨论|转向|观察|拆解|检验)"
+    r"|该节(?:锁定|聚焦(?:于)?|关注|围绕|讨论|转向|观察|拆解|检验)"
+    r"|这一节(?:锁定|聚焦(?:于)?|关注|围绕|讨论|转向|观察|拆解|检验)"
     r"|This section directly (?:presents|states|summarizes)"
     r"|This section (?:uses|through)"
     r")\s*"
@@ -100,12 +110,13 @@ def get_topic_and_term_style_instruction() -> str:
 def get_concise_heading_instruction() -> str:
     return (
         " Top-level and second-level headings must be concise, specific, and point directly to the content of that section. "
-        "Avoid generic labels such as '总体研判', '深度分析', '风险与催化', or '总结' when a more precise heading is available. "
-        "If you improve any heading, directly write the final rewritten heading text in the report itself: keep the original numbering hierarchy and optimize only the heading wording. "
-        "Do NOT output code blocks, JSON, dictionary mappings, variable assignments, or any programming-language structure for heading changes. "
-        "Forbidden example: `_HEADING_MAP = {\"一、总体研判\": \"一、情绪主线与权重影响\"}`. "
-        "Never present heading changes as rules, mapping tables, or replacement instructions; simply output the final human-readable headings that can be used directly in the report. "
-        "Each heading should be brief, forceful, and immediately usable in the final report. "
+        "You MUST use the exact section headings specified in the report structure above. "
+        "Do NOT substitute generic labels such as '总体研判', '深度分析', '风险与催化', or '总结' "
+        "when the structure already provides a precise heading for that section. "
+        "If the structure does not provide a heading, write one that is brief, forceful, and immediately usable. "
+        "In Chinese output, top-level and second-level headings must stay in plain Chinese and must NOT append English translations or notes in parentheses. "
+        "Do NOT output code blocks, JSON, dictionary mappings, variable assignments, or any programming-language structure. "
+        "Each heading should appear directly in the report as readable text, not as configuration. "
         "Use '一、' for top-level headings and '（一）' for second-level headings."
     )
 
@@ -114,6 +125,47 @@ def strip_exchange_only_pseudo_titles(report: str) -> str:
     if not report:
         return ""
     return collapse_blank_lines(_EXCHANGE_ONLY_PSEUDO_TITLE_PATTERN.sub("", report))
+
+
+def _normalize_heading_key(line: str) -> str:
+    stripped = _ENGLISH_HEADING_TRAILER_PATTERN.sub("", (line or "").strip()).strip()
+    return re.sub(r"\s+", " ", stripped)
+
+
+def normalize_chinese_section_headings(
+    report: str,
+    *,
+    strip_english_for_subheadings: bool = True,
+) -> str:
+    if not report:
+        return ""
+
+    heading_pattern = (
+        _VISIBLE_SECTION_HEADING_PATTERN
+        if strip_english_for_subheadings
+        else _TOP_LEVEL_VISIBLE_HEADING_PATTERN
+    )
+    cleaned_lines: list[str] = []
+    pending_top_level_heading: str | None = None
+
+    for raw_line in report.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        line = raw_line
+        stripped = (line or "").strip()
+        if heading_pattern.match(stripped):
+            line = _ENGLISH_HEADING_TRAILER_PATTERN.sub("", line).rstrip()
+            stripped = line.strip()
+
+        if _TOP_LEVEL_VISIBLE_HEADING_PATTERN.match(stripped):
+            heading_key = _normalize_heading_key(stripped)
+            if pending_top_level_heading == heading_key:
+                continue
+            pending_top_level_heading = heading_key
+        elif stripped:
+            pending_top_level_heading = None
+
+        cleaned_lines.append(line)
+
+    return collapse_blank_lines("\n".join(cleaned_lines))
 
 
 def _looks_like_report_title_line(line: str) -> bool:
@@ -140,19 +192,6 @@ def strip_report_title(report: str) -> str:
     if _H1_TITLE_PATTERN.match(first_line) or _looks_like_report_title_line(first_line):
         del lines[first_nonempty]
     return collapse_blank_lines("\n".join(lines[first_nonempty:]))
-
-
-def normalize_section_headings(report: str, heading_map: dict[str, str]) -> str:
-    text = (report or "").replace("\r\n", "\n").replace("\r", "\n")
-    if not text or not heading_map:
-        return collapse_blank_lines(text)
-
-    for old, new in heading_map.items():
-        pattern = re.compile(
-            rf"(?m)^(\s*#{{0,6}}\s*){re.escape(old)}(?:\s*\([^)]+\))?\s*$"
-        )
-        text = pattern.sub(lambda match: f"{match.group(1)}{new}", text)
-    return collapse_blank_lines(text)
 
 
 def ensure_h1_title(report: str, title: str) -> str:

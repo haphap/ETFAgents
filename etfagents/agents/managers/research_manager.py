@@ -170,7 +170,7 @@ Only after the three sections above, append a feedback block in this exact forma
         {localize_label("Market and flow analysis:", "市场与资金流分析:")}
         {market_flow_report}
 
-        {localize_label("ETF holdings-industry research:", "ETF持仓映射行业研究:")}
+        {localize_label("ETF holdings-industry research:", "ETF持仓行业研究:")}
         {holdings_industry_report}
 
         {localize_label("ETF top holdings research:", "ETF头部持仓研究:")}
