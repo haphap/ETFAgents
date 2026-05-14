@@ -1,5 +1,6 @@
 import copy
 import unittest
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import pandas as pd
@@ -7,6 +8,7 @@ from langgraph.prebuilt import ToolNode
 
 from etfagents.agents.utils.etf_data_tools import get_etf_indicators, get_etf_industry_research
 from etfagents.dataflows.config import get_config, set_config
+from etfagents.dataflows.config import backtest_context
 from etfagents.dataflows.interface import TOOLS_CATEGORIES, VENDOR_METHODS, get_category_for_method
 from etfagents.dataflows.tushare import get_etf_universe
 from etfagents.graph.conditional_logic import ConditionalLogic
@@ -150,6 +152,8 @@ class ETFExtensionTests(unittest.TestCase):
             [item["suggested_weight_pct"] for item in ranked],
             [50.0, 33.3, 16.7],
         )
+        self.assertEqual(ranked[0]["backtest_signal"]["source"], "candidate_pool")
+        self.assertEqual(ranked[0]["backtest_signal"]["target_weight_pct"], 50.0)
 
     @patch("etfagents.agents.utils.etf_data_tools.get_broker_reports")
     @patch("etfagents.agents.utils.etf_data_tools._resolve_broker_industry_keyword")
@@ -332,7 +336,211 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertAlmostEqual(result.windows[1].period_return, 0.049505, places=6)
         self.assertAlmostEqual(result.metrics.cumulative_return, 0.154455, places=6)
         self.assertAlmostEqual(result.metrics.average_turnover, 1.0, places=6)
+        self.assertEqual(result.execution_timing, "same_close")
         self.assertEqual(result.to_dict()["top_k"], 1)
+
+    def test_candidate_pool_replay_supports_next_open_execution(self):
+        graph = object.__new__(EtfAgentsGraph)
+
+        def _fake_ranked(_tickers, trade_date):
+            ranked_by_date = {
+                "2026-01-02": [
+                    {"ticker": "159915.SZ", "rating": "BUY", "suggested_weight_pct": 70.0},
+                    {"ticker": "510300.SH", "rating": "HOLD", "suggested_weight_pct": 30.0},
+                ],
+                "2026-01-06": [
+                    {"ticker": "510300.SH", "rating": "BUY", "suggested_weight_pct": 60.0},
+                    {"ticker": "159915.SZ", "rating": "OVERWEIGHT", "suggested_weight_pct": 40.0},
+                ],
+            }
+            return ranked_by_date[trade_date]
+
+        def _fake_prices(ticker, _start_date, _end_date):
+            frames = {
+                "159915.SZ": pd.DataFrame(
+                    {
+                        "Date": pd.to_datetime(["2026-01-02", "2026-01-06", "2026-01-08", "2026-01-10"]),
+                        "Open": [100.0, 101.0, 111.0, 112.0],
+                        "Close": [100.0, 110.0, 111.0, 112.0],
+                    }
+                ),
+                "510300.SH": pd.DataFrame(
+                    {
+                        "Date": pd.to_datetime(["2026-01-02", "2026-01-06", "2026-01-08", "2026-01-10"]),
+                        "Open": [100.0, 101.0, 102.0, 107.0],
+                        "Close": [100.0, 101.0, 106.0, 107.0],
+                    }
+                ),
+            }
+            return frames[ticker]
+
+        graph.analyze_candidate_pool = _fake_ranked
+
+        result = EtfAgentsGraph.replay_candidate_pool(
+            graph,
+            ["159915.SZ", "510300.SH"],
+            "2026-01-02",
+            "2026-01-08",
+            rebalance_interval_days=1,
+            top_k=1,
+            execution_timing="next_open",
+            price_loader=_fake_prices,
+        )
+
+        self.assertEqual(result.execution_timing, "next_open")
+        self.assertAlmostEqual(result.windows[0].period_return, 0.09901, places=6)
+        self.assertAlmostEqual(result.windows[1].period_return, 0.04902, places=6)
+        self.assertAlmostEqual(result.metrics.cumulative_return, 0.152883, places=6)
+
+    def test_candidate_pool_uses_cached_backtest_result_within_backtest_context(self):
+        graph = object.__new__(EtfAgentsGraph)
+        graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        graph.selected_analysts = ["market_flow", "macro_regime"]
+        with TemporaryDirectory() as tmpdir:
+            graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            graph.config["results_dir"] = tmpdir
+            call_count = {"propagate": 0}
+
+            def _fake_propagate(ticker, _trade_date):
+                call_count["propagate"] += 1
+                return (
+                    {
+                        "research_allocation_plan": f"research-{ticker}",
+                        "trader_allocation_plan": f"trader-{ticker}",
+                        "final_allocation_decision": f"decision-{ticker}",
+                        "backtest_signal": {
+                            "ticker": ticker,
+                            "decision_date": "2026-01-15",
+                            "rating": "BUY",
+                            "source": "portfolio_manager",
+                            "source_section": "positioning_recommendation",
+                            "target_weight_pct": 25.0,
+                            "target_weight_min_pct": 25.0,
+                            "target_weight_max_pct": 25.0,
+                            "weight_source": "rating_map",
+                            "execution_delay": "next_open",
+                            "starter_size_text": "",
+                            "add_conditions": [],
+                            "reduce_conditions": [],
+                            "exit_conditions": [],
+                            "rebalance_conditions": [],
+                            "risk_controls": [],
+                            "monitoring_points": [],
+                            "signal_text_snapshot": f"decision-{ticker}",
+                        },
+                    },
+                    "BUY",
+                )
+
+            graph.propagate = _fake_propagate
+
+            with backtest_context("2026-01-15"):
+                first = EtfAgentsGraph.analyze_candidate_pool(graph, ["510300.SH"], "2026-01-15")
+                second = EtfAgentsGraph.analyze_candidate_pool(graph, ["510300.SH"], "2026-01-15")
+
+        self.assertEqual(call_count["propagate"], 1)
+        self.assertEqual(first[0]["ticker"], second[0]["ticker"])
+        self.assertEqual(first[0]["rating"], second[0]["rating"])
+
+    def test_candidate_pool_force_refresh_bypasses_cache(self):
+        graph = object.__new__(EtfAgentsGraph)
+        graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        graph.selected_analysts = ["market_flow", "macro_regime"]
+        with TemporaryDirectory() as tmpdir:
+            graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            graph.config["results_dir"] = tmpdir
+            call_count = {"propagate": 0}
+
+            def _fake_propagate(ticker, _trade_date):
+                call_count["propagate"] += 1
+                return (
+                    {
+                        "research_allocation_plan": f"research-{ticker}",
+                        "trader_allocation_plan": f"trader-{ticker}",
+                        "final_allocation_decision": f"decision-{ticker}",
+                        "backtest_signal": {
+                            "ticker": ticker,
+                            "decision_date": "2026-01-15",
+                            "rating": "BUY",
+                            "source": "portfolio_manager",
+                            "source_section": "positioning_recommendation",
+                            "target_weight_pct": 25.0,
+                            "target_weight_min_pct": 25.0,
+                            "target_weight_max_pct": 25.0,
+                            "weight_source": "structured_field",
+                            "execution_delay": "next_open",
+                            "starter_size_text": "",
+                            "add_conditions": [],
+                            "reduce_conditions": [],
+                            "exit_conditions": [],
+                            "rebalance_conditions": [],
+                            "risk_controls": [],
+                            "monitoring_points": [],
+                            "signal_text_snapshot": f"decision-{ticker}",
+                        },
+                    },
+                    "BUY",
+                )
+
+            graph.propagate = _fake_propagate
+
+            with backtest_context("2026-01-15"):
+                EtfAgentsGraph.analyze_candidate_pool(graph, ["510300.SH"], "2026-01-15")
+                EtfAgentsGraph.analyze_candidate_pool(
+                    graph,
+                    ["510300.SH"],
+                    "2026-01-15",
+                    force_refresh=True,
+                )
+
+        self.assertEqual(call_count["propagate"], 2)
+
+    def test_candidate_pool_cache_misses_when_config_changes(self):
+        first_graph = object.__new__(EtfAgentsGraph)
+        second_graph = object.__new__(EtfAgentsGraph)
+        first_graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        second_graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        first_graph.selected_analysts = ["market_flow"]
+        second_graph.selected_analysts = ["market_flow", "macro_regime"]
+        with TemporaryDirectory() as tmpdir:
+            first_graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            first_graph.config["results_dir"] = tmpdir
+            second_graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            second_graph.config["results_dir"] = tmpdir
+            first_calls = {"propagate": 0}
+            second_calls = {"propagate": 0}
+
+            def _first_propagate(ticker, _trade_date):
+                first_calls["propagate"] += 1
+                return (
+                    {
+                        "research_allocation_plan": f"research-{ticker}",
+                        "trader_allocation_plan": f"trader-{ticker}",
+                        "final_allocation_decision": f"decision-{ticker}",
+                    },
+                    "BUY",
+                )
+
+            def _second_propagate(ticker, _trade_date):
+                second_calls["propagate"] += 1
+                return (
+                    {
+                        "research_allocation_plan": f"research-{ticker}",
+                        "trader_allocation_plan": f"trader-{ticker}",
+                        "final_allocation_decision": f"decision-{ticker}",
+                    },
+                    "BUY",
+                )
+
+            first_graph.propagate = _first_propagate
+            second_graph.propagate = _second_propagate
+
+            with backtest_context("2026-01-15"):
+                EtfAgentsGraph.analyze_candidate_pool(first_graph, ["510300.SH"], "2026-01-15")
+                EtfAgentsGraph.analyze_candidate_pool(second_graph, ["510300.SH"], "2026-01-15")
+
+        self.assertEqual(first_calls["propagate"], 1)
+        self.assertEqual(second_calls["propagate"], 1)
 
 
 if __name__ == "__main__":

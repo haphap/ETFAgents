@@ -1,6 +1,7 @@
 import copy
 from typing import Optional
 import datetime
+import json
 import typer
 from pathlib import Path
 from functools import wraps
@@ -27,6 +28,7 @@ from rich.rule import Rule
 from urllib.parse import urlparse
 
 from etfagents.graph.etf_graph import EtfAgentsGraph
+from etfagents.backtest import save_backtest_result
 from etfagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
 from cli.utils import *
@@ -1125,6 +1127,21 @@ def _normalize_ticker_list(raw_text: str) -> list[str]:
     return tickers
 
 
+def _normalize_benchmark_list(raw_text: str | None) -> list[str]:
+    benchmarks: list[str] = []
+    seen: set[str] = set()
+    for part in re.split(r"[\n,]+", raw_text or ""):
+        value = part.strip()
+        if not value:
+            continue
+        benchmark = "equal_weight_pool" if value.lower() == "equal_weight_pool" else value.upper()
+        if benchmark in seen:
+            continue
+        seen.add(benchmark)
+        benchmarks.append(benchmark)
+    return benchmarks
+
+
 def get_tickers():
     """Get one ETF ticker or a comma-separated candidate pool from user input."""
     while True:
@@ -1230,6 +1247,17 @@ def save_candidate_pool_report(candidates: list[dict[str, str]], analysis_date: 
     report_path = save_path / "complete_report.md"
     report_path.write_text(report_text, encoding="utf-8")
     return report_path
+
+
+def _default_backtest_output_dir(config: dict, tickers: list[str], start_date: str, end_date: str) -> Path:
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return (
+        Path(config["results_dir"])
+        / "backtest"
+        / _candidate_pool_slug(tickers)
+        / f"{start_date}_to_{end_date}"
+        / timestamp
+    )
 
 
 def save_report_to_disk(final_state, ticker: str, save_path: Path):
@@ -2191,6 +2219,180 @@ def run_analysis(checkpoint: bool = False):
     display_choice = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper()
     if display_choice in ("Y", "YES", ""):
         display_complete_report(final_state)
+
+
+@app.command()
+def backtest(
+    tickers: str = typer.Option(..., "--tickers", help="Comma-separated ETF tickers."),
+    benchmark_tickers: Optional[str] = typer.Option(
+        None,
+        "--benchmark-tickers",
+        help="Comma-separated benchmark tickers, or include equal_weight_pool for a synthetic equal-weight pool benchmark.",
+    ),
+    start_date: str = typer.Option(..., "--start-date", help="Backtest start date (YYYY-MM-DD)."),
+    end_date: str = typer.Option(..., "--end-date", help="Backtest end date (YYYY-MM-DD)."),
+    rebalance_interval_days: int = typer.Option(21, "--rebalance-interval-days", min=1),
+    top_k: int = typer.Option(3, "--top-k", min=1),
+    execution_timing: str = typer.Option("same_close", "--execution-timing"),
+    initial_cash: float = typer.Option(1_000_000.0, "--initial-cash"),
+    commission: float = typer.Option(0.0, "--commission"),
+    slippage_perc: float = typer.Option(0.0, "--slippage-perc"),
+    cash_buffer_pct: float = typer.Option(0.0, "--cash-buffer-pct"),
+    force_refresh: bool = typer.Option(False, "--force-refresh", help="Bypass backtest signal cache and recompute graph outputs."),
+    research_depth: int = typer.Option(1, "--research-depth", min=1),
+    llm_provider: str = typer.Option(DEFAULT_CONFIG["llm_provider"], "--llm-provider"),
+    deep_think_llm: str = typer.Option(DEFAULT_CONFIG["deep_think_llm"], "--deep-think-llm"),
+    quick_think_llm: str = typer.Option(DEFAULT_CONFIG["quick_think_llm"], "--quick-think-llm"),
+    output_language: str = typer.Option(DEFAULT_CONFIG["output_language"], "--output-language"),
+    backend_url: Optional[str] = typer.Option(None, "--backend-url"),
+    save_path: Optional[Path] = typer.Option(None, "--save-path"),
+):
+    normalized_tickers = _normalize_ticker_list(tickers)
+    normalized_benchmarks = _normalize_benchmark_list(benchmark_tickers)
+    if not normalized_tickers:
+        console.print("[red]Error: Please provide at least one ETF ticker.[/red]")
+        raise typer.Exit(code=1)
+    try:
+        start_dt = datetime.datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.datetime.strptime(end_date, "%Y-%m-%d")
+    except ValueError:
+        console.print("[red]Error: Dates must use YYYY-MM-DD format.[/red]")
+        raise typer.Exit(code=1)
+    if start_dt > end_dt:
+        console.print("[red]Error: start-date must be on or before end-date.[/red]")
+        raise typer.Exit(code=1)
+
+    config = copy.deepcopy(DEFAULT_CONFIG)
+    config["llm_provider"] = llm_provider.lower()
+    config["deep_think_llm"] = deep_think_llm
+    config["quick_think_llm"] = quick_think_llm
+    config["max_debate_rounds"] = research_depth
+    config["max_risk_discuss_rounds"] = research_depth
+    config["output_language"] = output_language
+    config["backend_url"] = backend_url
+
+    try:
+        _preflight_local_backend(llm_provider, backend_url)
+    except Exception as exc:
+        console.print(f"\n[red]{_format_runtime_failure(exc, {'llm_provider': llm_provider, 'backend_url': backend_url})}[/red]")
+        raise typer.Exit(code=1)
+
+    graph = EtfAgentsGraph(config=config, debug=False)
+    output_dir = save_path or _default_backtest_output_dir(config, normalized_tickers, start_date, end_date)
+
+    with console.status(_localize_cli_label("Running backtest...", "正在运行回测...")):
+        result = graph.backtest_candidate_pool(
+            normalized_tickers,
+            start_date,
+            end_date,
+            rebalance_interval_days=rebalance_interval_days,
+            top_k=top_k,
+            execution_timing=execution_timing,
+            initial_cash=initial_cash,
+            commission=commission,
+            slippage_perc=slippage_perc,
+            cash_buffer_pct=cash_buffer_pct,
+            benchmark_tickers=normalized_benchmarks or None,
+            force_refresh=force_refresh,
+        )
+        save_backtest_result(result, output_dir)
+
+    summary = Table(title=_localize_cli_label("Backtest Summary", "回测摘要"), box=box.SIMPLE_HEAVY)
+    summary.add_column(_localize_cli_label("Metric", "指标"))
+    summary.add_column(_localize_cli_label("Value", "数值"))
+    summary.add_row(_localize_cli_label("Execution", "执行时点"), result.execution_timing)
+    summary.add_row(_localize_cli_label("Cumulative Return", "累计收益"), f"{result.metrics.cumulative_return:.4%}")
+    summary.add_row(_localize_cli_label("Annualized Return", "年化收益"), f"{result.metrics.annualized_return:.4%}")
+    summary.add_row(_localize_cli_label("Max Drawdown", "最大回撤"), f"{result.metrics.max_drawdown:.4%}")
+    summary.add_row(_localize_cli_label("Sharpe", "夏普"), f"{result.metrics.sharpe_ratio:.4f}")
+    summary.add_row(_localize_cli_label("Average Turnover", "平均换手"), f"{result.metrics.average_turnover:.4f}")
+    summary.add_row(_localize_cli_label("Trades", "成交笔数"), str(result.metrics.total_trades))
+    if result.benchmarks:
+        summary.add_row(_localize_cli_label("Benchmarks", "基准"), ", ".join(result.benchmarks))
+    for benchmark_metric in result.benchmark_metrics:
+        summary.add_row(
+            _localize_cli_label(f"{benchmark_metric.benchmark} Return", f"{benchmark_metric.benchmark} 收益"),
+            f"{benchmark_metric.cumulative_return:.4%}",
+        )
+        summary.add_row(
+            _localize_cli_label(f"{benchmark_metric.benchmark} Excess", f"{benchmark_metric.benchmark} 超额"),
+            f"{benchmark_metric.excess_cumulative_return:.4%}",
+        )
+    console.print(summary)
+    health = Table(title=_localize_cli_label("Backtest Health", "回测健康检查"), box=box.SIMPLE_HEAVY)
+    health.add_column(_localize_cli_label("Check", "检查项"))
+    health.add_column(_localize_cli_label("Value", "数值"))
+    health.add_row(
+        _localize_cli_label("Weight Sources", "权重来源分布"),
+        ", ".join(
+            f"{key}:{value}"
+            for key, value in sorted(result.health.weight_source_counts.items())
+        ) or "none",
+    )
+    health.add_row(
+        _localize_cli_label("Structured Triggers", "结构化触发器"),
+        str(result.health.structured_trigger_count),
+    )
+    health.add_row(
+        _localize_cli_label("Risk Rules", "风控规则"),
+        str(result.health.risk_rule_count),
+    )
+    health.add_row(
+        _localize_cli_label("Trigger Buckets", "触发器分布"),
+        ", ".join(
+            f"{key}:{value}"
+            for key, value in sorted(result.health.trigger_bucket_counts.items())
+        ),
+    )
+    health.add_row(
+        _localize_cli_label("Timing Mismatches", "执行时点不一致"),
+        str(result.health.execution_timing_mismatch_count),
+    )
+    health.add_row(
+        _localize_cli_label("Clamp Hits", "日期夹紧次数"),
+        str(result.health.clamp_hit_count),
+    )
+    health.add_row(
+        _localize_cli_label("Missing Price Rows", "缺失价格行"),
+        str(result.health.missing_price_rows),
+    )
+    health.add_row(
+        _localize_cli_label("Unsupported Trigger Rules", "不支持的触发器规则"),
+        str(result.health.unsupported_trigger_count),
+    )
+    console.print(health)
+
+    rebalance_summary = Table(title=_localize_cli_label("Rebalance Summary", "调仓摘要"), box=box.SIMPLE_HEAVY)
+    rebalance_summary.add_column(_localize_cli_label("Decision", "决策日"))
+    rebalance_summary.add_column(_localize_cli_label("Reason", "原因"))
+    rebalance_summary.add_column(_localize_cli_label("Tickers", "标的"))
+    rebalance_summary.add_column(_localize_cli_label("Weights", "权重"))
+    rebalance_summary.add_column(_localize_cli_label("Ratings", "评级"))
+    rebalance_summary.add_column(_localize_cli_label("Weight Source", "权重来源"))
+    rebalance_summary.add_column(_localize_cli_label("Period Return", "阶段收益"))
+    rebalance_summary.add_column(_localize_cli_label("Cum Return", "累计收益"))
+    for row in result.rebalance_summary_rows():
+        rebalance_summary.add_row(
+            row["decision_date"],
+            row["reason"],
+            ", ".join(row["selected_tickers"]) or "-",
+            ", ".join(
+                f"{ticker}:{weight:.1%}"
+                for ticker, weight in row["weights"].items()
+                if weight > 1e-9
+            ) or "-",
+            ", ".join(
+                f"{ticker}:{rating}"
+                for ticker, rating in row["ratings"].items()
+            ) or "-",
+            ", ".join(row["weight_sources"]) or "unknown",
+            f"{row['period_return']:.4%}",
+            f"{row['cumulative_return']:.4%}",
+        )
+    console.print(rebalance_summary)
+    console.print(
+        f"[green]{_localize_cli_label('Artifacts saved', '结果已保存')}:[/green] {Path(output_dir).resolve()}"
+    )
 
 
 @app.command()

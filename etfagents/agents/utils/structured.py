@@ -33,10 +33,27 @@ def invoke_structured_or_freetext(
     render: Callable[[SchemaT], str],
     agent_name: str,
 ) -> str:
+    return invoke_structured_or_freetext_with_result(
+        structured_llm,
+        plain_llm,
+        prompt,
+        render,
+        agent_name,
+    )[0]
+
+
+def invoke_structured_or_freetext_with_result(
+    structured_llm: Optional[Any],
+    plain_llm: Any,
+    prompt: Any,
+    render: Callable[[SchemaT], str],
+    agent_name: str,
+) -> tuple[str, Optional[SchemaT]]:
     """Run the structured call and render it; fall back to free text on failure."""
     if structured_llm is not None:
         try:
-            return render(structured_llm.invoke(prompt))
+            structured_result = structured_llm.invoke(prompt)
+            return render(structured_result), structured_result
         except Exception as exc:
             logger.warning(
                 "%s: structured-output invocation failed (%s); retrying once as free text",
@@ -45,4 +62,4 @@ def invoke_structured_or_freetext(
             )
 
     response = plain_llm.invoke(prompt)
-    return extract_text_content(getattr(response, "content", response))
+    return extract_text_content(getattr(response, "content", response)), None

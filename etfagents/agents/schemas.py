@@ -1,6 +1,7 @@
 import re
 from difflib import SequenceMatcher
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +23,26 @@ class PortfolioRating(str, Enum):
     SELL = "Sell"
 
 
+class Trigger(BaseModel):
+    metric: str = Field(description="Metric to evaluate, e.g. close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, or weight_pct.")
+    op: Literal["<", "<=", ">", ">=", "==", "in_range"] = Field(description="Comparison operator for the trigger.")
+    threshold: float | tuple[float, float] = Field(description="Threshold value or inclusive range for the trigger.")
+    action: Literal["add", "reduce", "exit", "rebalance", "hold"] = Field(description="Action to take when the trigger fires.")
+    delta_pct: float | None = Field(default=None, description="Optional percentage-point change in target portfolio weight when the trigger fires.")
+    target_weight_pct: float | None = Field(default=None, description="Optional target portfolio weight in percent to set directly when the trigger fires.")
+    note: str = Field(default="", description="Short explanation of the trigger and why it matters.")
+
+
+class RiskRule(BaseModel):
+    metric: str = Field(description="Risk metric to evaluate, e.g. close, low, pnl_pct, weight_pct, or volume_ratio_20d.")
+    op: Literal["<", "<=", ">", ">=", "==", "in_range"] = Field(description="Comparison operator for the risk rule.")
+    threshold: float | tuple[float, float] = Field(description="Threshold value or inclusive range for the risk rule.")
+    action: Literal["cap", "floor", "exit", "hold"] = Field(description="Risk action to take when the rule fires.")
+    max_weight_pct: float | None = Field(default=None, description="Optional maximum portfolio weight in percent after the rule fires.")
+    min_weight_pct: float | None = Field(default=None, description="Optional minimum portfolio weight in percent after the rule fires.")
+    note: str = Field(default="", description="Short explanation of the risk rule and why it matters.")
+
+
 class ResearchPlan(BaseModel):
     debate_conclusion: str = Field(description="A detailed synthesis paragraph comparing both sides, naming the strongest evidence from each, and explaining the decisive weakness in the losing view for ETF allocation.")
     action_logic: str = Field(description="A detailed evidence-to-allocation paragraph linking ETF structure, flows, catalysts, downside boundaries, and confirmation or invalidation triggers to the final decision.")
@@ -37,6 +58,14 @@ class TraderProposal(BaseModel):
     execution_plan: str = Field(description="Concrete ETF allocation plan with support or resistance references, exact price or moving-average levels, volume or fund-flow thresholds, catalyst triggers, ETF share or premium-discount checks, and explicit add, reduce, rotate, or exit conditions. Do not say 'wait for confirmation' without numeric thresholds. Write the numeric level inline instead of saying 'the key level in the market report'.")
     risk_management: str = Field(description="Risk controls, rebalance or invalidation signals, monitoring thresholds, and the actions to take when those thresholds are breached.")
     rating: PortfolioRating = Field(description="Trader recommendation for ETF exposure.")
+    target_weight_pct: float | None = Field(default=None, description="Structured target portfolio weight in percent for this ETF, from 0 to 100. Use when the execution plan implies a single target sizing.")
+    target_weight_band: tuple[float, float] | None = Field(default=None, description="Structured target weight band in percent as (low, high), from 0 to 100. Use when the plan specifies a sizing range rather than a single weight.")
+    execution_timing: Literal["same_close", "next_open", "next_close"] | None = Field(default=None, description="Structured execution timing for the backtest signal. Use same_close, next_open, or next_close.")
+    add_triggers: list[Trigger] = Field(default_factory=list, description="Structured add triggers that increase the ETF target weight when their conditions are met.")
+    reduce_triggers: list[Trigger] = Field(default_factory=list, description="Structured reduce triggers that trim the ETF target weight when their conditions are met.")
+    exit_triggers: list[Trigger] = Field(default_factory=list, description="Structured exit triggers that close or nearly close the ETF position when their conditions are met.")
+    rebalance_triggers: list[Trigger] = Field(default_factory=list, description="Structured rebalance triggers that restore or rotate the ETF position when their conditions are met.")
+    risk_controls: list[RiskRule] = Field(default_factory=list, description="Structured risk rules that cap, floor, or exit the ETF position when risk conditions are breached.")
 
 
 class PortfolioDecision(BaseModel):
@@ -44,6 +73,14 @@ class PortfolioDecision(BaseModel):
     action_logic: str = Field(description="A detailed portfolio-manager paragraph showing how ETF evidence leads to sizing, hedging, rebalance triggers, and risk controls.")
     positioning_recommendation: str = Field(description="Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate those numeric levels inline rather than telling the reader to look back at the market report.")
     rating: PortfolioRating = Field(description="Final portfolio-manager rating for ETF allocation.")
+    target_weight_pct: float | None = Field(default=None, description="Structured target portfolio weight in percent for this ETF, from 0 to 100. Use when the final recommendation implies a single target sizing.")
+    target_weight_band: tuple[float, float] | None = Field(default=None, description="Structured target weight band in percent as (low, high), from 0 to 100. Use when the final recommendation specifies a sizing range rather than a single weight.")
+    execution_timing: Literal["same_close", "next_open", "next_close"] | None = Field(default=None, description="Structured execution timing for the backtest signal. Use same_close, next_open, or next_close.")
+    add_triggers: list[Trigger] = Field(default_factory=list, description="Structured add triggers that increase the ETF target weight when their conditions are met.")
+    reduce_triggers: list[Trigger] = Field(default_factory=list, description="Structured reduce triggers that trim the ETF target weight when their conditions are met.")
+    exit_triggers: list[Trigger] = Field(default_factory=list, description="Structured exit triggers that close or nearly close the ETF position when their conditions are met.")
+    rebalance_triggers: list[Trigger] = Field(default_factory=list, description="Structured rebalance triggers that restore or rotate the ETF position when their conditions are met.")
+    risk_controls: list[RiskRule] = Field(default_factory=list, description="Structured risk rules that cap, floor, or exit the ETF position when risk conditions are breached.")
     snapshot_stance: str = Field(description="Concise stance for the feedback snapshot.")
     snapshot_new_and_rebuttal: str = Field(description="What was newly added this round and how it rebutted competing views.")
     snapshot_to_verify: str = Field(description="Specific items or triggers to verify next.")

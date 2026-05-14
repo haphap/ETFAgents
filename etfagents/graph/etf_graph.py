@@ -19,6 +19,15 @@ from etfagents.agents.utils.agent_utils import (
     get_news,
 )
 from etfagents.agents.utils.state_keys import get_state_value
+from etfagents.backtest.signals import (
+    build_candidate_backtest_signal,
+    build_state_backtest_signal,
+)
+from etfagents.backtest.cache import BacktestSignalStore
+from etfagents.backtest.backtrader_engine import (
+    BacktraderBacktestResult,
+    run_candidate_pool_backtest,
+)
 from etfagents.default_config import DEFAULT_CONFIG
 
 from .replay import ReplayResult, run_candidate_pool_replay
@@ -97,33 +106,53 @@ class EtfAgentsGraph(TradingAgentsGraph):
             "etf_macro": ToolNode([get_etf_holdings, get_etf_industry_research]),
         }
 
-    def analyze_candidate_pool(self, tickers: list[str], trade_date: str) -> list[dict[str, object]]:
+    def analyze_candidate_pool(
+        self,
+        tickers: list[str],
+        trade_date: str,
+        *,
+        force_refresh: bool = False,
+    ) -> list[dict[str, object]]:
         """Analyze a candidate pool sequentially and rank it by final allocation rating."""
         results: list[dict[str, object]] = []
+        cache = BacktestSignalStore(
+            getattr(self, "config", self.DEFAULT_GRAPH_CONFIG),
+            getattr(self, "selected_analysts", self.DEFAULT_SELECTED_ANALYSTS),
+            force_refresh=force_refresh,
+        )
         for ticker in tickers:
+            cached = cache.get(ticker, trade_date)
+            if cached is not None:
+                results.append(dict(cached))
+                continue
             final_state, rating = self.propagate(ticker, trade_date)
-            results.append(
-                {
-                    "ticker": ticker,
-                    "rating": rating,
-                    "score": str(self._RATING_SCORE.get(rating, 0)),
-                    "research_allocation_plan": get_state_value(
-                        final_state,
-                        "research_allocation_plan",
-                        "",
-                    ),
-                    "trader_allocation_plan": get_state_value(
-                        final_state,
-                        "trader_allocation_plan",
-                        "",
-                    ),
-                    "final_allocation_decision": get_state_value(
-                        final_state,
-                        "final_allocation_decision",
-                        "",
-                    ),
-                }
-            )
+            result = {
+                "ticker": ticker,
+                "rating": rating,
+                "score": str(self._RATING_SCORE.get(rating, 0)),
+                "research_allocation_plan": get_state_value(
+                    final_state,
+                    "research_allocation_plan",
+                    "",
+                ),
+                "trader_allocation_plan": get_state_value(
+                    final_state,
+                    "trader_allocation_plan",
+                    "",
+                ),
+                "final_allocation_decision": get_state_value(
+                    final_state,
+                    "final_allocation_decision",
+                    "",
+                ),
+                "backtest_signal": build_state_backtest_signal(
+                    final_state,
+                    default_ticker=ticker,
+                    default_trade_date=trade_date,
+                ),
+            }
+            cache.put(ticker, trade_date, result)
+            results.append(result)
         ranked = sorted(
             results,
             key=lambda item: (-int(item["score"]), item["ticker"]),
@@ -134,6 +163,10 @@ class EtfAgentsGraph(TradingAgentsGraph):
             item["suggested_weight_pct"] = (
                 round(conviction / total_conviction * 100, 1) if total_conviction else 0.0
             )
+            item["backtest_signal"] = build_candidate_backtest_signal(
+                item,
+                trade_date,
+            )
         return ranked
 
     def replay_candidate_pool(
@@ -143,6 +176,8 @@ class EtfAgentsGraph(TradingAgentsGraph):
         end_date: str,
         rebalance_interval_days: int = 21,
         top_k: int = 3,
+        execution_timing: str = "same_close",
+        force_refresh: bool = False,
         price_loader=None,
     ) -> ReplayResult:
         """Replay ranked ETF allocation decisions across historical rebalance windows."""
@@ -153,5 +188,41 @@ class EtfAgentsGraph(TradingAgentsGraph):
             end_date,
             rebalance_interval_days=rebalance_interval_days,
             top_k=top_k,
+            execution_timing=execution_timing,
+            force_refresh=force_refresh,
+            price_loader=price_loader,
+        )
+
+    def backtest_candidate_pool(
+        self,
+        tickers: list[str],
+        start_date: str,
+        end_date: str,
+        rebalance_interval_days: int = 21,
+        top_k: int = 3,
+        execution_timing: str = "same_close",
+        initial_cash: float = 1_000_000.0,
+        commission: float = 0.0,
+        slippage_perc: float = 0.0,
+        cash_buffer_pct: float = 0.0,
+        benchmark_tickers: list[str] | None = None,
+        force_refresh: bool = False,
+        price_loader=None,
+    ) -> BacktraderBacktestResult:
+        """Run a formal Backtrader backtest over ranked ETF candidate-pool decisions."""
+        return run_candidate_pool_backtest(
+            self,
+            tickers,
+            start_date,
+            end_date,
+            rebalance_interval_days=rebalance_interval_days,
+            top_k=top_k,
+            execution_timing=execution_timing,
+            initial_cash=initial_cash,
+            commission=commission,
+            slippage_perc=slippage_perc,
+            cash_buffer_pct=cash_buffer_pct,
+            benchmark_tickers=benchmark_tickers,
+            force_refresh=force_refresh,
             price_loader=price_loader,
         )

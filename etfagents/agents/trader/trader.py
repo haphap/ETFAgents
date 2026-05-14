@@ -2,7 +2,10 @@ import functools
 from langchain_core.messages import AIMessage
 
 from etfagents.agents.schemas import TraderProposal, render_trader_proposal
-from etfagents.agents.utils.structured import bind_structured, invoke_structured_or_freetext
+from etfagents.agents.utils.structured import (
+    bind_structured,
+    invoke_structured_or_freetext_with_result,
+)
 from etfagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_localized_execution_bias_instruction,
@@ -12,6 +15,7 @@ from etfagents.agents.utils.agent_utils import (
     truncate_for_prompt,
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value, with_state_aliases
+from etfagents.backtest.signals import build_trader_backtest_signal
 
 
 def _trader_detail_instruction() -> str:
@@ -72,28 +76,36 @@ def create_trader(llm):
                     "In the execution plan (section 二), the opening sentence must state WHAT to do and at what levels (e.g., '先以目标仓位的20%—30%建立试探仓，价格站回50日均线上方后逐步加仓'); do not restate the thesis rationale. "
                     "In rebalance and risk controls (section 三), focus on failure conditions, rebalance triggers, cut or restore rules, and what must be monitored next; do not repeat the thesis or execution sentence verbatim. "
                     "Do not stack multiple rating labels with different wording. "
-                    "If you mention timing in Chinese output, translate it as 时机 or 节奏 instead of leaving the English word. "
-                    "For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三. "
-                    f"{_trader_detail_instruction()} "
-                    f"{get_localized_execution_bias_instruction()}{get_language_instruction()}"
-                ),
-            },
+                     "If you mention timing in Chinese output, translate it as 时机 or 节奏 instead of leaving the English word. "
+                     "For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三. "
+                     "In addition to the prose sections, populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values. "
+                     "For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct. "
+                     f"{_trader_detail_instruction()} "
+                     f"{get_localized_execution_bias_instruction()}{get_language_instruction()}"
+                 ),
+             },
             context,
         ]
 
-        rendered_result = normalize_chinese_manager_terms(
-            invoke_structured_or_freetext(
-                structured_llm,
-                llm,
-                messages,
-                functools.partial(render_trader_proposal, context_text=market_flow_report),
-                "Trader",
-            )
+        rendered_result, structured_result = invoke_structured_or_freetext_with_result(
+            structured_llm,
+            llm,
+            messages,
+            functools.partial(render_trader_proposal, context_text=market_flow_report),
+            "Trader",
+        )
+        rendered_result = normalize_chinese_manager_terms(rendered_result)
+        trader_backtest_signal = build_trader_backtest_signal(
+            asset_symbol,
+            str(state.get("trade_date", "")),
+            rendered_result,
+            structured_result,
         )
 
         return with_state_aliases({
             "messages": [AIMessage(content=rendered_result)],
             "trader_allocation_plan": rendered_result,
+            "trader_backtest_signal": trader_backtest_signal,
             "sender": name,
         })
 

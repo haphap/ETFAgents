@@ -21,7 +21,11 @@ from etfagents.agents.utils.agent_utils import (
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value, with_state_aliases
 from etfagents.agents.schemas import PortfolioDecision, render_portfolio_decision
-from etfagents.agents.utils.structured import bind_structured, invoke_structured_or_freetext
+from etfagents.agents.utils.structured import (
+    bind_structured,
+    invoke_structured_or_freetext_with_result,
+)
+from etfagents.backtest.signals import build_portfolio_backtest_signal
 
 
 def _is_chinese_output() -> bool:
@@ -122,6 +126,8 @@ def create_portfolio_manager(llm, memory=None):
 Your response must evaluate all three risk perspectives before giving a position. Do not jump straight to the final recommendation.
 For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三.
 Output only the finished report. Never copy, quote, or paraphrase the writing rules or bullet instructions from this prompt into the answer, and do not repeat a section heading once it has already appeared.
+Populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values.
+For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct.
 
 Use this exact output order with Markdown headings:
 ## {localize_label("Debate Conclusion", "辩论结论")}
@@ -188,25 +194,30 @@ Only after the three sections above, append a feedback block in this exact forma
 {get_snapshot_template()}
 {get_snapshot_writing_instruction()}{get_language_instruction()}"""
 
-        normalized_content = normalize_chinese_manager_terms(
-            invoke_structured_or_freetext(
-                structured_llm,
-                llm,
-                prompt,
-                functools.partial(
-                    render_portfolio_decision,
-                    context_text="\n".join(
-                        part
-                        for part in (
-                            market_flow_report,
-                            research_plan,
-                            trader_plan,
-                        )
-                        if part
-                    ),
+        rendered_content, structured_result = invoke_structured_or_freetext_with_result(
+            structured_llm,
+            llm,
+            prompt,
+            functools.partial(
+                render_portfolio_decision,
+                context_text="\n".join(
+                    part
+                    for part in (
+                        market_flow_report,
+                        research_plan,
+                        trader_plan,
+                    )
+                    if part
                 ),
-                "Portfolio Manager",
-            )
+            ),
+            "Portfolio Manager",
+        )
+        normalized_content = normalize_chinese_manager_terms(rendered_content)
+        portfolio_backtest_signal = build_portfolio_backtest_signal(
+            get_asset_symbol(state),
+            str(state.get("trade_date", "")),
+            normalized_content,
+            structured_result,
         )
         judge_snapshot_full = extract_feedback_snapshot(normalized_content)
         debate_round = max(1, (risk_debate_state.get("count", 0) + 2) // 3)
@@ -253,6 +264,8 @@ Only after the three sections above, append a feedback block in this exact forma
         return with_state_aliases({
             "risk_debate_state": new_risk_debate_state,
             "final_allocation_decision": normalized_content,
+            "portfolio_backtest_signal": portfolio_backtest_signal,
+            "backtest_signal": portfolio_backtest_signal,
         })
 
     return portfolio_manager_node

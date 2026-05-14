@@ -1,3 +1,5 @@
+from datetime import datetime
+
 # Import from vendor-specific modules
 from .y_finance import (
     get_YFin_data_online,
@@ -38,7 +40,7 @@ from .qlib_local import (
 from .exceptions import DataVendorUnavailable
 
 # Configuration and routing logic
-from .config import get_config
+from .config import get_backtest_context, get_config, increment_backtest_health
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
@@ -189,6 +191,35 @@ VENDOR_METHODS = {
     },
 }
 
+_RANGE_DATE_METHODS = {
+    "get_stock_data": (1, 2),
+    "get_news": (1, 2),
+    "get_broker_research": (1, 2),
+    "get_stock_research": (1, 2),
+    "get_etf_price_data": (1, 2),
+}
+
+_CURRENT_DATE_METHODS = {
+    "get_indicators": 2,
+    "get_etf_indicators": 2,
+    "get_global_news": 0,
+    "get_fundamentals": 1,
+    "get_balance_sheet": 2,
+    "get_cashflow": 2,
+    "get_income_statement": 2,
+    "get_etf_info": 1,
+    "get_etf_nav": 1,
+    "get_etf_holdings": 1,
+    "get_etf_share": 1,
+    "get_etf_universe": 0,
+}
+
+_UNBOUNDED_BACKTEST_METHODS = {
+    "get_insider_transactions",
+    "get_news",
+    "get_global_news",
+}
+
 def get_category_for_method(method: str) -> str:
     """Get the category that contains the specified method."""
     for category, info in TOOLS_CATEGORIES.items():
@@ -220,6 +251,88 @@ def _is_chinese_ticker(ticker: str) -> bool:
     return False
 
 
+def _parse_iso_date(date_str: str) -> datetime:
+    return datetime.strptime(date_str, "%Y-%m-%d")
+
+
+def _clamp_iso_date(date_str: str | None, as_of_date: str) -> str:
+    if not date_str:
+        return as_of_date
+    return min(date_str, as_of_date, key=_parse_iso_date)
+
+
+def _replace_arg(args: tuple, index: int, value):
+    mutable = list(args)
+    while len(mutable) <= index:
+        mutable.append(None)
+    mutable[index] = value
+    return tuple(mutable)
+
+
+def _apply_backtest_date_bounds(method: str, args: tuple, kwargs: dict):
+    context = get_backtest_context()
+    as_of_date = context.as_of_date
+    if context.mode != "backtest" or not as_of_date:
+        return args, kwargs
+
+    if method in _UNBOUNDED_BACKTEST_METHODS:
+        increment_backtest_health(blocked_call=True)
+        raise RuntimeError(
+            f"Backtest mode does not allow '{method}' because the invocation has no date boundary to clamp."
+        )
+
+    bounded_args = args
+    bounded_kwargs = dict(kwargs)
+
+    if method in _RANGE_DATE_METHODS:
+        start_idx, end_idx = _RANGE_DATE_METHODS[method]
+        had_start_kw = "start_date" in bounded_kwargs
+        had_end_kw = "end_date" in bounded_kwargs
+        start_value = bounded_kwargs.get("start_date")
+        if start_value is None and len(bounded_args) > start_idx:
+            start_value = bounded_args[start_idx]
+        end_value = bounded_kwargs.get("end_date")
+        if end_value is None and len(bounded_args) > end_idx:
+            end_value = bounded_args[end_idx]
+        clamped_end = _clamp_iso_date(end_value, as_of_date)
+        if start_value and _parse_iso_date(start_value) > _parse_iso_date(clamped_end):
+            increment_backtest_health(blocked_call=True)
+            raise RuntimeError(
+                f"Backtest mode rejected '{method}' because start_date {start_value} is after clamped end_date {clamped_end}."
+            )
+        if str(end_value or "") != str(clamped_end):
+            increment_backtest_health(clamp_hit=True)
+        bounded_args = _replace_arg(bounded_args, end_idx, clamped_end)
+        if had_end_kw or len(bounded_args) <= end_idx:
+            bounded_kwargs["end_date"] = clamped_end
+        elif "end_date" in bounded_kwargs:
+            bounded_kwargs.pop("end_date", None)
+        if not had_start_kw:
+            bounded_kwargs.pop("start_date", None)
+        return bounded_args, bounded_kwargs
+
+    if method in _CURRENT_DATE_METHODS:
+        current_idx = _CURRENT_DATE_METHODS[method]
+        had_curr_kw = "curr_date" in bounded_kwargs
+        current_value = bounded_kwargs.get("curr_date")
+        if current_value is None and len(bounded_args) > current_idx:
+            current_value = bounded_args[current_idx]
+        clamped_current = _clamp_iso_date(current_value, as_of_date)
+        if str(current_value or "") != str(clamped_current):
+            increment_backtest_health(clamp_hit=True)
+        bounded_args = _replace_arg(bounded_args, current_idx, clamped_current)
+        if had_curr_kw or len(bounded_args) <= current_idx:
+            bounded_kwargs["curr_date"] = clamped_current
+        else:
+            bounded_kwargs.pop("curr_date", None)
+        return bounded_args, bounded_kwargs
+
+    increment_backtest_health(blocked_call=True)
+    raise RuntimeError(
+        f"Backtest mode has no date-bound routing rule for '{method}', so the call was blocked."
+    )
+
+
 def is_a_share_ticker(ticker: str) -> bool:
     """Return True when *ticker* maps to an A-share market symbol."""
     if not isinstance(ticker, str) or not ticker.strip():
@@ -233,6 +346,7 @@ def is_a_share_ticker(ticker: str) -> bool:
 
 def route_to_vendor(method: str, *args, **kwargs):
     """Route method calls to appropriate vendor implementation with fallback support."""
+    args, kwargs = _apply_backtest_date_bounds(method, args, kwargs)
     category = get_category_for_method(method)
     vendor_config = get_vendor(category, method)
     primary_vendors = [v.strip() for v in vendor_config.split(',')]

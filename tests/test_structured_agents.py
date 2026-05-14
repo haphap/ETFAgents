@@ -87,6 +87,8 @@ class StructuredAgentTests(unittest.TestCase):
             execution_plan="Enter in tranches above support.",
             risk_management="Reduce if support breaks.",
             rating=PortfolioRating.HOLD,
+            target_weight_pct=22.5,
+            execution_timing="next_open",
         )
         llm.with_structured_output.return_value = structured
 
@@ -94,6 +96,10 @@ class StructuredAgentTests(unittest.TestCase):
 
         self.assertIn("## ETF Allocation Thesis", result["trader_investment_plan"])
         self.assertIn("EXECUTION BIAS: **HOLD**", result["trader_investment_plan"])
+        self.assertEqual(result["trader_backtest_signal"]["source"], "trader")
+        self.assertEqual(result["trader_backtest_signal"]["rating"], "HOLD")
+        self.assertEqual(result["trader_backtest_signal"]["weight_source"], "structured_field")
+        self.assertEqual(result["trader_backtest_signal"]["target_weight_pct"], 22.5)
 
     def test_research_manager_renders_structured_output(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
@@ -140,6 +146,8 @@ class StructuredAgentTests(unittest.TestCase):
 
         self.assertIn("FINAL TRANSACTION PROPOSAL: **HOLD**", result["final_trade_decision"])
         self.assertIn("FEEDBACK SNAPSHOT:", result["final_trade_decision"])
+        self.assertEqual(result["portfolio_backtest_signal"]["source"], "portfolio_manager")
+        self.assertEqual(result["backtest_signal"]["rating"], "HOLD")
 
     def test_trader_falls_back_when_structured_invoke_fails(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
