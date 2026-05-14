@@ -46,6 +46,9 @@ def get_topic_and_term_style_instruction() -> str:
     return (
         " Make the opening sentence concise and thesis-led, with the same sharpness a strong title would have, rather than using generic scene-setting. "
         "Do NOT start the opening paragraph with a standalone conclusion label such as '结论：偏多' or '结论：偏空' — weave the directional stance into the body of the paragraph naturally. "
+        "Do NOT use '（导语）' as a label before introductory paragraphs. "
+        "When explaining technical terms, weave the explanation into the sentence where the term first appears — "
+        "do NOT collect multiple term definitions into a single parenthetical block such as '（附首次出现关键术语的白话解释：...）'. "
         "In Chinese output, do NOT lean on a single repeated word such as '反噬'; vary the wording with precise alternatives like '利润挤压', '成本倒逼', '负反馈', '传导受阻', or '盈利受压' when the context fits."
     )
 
@@ -232,6 +235,12 @@ def strip_self_referential_meta_leads(report: str) -> str:
 _QA_LABEL_RE = re.compile(
     r"(?m)^\s*(?:对交易应该怎么做|这意味着什么|这意味著什么|对交易应怎么做|交易建议|交易含义|市场含义|配置含义)[：:][^\n]*\n?"
     r"|^\s*结论[：:]\s*(?:偏多|偏空|中性|看多|看空|看涨|看跌|买入|卖出|持有|增持|减持)[^\n]*\n?"
+    r"|^\s*（导语）[^\n]*\n?"
+)
+
+_TERM_BLOCK_RE = re.compile(
+    r"（附首次出现关键术语[^）]*）",
+    re.DOTALL,
 )
 
 
@@ -240,6 +249,7 @@ def strip_qa_labels(report: str) -> str:
     if not report:
         return ""
     cleaned = _QA_LABEL_RE.sub("", report)
+    cleaned = _TERM_BLOCK_RE.sub("", cleaned)
     return collapse_blank_lines(cleaned)
 
 
