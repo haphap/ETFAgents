@@ -23,12 +23,15 @@ class BacktestSignalTests(unittest.TestCase):
                 ),
                 risk_management="若跌破关键支撑并放量，则先减仓；继续跟踪份额变化与资金流。",
                 rating=PortfolioRating.HOLD,
+                target_weight_band=(20.0, 25.0),
+                execution_timing="next_close",
             ),
         )
 
         self.assertEqual(signal["rating"], "HOLD")
-        self.assertEqual(signal["weight_source"], "parsed_target_range")
+        self.assertEqual(signal["weight_source"], "structured_field")
         self.assertAlmostEqual(signal["target_weight_pct"], 22.5)
+        self.assertEqual(signal["execution_delay"], "next_close")
         self.assertIn("再分两次加仓", "\n".join(signal["add_conditions"]))
         self.assertIn("先减仓", "\n".join(signal["reduce_conditions"]))
         self.assertIn("继续跟踪份额变化与资金流", "\n".join(signal["monitoring_points"]))
@@ -46,6 +49,8 @@ class BacktestSignalTests(unittest.TestCase):
                     "再考虑上调一个档位；若跌破2.08元支撑位则强制降仓。"
                 ),
                 rating=PortfolioRating.HOLD,
+                target_weight_pct=18.0,
+                execution_timing="same_close",
                 snapshot_stance="持有",
                 snapshot_new_and_rebuttal="新增了仓位上限与风险约束。",
                 snapshot_to_verify="继续跟踪均线、成交量和份额变化。",
@@ -53,8 +58,9 @@ class BacktestSignalTests(unittest.TestCase):
         )
 
         self.assertEqual(signal["source"], "portfolio_manager")
-        self.assertEqual(signal["weight_source"], "parsed_target_range")
-        self.assertAlmostEqual(signal["target_weight_pct"], 17.5)
+        self.assertEqual(signal["weight_source"], "structured_field")
+        self.assertAlmostEqual(signal["target_weight_pct"], 18.0)
+        self.assertEqual(signal["execution_delay"], "same_close")
         self.assertIn("上调一个档位", "\n".join(signal["add_conditions"]))
         self.assertIn("强制降仓", "\n".join(signal["reduce_conditions"]))
         self.assertIn("按周度再平衡复核", "\n".join(signal["rebalance_conditions"]))

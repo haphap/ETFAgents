@@ -1,6 +1,7 @@
 import re
 from difflib import SequenceMatcher
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -37,6 +38,9 @@ class TraderProposal(BaseModel):
     execution_plan: str = Field(description="Concrete ETF allocation plan with support or resistance references, exact price or moving-average levels, volume or fund-flow thresholds, catalyst triggers, ETF share or premium-discount checks, and explicit add, reduce, rotate, or exit conditions. Do not say 'wait for confirmation' without numeric thresholds. Write the numeric level inline instead of saying 'the key level in the market report'.")
     risk_management: str = Field(description="Risk controls, rebalance or invalidation signals, monitoring thresholds, and the actions to take when those thresholds are breached.")
     rating: PortfolioRating = Field(description="Trader recommendation for ETF exposure.")
+    target_weight_pct: float | None = Field(default=None, description="Structured target portfolio weight in percent for this ETF, from 0 to 100. Use when the execution plan implies a single target sizing.")
+    target_weight_band: tuple[float, float] | None = Field(default=None, description="Structured target weight band in percent as (low, high), from 0 to 100. Use when the plan specifies a sizing range rather than a single weight.")
+    execution_timing: Literal["same_close", "next_open", "next_close"] | None = Field(default=None, description="Structured execution timing for the backtest signal. Use same_close, next_open, or next_close.")
 
 
 class PortfolioDecision(BaseModel):
@@ -44,6 +48,9 @@ class PortfolioDecision(BaseModel):
     action_logic: str = Field(description="A detailed portfolio-manager paragraph showing how ETF evidence leads to sizing, hedging, rebalance triggers, and risk controls.")
     positioning_recommendation: str = Field(description="Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate those numeric levels inline rather than telling the reader to look back at the market report.")
     rating: PortfolioRating = Field(description="Final portfolio-manager rating for ETF allocation.")
+    target_weight_pct: float | None = Field(default=None, description="Structured target portfolio weight in percent for this ETF, from 0 to 100. Use when the final recommendation implies a single target sizing.")
+    target_weight_band: tuple[float, float] | None = Field(default=None, description="Structured target weight band in percent as (low, high), from 0 to 100. Use when the final recommendation specifies a sizing range rather than a single weight.")
+    execution_timing: Literal["same_close", "next_open", "next_close"] | None = Field(default=None, description="Structured execution timing for the backtest signal. Use same_close, next_open, or next_close.")
     snapshot_stance: str = Field(description="Concise stance for the feedback snapshot.")
     snapshot_new_and_rebuttal: str = Field(description="What was newly added this round and how it rebutted competing views.")
     snapshot_to_verify: str = Field(description="Specific items or triggers to verify next.")

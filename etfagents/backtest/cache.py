@@ -20,13 +20,14 @@ def _safe_path_token(value: str) -> str:
 class BacktestSignalStore:
     config: Mapping[str, Any]
     selected_analysts: Sequence[str]
+    force_refresh: bool = False
 
     def is_enabled(self) -> bool:
         context = get_backtest_context()
         return context.mode == "backtest" and bool(context.as_of_date)
 
     def get(self, ticker: str, decision_date: str) -> dict[str, Any] | None:
-        if not self.is_enabled():
+        if self.force_refresh or not self.is_enabled():
             return None
         path = self._cache_path(ticker, decision_date)
         if not path.exists():

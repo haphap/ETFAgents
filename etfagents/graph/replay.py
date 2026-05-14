@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from io import StringIO
 from datetime import timedelta
+import inspect
 from typing import Callable
 
 import pandas as pd
@@ -154,6 +155,17 @@ def _build_rebalance_schedule(dates: list[str], rebalance_interval_days: int) ->
     return schedule
 
 
+def _analyze_candidate_pool(graph, tickers: list[str], rebalance_date: str, force_refresh: bool):
+    analyze = graph.analyze_candidate_pool
+    try:
+        signature = inspect.signature(analyze)
+    except (TypeError, ValueError):
+        signature = None
+    if signature is not None and "force_refresh" in signature.parameters:
+        return analyze(tickers, rebalance_date, force_refresh=force_refresh)
+    return analyze(tickers, rebalance_date)
+
+
 def _compute_replay_metrics(
     windows: list[ReplayWindowResult],
     start_date: str,
@@ -200,6 +212,7 @@ def run_candidate_pool_replay(
     rebalance_interval_days: int = 21,
     top_k: int = 3,
     execution_timing: str = "same_close",
+    force_refresh: bool = False,
     price_loader: Callable[[str, str, str], pd.DataFrame] | None = None,
 ) -> ReplayResult:
     unique_tickers = list(dict.fromkeys(tickers))
@@ -227,7 +240,12 @@ def run_candidate_pool_replay(
 
     for rebalance_date, window_end in zip(schedule[:-1], schedule[1:]):
         with backtest_context(rebalance_date):
-            ranked_candidates = graph.analyze_candidate_pool(unique_tickers, rebalance_date)
+            ranked_candidates = _analyze_candidate_pool(
+                graph,
+                unique_tickers,
+                rebalance_date,
+                force_refresh,
+            )
         weights = _normalize_candidate_weights(ranked_candidates, top_k)
         selected_tickers = list(weights.keys())
         ratings = {

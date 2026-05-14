@@ -442,6 +442,106 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertEqual(first[0]["ticker"], second[0]["ticker"])
         self.assertEqual(first[0]["rating"], second[0]["rating"])
 
+    def test_candidate_pool_force_refresh_bypasses_cache(self):
+        graph = object.__new__(EtfAgentsGraph)
+        graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        graph.selected_analysts = ["market_flow", "macro_regime"]
+        with TemporaryDirectory() as tmpdir:
+            graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            graph.config["results_dir"] = tmpdir
+            call_count = {"propagate": 0}
+
+            def _fake_propagate(ticker, _trade_date):
+                call_count["propagate"] += 1
+                return (
+                    {
+                        "research_allocation_plan": f"research-{ticker}",
+                        "trader_allocation_plan": f"trader-{ticker}",
+                        "final_allocation_decision": f"decision-{ticker}",
+                        "backtest_signal": {
+                            "ticker": ticker,
+                            "decision_date": "2026-01-15",
+                            "rating": "BUY",
+                            "source": "portfolio_manager",
+                            "source_section": "positioning_recommendation",
+                            "target_weight_pct": 25.0,
+                            "target_weight_min_pct": 25.0,
+                            "target_weight_max_pct": 25.0,
+                            "weight_source": "structured_field",
+                            "execution_delay": "next_open",
+                            "starter_size_text": "",
+                            "add_conditions": [],
+                            "reduce_conditions": [],
+                            "exit_conditions": [],
+                            "rebalance_conditions": [],
+                            "risk_controls": [],
+                            "monitoring_points": [],
+                            "signal_text_snapshot": f"decision-{ticker}",
+                        },
+                    },
+                    "BUY",
+                )
+
+            graph.propagate = _fake_propagate
+
+            with backtest_context("2026-01-15"):
+                EtfAgentsGraph.analyze_candidate_pool(graph, ["510300.SH"], "2026-01-15")
+                EtfAgentsGraph.analyze_candidate_pool(
+                    graph,
+                    ["510300.SH"],
+                    "2026-01-15",
+                    force_refresh=True,
+                )
+
+        self.assertEqual(call_count["propagate"], 2)
+
+    def test_candidate_pool_cache_misses_when_config_changes(self):
+        first_graph = object.__new__(EtfAgentsGraph)
+        second_graph = object.__new__(EtfAgentsGraph)
+        first_graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        second_graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        first_graph.selected_analysts = ["market_flow"]
+        second_graph.selected_analysts = ["market_flow", "macro_regime"]
+        with TemporaryDirectory() as tmpdir:
+            first_graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            first_graph.config["results_dir"] = tmpdir
+            second_graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            second_graph.config["results_dir"] = tmpdir
+            first_calls = {"propagate": 0}
+            second_calls = {"propagate": 0}
+
+            def _first_propagate(ticker, _trade_date):
+                first_calls["propagate"] += 1
+                return (
+                    {
+                        "research_allocation_plan": f"research-{ticker}",
+                        "trader_allocation_plan": f"trader-{ticker}",
+                        "final_allocation_decision": f"decision-{ticker}",
+                    },
+                    "BUY",
+                )
+
+            def _second_propagate(ticker, _trade_date):
+                second_calls["propagate"] += 1
+                return (
+                    {
+                        "research_allocation_plan": f"research-{ticker}",
+                        "trader_allocation_plan": f"trader-{ticker}",
+                        "final_allocation_decision": f"decision-{ticker}",
+                    },
+                    "BUY",
+                )
+
+            first_graph.propagate = _first_propagate
+            second_graph.propagate = _second_propagate
+
+            with backtest_context("2026-01-15"):
+                EtfAgentsGraph.analyze_candidate_pool(first_graph, ["510300.SH"], "2026-01-15")
+                EtfAgentsGraph.analyze_candidate_pool(second_graph, ["510300.SH"], "2026-01-15")
+
+        self.assertEqual(first_calls["propagate"], 1)
+        self.assertEqual(second_calls["propagate"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

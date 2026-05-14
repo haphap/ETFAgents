@@ -2238,6 +2238,7 @@ def backtest(
     commission: float = typer.Option(0.0, "--commission"),
     slippage_perc: float = typer.Option(0.0, "--slippage-perc"),
     cash_buffer_pct: float = typer.Option(0.0, "--cash-buffer-pct"),
+    force_refresh: bool = typer.Option(False, "--force-refresh", help="Bypass backtest signal cache and recompute graph outputs."),
     research_depth: int = typer.Option(1, "--research-depth", min=1),
     llm_provider: str = typer.Option(DEFAULT_CONFIG["llm_provider"], "--llm-provider"),
     deep_think_llm: str = typer.Option(DEFAULT_CONFIG["deep_think_llm"], "--deep-think-llm"),
@@ -2292,6 +2293,7 @@ def backtest(
             slippage_perc=slippage_perc,
             cash_buffer_pct=cash_buffer_pct,
             benchmark_tickers=normalized_benchmarks or None,
+            force_refresh=force_refresh,
         )
         save_backtest_result(result, output_dir)
 

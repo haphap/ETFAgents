@@ -181,6 +181,7 @@ def build_trader_backtest_signal(
         rating=rating,
         primary_text=action_text,
         secondary_text=risk_text,
+        structured_plan=structured_plan,
     )
     return signal.to_dict()
 
@@ -218,6 +219,7 @@ def build_portfolio_backtest_signal(
         rating=rating,
         primary_text=action_text,
         secondary_text=risk_text,
+        structured_plan=structured_plan,
     )
     return signal.to_dict()
 
@@ -322,8 +324,11 @@ def _build_signal(
     rating: str,
     primary_text: str,
     secondary_text: str,
+    structured_plan: Any = None,
 ) -> BacktestSignal:
-    target_range, weight_source = _extract_target_weight(primary_text, secondary_text)
+    target_range, weight_source = _extract_structured_target_weight(structured_plan)
+    if target_range is None:
+        target_range, weight_source = _extract_target_weight(primary_text, secondary_text)
     if target_range is None:
         default_weight = _DEFAULT_TARGET_WEIGHT_PCT.get(rating, _DEFAULT_TARGET_WEIGHT_PCT["HOLD"])
         target_weight_pct = default_weight
@@ -363,6 +368,7 @@ def _build_signal(
         target_weight_min_pct=target_weight_min_pct,
         target_weight_max_pct=target_weight_max_pct,
         weight_source=weight_source,
+        execution_delay=_extract_execution_timing(structured_plan),
         starter_size_text=starter_sentence,
         add_conditions=add_conditions,
         reduce_conditions=reduce_conditions,
@@ -372,6 +378,32 @@ def _build_signal(
         monitoring_points=monitoring_points,
         signal_text_snapshot=snapshot,
     )
+
+
+def _extract_structured_target_weight(structured_plan: Any) -> tuple[tuple[float, float] | None, str]:
+    if structured_plan is None:
+        return None, "unknown"
+
+    pct_value = _coerce_pct(getattr(structured_plan, "target_weight_pct", None))
+    if pct_value is not None:
+        return (pct_value, pct_value), "structured_field"
+
+    band_value = getattr(structured_plan, "target_weight_band", None)
+    if isinstance(band_value, Sequence) and len(band_value) == 2:
+        low = _coerce_pct(band_value[0])
+        high = _coerce_pct(band_value[1])
+        if low is not None and high is not None:
+            return (min(low, high), max(low, high)), "structured_field"
+
+    return None, "unknown"
+
+
+def _extract_execution_timing(structured_plan: Any) -> str:
+    raw_value = getattr(structured_plan, "execution_timing", None) if structured_plan is not None else None
+    normalized = str(raw_value or "").strip().lower()
+    if normalized in {"same_close", "next_open", "next_close"}:
+        return normalized
+    return "next_open"
 
 
 def _extract_target_weight(*texts: str) -> tuple[tuple[float, float] | None, str]:
@@ -389,6 +421,14 @@ def _extract_target_weight(*texts: str) -> tuple[tuple[float, float] | None, str
                 return weight, "parsed_initial_range"
 
     return None, "unknown"
+
+
+def _coerce_pct(value: Any) -> float | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return round(numeric, 4)
 
 
 def _extract_weight_range_from_sentence(sentence: str) -> tuple[float, float] | None:

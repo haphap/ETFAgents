@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from datetime import timedelta
 from html import escape
+import inspect
 from io import StringIO
 import json
 from math import sqrt
@@ -222,6 +223,17 @@ def _normalize_candidate_weights(candidates: list[dict[str, object]], top_k: int
         equal_weight = round(1 / len(raw_weights), 6)
         return {ticker: equal_weight for ticker in raw_weights}
     return {ticker: value / total_weight for ticker, value in raw_weights.items()}
+
+
+def _analyze_candidate_pool(graph, tickers: list[str], decision_date: str, force_refresh: bool):
+    analyze = graph.analyze_candidate_pool
+    try:
+        signature = inspect.signature(analyze)
+    except (TypeError, ValueError):
+        signature = None
+    if signature is not None and "force_refresh" in signature.parameters:
+        return analyze(tickers, decision_date, force_refresh=force_refresh)
+    return analyze(tickers, decision_date)
 
 
 def _to_backtrader_feed(df: pd.DataFrame, ticker: str) -> bt.feeds.PandasData:
@@ -668,6 +680,7 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
         top_k=3,
         execution_timing="same_close",
         cash_buffer_pct=0.0,
+        force_refresh=False,
     )
 
     def __init__(self):
@@ -768,7 +781,12 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
 
     def _rebalance(self, decision_date: str) -> None:
         with backtest_context(decision_date):
-            ranked_candidates = self.p.graph.analyze_candidate_pool(self.p.tickers, decision_date)
+            ranked_candidates = _analyze_candidate_pool(
+                self.p.graph,
+                self.p.tickers,
+                decision_date,
+                bool(self.p.force_refresh),
+            )
         weights = _normalize_candidate_weights(ranked_candidates, self.p.top_k)
         weights = {
             ticker: weight * max(0.0, 1.0 - float(self.p.cash_buffer_pct))
@@ -876,6 +894,7 @@ def run_candidate_pool_backtest(
     slippage_perc: float = 0.0,
     cash_buffer_pct: float = 0.0,
     benchmark_tickers: list[str] | None = None,
+    force_refresh: bool = False,
     price_loader: Callable[[str, str, str], pd.DataFrame] | None = None,
 ) -> BacktraderBacktestResult:
     unique_tickers = list(dict.fromkeys(tickers))
@@ -952,6 +971,7 @@ def run_candidate_pool_backtest(
         top_k=max(1, int(top_k)),
         execution_timing=timing,
         cash_buffer_pct=float(cash_buffer_pct),
+        force_refresh=bool(force_refresh),
     )
     cerebro.addanalyzer(bt.analyzers.Returns, _name="returns")
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")

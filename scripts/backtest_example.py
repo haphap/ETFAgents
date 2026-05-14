@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--commission", type=float, default=0.0)
     parser.add_argument("--slippage-perc", type=float, default=0.0)
     parser.add_argument("--cash-buffer-pct", type=float, default=0.0)
+    parser.add_argument("--force-refresh", action="store_true")
     parser.add_argument("--research-depth", type=int, default=1)
     parser.add_argument("--llm-provider", default=DEFAULT_CONFIG["llm_provider"])
     parser.add_argument("--deep-think-llm", default=DEFAULT_CONFIG["deep_think_llm"])
@@ -81,6 +82,7 @@ def main() -> None:
         slippage_perc=args.slippage_perc,
         cash_buffer_pct=args.cash_buffer_pct,
         benchmark_tickers=normalize_benchmarks(args.benchmark_tickers) or None,
+        force_refresh=args.force_refresh,
     )
     if args.save_path:
         save_backtest_result(result, Path(args.save_path))

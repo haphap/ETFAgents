@@ -106,12 +106,19 @@ class EtfAgentsGraph(TradingAgentsGraph):
             "etf_macro": ToolNode([get_etf_holdings, get_etf_industry_research]),
         }
 
-    def analyze_candidate_pool(self, tickers: list[str], trade_date: str) -> list[dict[str, object]]:
+    def analyze_candidate_pool(
+        self,
+        tickers: list[str],
+        trade_date: str,
+        *,
+        force_refresh: bool = False,
+    ) -> list[dict[str, object]]:
         """Analyze a candidate pool sequentially and rank it by final allocation rating."""
         results: list[dict[str, object]] = []
         cache = BacktestSignalStore(
             getattr(self, "config", self.DEFAULT_GRAPH_CONFIG),
             getattr(self, "selected_analysts", self.DEFAULT_SELECTED_ANALYSTS),
+            force_refresh=force_refresh,
         )
         for ticker in tickers:
             cached = cache.get(ticker, trade_date)
@@ -170,6 +177,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
         rebalance_interval_days: int = 21,
         top_k: int = 3,
         execution_timing: str = "same_close",
+        force_refresh: bool = False,
         price_loader=None,
     ) -> ReplayResult:
         """Replay ranked ETF allocation decisions across historical rebalance windows."""
@@ -181,6 +189,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
             rebalance_interval_days=rebalance_interval_days,
             top_k=top_k,
             execution_timing=execution_timing,
+            force_refresh=force_refresh,
             price_loader=price_loader,
         )
 
@@ -197,6 +206,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
         slippage_perc: float = 0.0,
         cash_buffer_pct: float = 0.0,
         benchmark_tickers: list[str] | None = None,
+        force_refresh: bool = False,
         price_loader=None,
     ) -> BacktraderBacktestResult:
         """Run a formal Backtrader backtest over ranked ETF candidate-pool decisions."""
@@ -213,5 +223,6 @@ class EtfAgentsGraph(TradingAgentsGraph):
             slippage_perc=slippage_perc,
             cash_buffer_pct=cash_buffer_pct,
             benchmark_tickers=benchmark_tickers,
+            force_refresh=force_refresh,
             price_loader=price_loader,
         )
