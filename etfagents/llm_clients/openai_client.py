@@ -98,19 +98,28 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
     def _get_request_payload(
         self, input, *, stop=None, **kwargs
     ) -> dict:
+        # Extract reasoning_content from raw message objects BEFORE
+        # serialization, because _convert_message_to_dict drops
+        # additional_kwargs (except tool_calls/function_call/audio).
+        messages = self._convert_input(input).to_messages()
+        reasoning_map: dict[int, str] = {}
+        for m in messages:
+            if isinstance(m, AIMessage):
+                rc = m.additional_kwargs.get("reasoning_content")
+                if rc:
+                    reasoning_map[id(m)] = rc
+
         payload = super()._get_request_payload(input, stop=stop, **kwargs)
-        # Echo reasoning_content back for multi-turn conversations.
+
+        # Inject reasoning_content back into serialized assistant dicts.
         # DeepSeek returns HTTP 400 if a previous assistant message
         # contained reasoning_content but the follow-up omits it.
-        for msg in payload.get("messages", []):
-            if not isinstance(msg, dict):
+        for m, msg_dict in zip(messages, payload.get("messages", [])):
+            if not isinstance(msg_dict, dict):
                 continue
-            rc = (
-                (msg.get("additional_kwargs") or {}).get("reasoning_content")
-                or (msg.get("message_kwargs") or {}).get("reasoning_content")
-            )
+            rc = reasoning_map.get(id(m))
             if rc:
-                msg["reasoning_content"] = rc
+                msg_dict["reasoning_content"] = rc
         return payload
 
     # --- structured output guard ---
