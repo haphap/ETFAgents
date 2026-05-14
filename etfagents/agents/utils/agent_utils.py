@@ -865,8 +865,8 @@ def get_localized_rating_scale() -> str:
 def get_localized_final_proposal_instruction() -> str:
     if _is_chinese_output():
         return (
-            "以明确的配置建议结束，最后一行必须使用格式："
-            "'最终配置建议: **买入/增持/持有/减持/卖出**'。"
+            "在“持仓建议”的“（一）评级”中只保留一行明确评级，使用格式："
+            "'研究结论: **买入/增持/持有/减持/卖出**'。"
         )
     return (
         "End with a firm allocation decision and always conclude your response with "
@@ -2327,6 +2327,15 @@ _MANAGER_SECTION_KEYS = {"辩论结论", "行为逻辑", "持仓建议", "研究
 _RATING_ONLY_LINE_PATTERN = re.compile(
     r"^(?:建议评级|评级|配置评级|研究结论|执行倾向|最终配置建议|最终交易建议)\s*[:：]\s*\**(?:买入|增持|持有|减持|卖出)\**[。！!？?\s]*$"
 )
+_POSITIONING_PARENT_HEADING_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、\s*)?持仓建议\s*$"
+)
+_POSITIONING_RATING_HEADING_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、\s*)?(?:（[一二三四五六七八九十\d]+）\s*)?评级\s*$"
+)
+_POSITIONING_ADVICE_HEADING_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、\s*)?(?:（[一二三四五六七八九十\d]+）\s*)?建议(?:正文)?\s*$"
+)
 
 
 def _normalize_manager_section_key(title: str) -> str:
@@ -2344,6 +2353,48 @@ def _trim_section_lines(lines: list[str]) -> list[str]:
     while trimmed and not trimmed[-1].strip():
         trimmed.pop()
     return trimmed
+
+
+def _normalize_manager_positioning_subsections(text: str) -> str:
+    lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    if not lines:
+        return ""
+
+    normalized_lines: list[str] = []
+    has_positioning_parent = False
+
+    def _ensure_positioning_parent() -> None:
+        nonlocal has_positioning_parent
+        if has_positioning_parent:
+            return
+        if normalized_lines and normalized_lines[-1].strip():
+            normalized_lines.append("")
+        normalized_lines.append("## 持仓建议")
+        has_positioning_parent = True
+
+    for line in lines:
+        stripped = line.strip()
+        if _POSITIONING_PARENT_HEADING_RE.match(stripped):
+            if normalized_lines and normalized_lines[-1].strip():
+                normalized_lines.append("")
+            normalized_lines.append("## 持仓建议")
+            has_positioning_parent = True
+            continue
+        if _POSITIONING_RATING_HEADING_RE.match(stripped):
+            _ensure_positioning_parent()
+            if normalized_lines and normalized_lines[-1].strip():
+                normalized_lines.append("")
+            normalized_lines.append("### （一）评级")
+            continue
+        if _POSITIONING_ADVICE_HEADING_RE.match(stripped):
+            _ensure_positioning_parent()
+            if normalized_lines and normalized_lines[-1].strip():
+                normalized_lines.append("")
+            normalized_lines.append("### （二）建议")
+            continue
+        normalized_lines.append(line)
+
+    return collapse_blank_lines("\n".join(normalized_lines))
 
 
 def _default_manager_positioning_content(rating: str) -> str:
@@ -2370,6 +2421,42 @@ def _default_manager_positioning_content(rating: str) -> str:
         ),
     }
     return mapping.get(rating, mapping["HOLD"])
+
+
+def _normalize_manager_rating_line(line: str, fallback_rating: str) -> str:
+    stripped = (line or "").strip()
+    match = re.search(r"(买入|增持|持有|减持|卖出)", stripped)
+    rating_text = match.group(1) if match else localize_rating_term(fallback_rating.title())
+    return f"研究结论: **{rating_text}**"
+
+
+def _ensure_manager_positioning_subsections(lines: list[str], rating: str) -> list[str]:
+    trimmed = _trim_section_lines(lines)
+    if not trimmed:
+        return [
+            "### （一）评级",
+            _normalize_manager_rating_line("", rating),
+            "",
+            "### （二）建议",
+            _default_manager_positioning_content(rating),
+        ]
+
+    if any(
+        _POSITIONING_RATING_HEADING_RE.match(line.strip())
+        or _POSITIONING_ADVICE_HEADING_RE.match(line.strip())
+        for line in trimmed
+    ):
+        return trimmed
+
+    rating_lines = [line.strip() for line in trimmed if _RATING_ONLY_LINE_PATTERN.match(line.strip())]
+    advice_lines = [line for line in trimmed if line.strip() and not _RATING_ONLY_LINE_PATTERN.match(line.strip())]
+    rating_line = _normalize_manager_rating_line(rating_lines[-1] if rating_lines else "", rating)
+    advice_block = _trim_section_lines(advice_lines)
+    if not advice_block:
+        advice_block = [_default_manager_positioning_content(rating)]
+
+    rebuilt = ["### （一）评级", rating_line, "", "### （二）建议", *advice_block]
+    return _trim_section_lines(rebuilt)
 
 
 def _dedupe_manager_rating_only_lines(lines: list[str]) -> list[str]:
@@ -2452,6 +2539,8 @@ def _dedupe_and_fill_manager_sections(text: str) -> str:
         if section["key"] not in {"持仓建议", "研究结论"}:
             continue
         section["lines"] = _dedupe_manager_rating_only_lines(section["lines"])
+        if section["key"] == "持仓建议" and _is_chinese_output():
+            section["lines"] = _ensure_manager_positioning_subsections(section["lines"], rating)
         has_non_rating_content = any(
             line.strip() and not _RATING_ONLY_LINE_PATTERN.match(line.strip())
             for line in section["lines"]
@@ -2508,6 +2597,11 @@ def normalize_chinese_manager_terms(text: str) -> str:
     for source, target in replacements:
         body = body.replace(source, target)
     body = re.sub(
+        r"(?m)^(\s*)(?:最终配置建议|最终交易建议)\s*[:：]\s*",
+        r"\1研究结论: ",
+        body,
+    )
+    body = re.sub(
         r"(?<=\S)\s+(?=(?:建议评级|评级|配置评级|研究结论|执行倾向|最终配置建议|最终交易建议)\s*[:：])",
         "\n",
         body,
@@ -2515,6 +2609,11 @@ def normalize_chinese_manager_terms(text: str) -> str:
     body = re.sub(
         r"(?<=[。！？!?；;])\s*(?=(?:建议评级|评级|配置评级|研究结论|执行倾向|最终配置建议|最终交易建议)\s*[:：])",
         "\n",
+        body,
+    )
+    body = re.sub(
+        r"(?m)^(\s*)(?:最终配置建议|最终交易建议)\s*[:：]\s*",
+        r"\1研究结论: ",
         body,
     )
     inline_rating_pattern = re.compile(
@@ -2556,6 +2655,7 @@ def normalize_chinese_manager_terms(text: str) -> str:
                 continue
             deduped_lines.append(line)
         body = "\n".join(deduped_lines)
+    body = _normalize_manager_positioning_subsections(body)
     body = _dedupe_and_fill_manager_sections(
         _collapse_duplicate_markdown_headings(
             normalize_chinese_finance_terms(normalize_display_numbering(body)).strip()

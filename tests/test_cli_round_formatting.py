@@ -366,6 +366,10 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("#### 三、持仓建议", formatted)
         self.assertIn("时间区间", formatted)
         self.assertNotIn("time horizon", formatted.lower())
+        self.assertIn("##### （一）评级", formatted)
+        self.assertIn("##### （二）建议", formatted)
+        self.assertNotIn("（一）##", formatted)
+        self.assertNotIn("（二）##", formatted)
 
     def test_portfolio_manager_inserts_paragraph_break_after_rating_line(self):
         risk_state = {
@@ -382,9 +386,11 @@ class CliRoundFormattingTests(unittest.TestCase):
 
         formatted = format_risk_management_history(risk_state)
 
-        self.assertIn("#### 一、持仓建议", formatted)
+        self.assertIn("#### 持仓建议", formatted)
+        self.assertIn("##### 一、评级", formatted)
+        self.assertIn("##### 二、建议", formatted)
         self.assertNotIn("评级: 增持", formatted)
-        self.assertIn("最终配置建议: **增持**", formatted)
+        self.assertIn("研究结论: **增持**", formatted)
         self.assertIn("建议针对回踩后的确认信号分批加仓", formatted)
 
     def test_message_buffer_localizes_etf_structure_section_title_in_chinese(self):

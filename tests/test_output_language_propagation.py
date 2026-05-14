@@ -21,7 +21,7 @@ from etfagents.agents.risk_mgmt.conservative_debator import create_conservative_
 from etfagents.agents.risk_mgmt.neutral_debator import create_neutral_debator
 from etfagents.agents.trader.trader import create_trader
 from etfagents.agents.utils.agent_utils import (
-    get_collaboration_stop_instruction,
+    get_localized_final_proposal_instruction,
     normalize_chinese_manager_terms,
     normalize_chinese_role_terms,
 )
@@ -429,6 +429,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
+        self.assertIn("### （一）评级", rendered)
+        self.assertIn("### （二）建议", rendered)
         self.assertIn("研究结论: **持有**", rendered)
         self.assertNotIn("建议采取减持策略", rendered)
         self.assertIn("继续跟踪订单兑现与估值消化", rendered)
@@ -447,10 +449,13 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("最终配置建议: **买入**", rendered)
-        self.assertIn("最终配置建议: **买入**\n等待催化确认后再分批布局。", rendered)
+        self.assertIn("### （一）评级", rendered)
+        self.assertIn("### （二）建议", rendered)
+        self.assertIn("研究结论: **买入**", rendered)
+        self.assertIn("### （一）评级\n研究结论: **买入**", rendered)
+        self.assertIn("### （二）建议\n等待催化确认后再分批布局。", rendered)
         self.assertNotIn("建议评级: 减持", rendered)
-        self.assertEqual(rendered.count("最终配置建议: **买入**"), 1)
+        self.assertEqual(rendered.count("研究结论: **买入**"), 1)
         self.assertNotIn("反馈快照:\n- 立场: 减持", rendered)
 
     def test_research_plan_rendering_replaces_placeholder_sections(self):
@@ -647,7 +652,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("最终配置建议: **持有**", rendered)
+        self.assertIn("研究结论: **持有**", rendered)
         self.assertIn("成交量回到近期均量上方", rendered)
         self.assertIn("份额或资金流同步改善后再考虑上调一个档位", rendered)
 
@@ -664,8 +669,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("最终配置建议: **持有**", rendered)
-        self.assertEqual(rendered.count("最终配置建议: **持有**"), 1)
+        self.assertIn("研究结论: **持有**", rendered)
+        self.assertEqual(rendered.count("研究结论: **持有**"), 1)
         self.assertNotIn("建议评级为减持", rendered)
         self.assertNotIn("分批减持当前持仓", rendered)
         self.assertIn("维持现有基准仓位", rendered)
@@ -706,7 +711,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(rendered.count("最终配置建议: **增持**"), 1)
+        self.assertEqual(rendered.count("研究结论: **增持**"), 1)
         self.assertNotIn("最终配置建议: 增持。", rendered)
         self.assertIn("在净值回落至2.08元支撑带时分批建立15%至20%的初始底仓", rendered)
 
@@ -727,7 +732,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             context_text="10日均线452元、20日均线448元、50日均线443元。布林中轨449元。",
         )
 
-        self.assertEqual(rendered.count("最终配置建议: **增持**"), 1)
+        self.assertEqual(rendered.count("研究结论: **增持**"), 1)
         self.assertNotIn("本组合对516160.SH的明确建议为增持", rendered)
         self.assertNotIn("本组合当前", rendered)
         self.assertNotIn("明确建议为增持", rendered)
@@ -755,11 +760,11 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("最终配置建议: **持有**", rendered)
+        self.assertIn("研究结论: **持有**", rendered)
         self.assertIn("目标仓位先维持在15%至20%", rendered)
         self.assertNotIn("Give a clear, actionable ETF portfolio recommendation", rendered)
         self.assertNotIn("Time Horizon", rendered)
-        self.assertEqual(rendered.count("最终配置建议: **持有**"), 1)
+        self.assertEqual(rendered.count("研究结论: **持有**"), 1)
         self.assertNotIn("\n\n\n", rendered)
 
     def test_research_manager_normalization_strips_inline_duplicate_research_view(self):
@@ -787,7 +792,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
 
         self.assertEqual(normalized.count("## 辩论结论"), 1)
-        self.assertIn("最终配置建议: **持有**", normalized)
+        self.assertIn("研究结论: **持有**", normalized)
         self.assertIn("目标仓位维持在15%至20%", normalized)
         self.assertNotIn("这一部分必须写成连贯分析段落", normalized)
         self.assertNotIn("Give a clear, actionable ETF portfolio recommendation", normalized)
@@ -804,7 +809,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
 
         self.assertEqual(normalized.count("## 持仓建议"), 1)
-        self.assertEqual(normalized.count("最终配置建议: **持有**"), 1)
+        self.assertEqual(normalized.count("研究结论: **持有**"), 1)
         self.assertIn("维持当前仓位，等待价格、量能与份额变化共同确认后再决定是否调整敞口。", normalized)
 
     def test_manager_normalization_dedupes_inline_rating_labels_in_positioning_section(self):
@@ -815,7 +820,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
 
         self.assertNotIn("建议评级：增持", normalized)
-        self.assertEqual(normalized.count("最终配置建议: 增持"), 1)
+        self.assertEqual(normalized.count("研究结论: **增持**"), 1)
         self.assertIn("目标仓位控制在20%至25%", normalized)
 
     def test_manager_normalization_fills_empty_positioning_section(self):
@@ -827,13 +832,53 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
 
         self.assertEqual(normalized.count("## 持仓建议"), 1)
-        self.assertIn("最终配置建议: **持有**", normalized)
+        self.assertIn("研究结论: **持有**", normalized)
         self.assertIn("维持当前仓位，不新增方向性敞口", normalized)
         self.assertIn("若验证链条继续改善，只做小幅上调", normalized)
 
+    def test_manager_normalization_rewrites_rating_and_advice_as_subsections(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 辩论结论\n"
+            "低利率环境与盈利兑现仍提供底座。\n\n"
+            "四、评级\n"
+            "最终配置建议: **持有**\n\n"
+            "五、建议\n"
+            "基于低利率宏观底座稳固、AI算力基建周期业绩兑现以及量价背离下的健康筹码沉淀，组合正式给予588000.SH持有评级。"
+        )
+
+        self.assertIn("## 持仓建议", normalized)
+        self.assertIn("### （一）评级", normalized)
+        self.assertIn("### （二）建议", normalized)
+        self.assertNotIn("四、评级", normalized)
+        self.assertNotIn("五、建议", normalized)
+        self.assertEqual(normalized.count("## 持仓建议"), 1)
+        self.assertIn("研究结论: **持有**", normalized)
+
+    def test_manager_normalization_removes_portfolio_final_proposal_label(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "最终配置建议: **持有**\n"
+            "目标仓位先维持在15%至20%，等待成交量与份额变化共同确认。\n"
+        )
+
+        self.assertNotIn("最终配置建议", normalized)
+        self.assertIn("研究结论: **持有**", normalized)
+
+    def test_manager_normalization_prevents_inline_markdown_heading_echo(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **持有**\n\n"
+            "### （二）建议\n"
+            "维持当前仓位。"
+        )
+
+        self.assertNotIn("（一）##", normalized)
+        self.assertNotIn("（二）##", normalized)
+
     def test_collaboration_stop_instruction_prefers_chinese_display(self):
-        instruction = get_collaboration_stop_instruction()
-        self.assertIn("最终配置建议: **买入/增持/持有/减持/卖出**", instruction)
+        instruction = get_localized_final_proposal_instruction()
+        self.assertIn("研究结论: **买入/增持/持有/减持/卖出**", instruction)
 
 
 if __name__ == "__main__":

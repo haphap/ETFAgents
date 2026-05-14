@@ -48,7 +48,7 @@ def get_topic_and_term_style_instruction() -> str:
         "Do NOT start the opening paragraph with a standalone conclusion label such as '结论：偏多' or '结论：偏空' — weave the directional stance into the body of the paragraph naturally. "
         "Do NOT use '（导语）' as a label before introductory paragraphs. "
         "When explaining technical terms, weave the explanation into the sentence where the term first appears — "
-        "do NOT collect multiple term definitions into a single parenthetical block such as '（附首次出现关键术语的白话解释：...）'. "
+        "do NOT collect multiple term definitions into a single parenthetical block such as '（附首次出现关键术语的白话解释：...）' or '（关键术语交易含义速览：...）'. "
         "In Chinese output, do NOT lean on a single repeated word such as '反噬'; vary the wording with precise alternatives like '利润挤压', '成本倒逼', '负反馈', '传导受阻', or '盈利受压' when the context fits."
     )
 
@@ -218,8 +218,8 @@ def _looks_like_section_heading(line: str) -> bool:
 
 _SELF_REFERENTIAL_META_LEAD_RE = re.compile(
     r"(?m)^\s*(?:（[^）]*）)?\s*"
-    r"(?:本节|本部分|该部分|这一节|本段)"
-    r"(?:核心结论|锁定|聚焦|讨论|围绕|分析|探讨|旨在|将|主要|重点|结论|说明|指出|表明|认为|阐述|梳理|审视|检视)"
+    r"(?:本节|本部分|该部分|这一节|本段|本文|本章节)"
+    r"(?:核心结论|章节导语|导语|锁定|聚焦|讨论|围绕|分析|探讨|旨在|将|主要|重点|结论|说明|指出|表明|认为|阐述|梳理|审视|检视)"
     r"[^\n]*\n?"
 )
 
@@ -232,15 +232,61 @@ def strip_self_referential_meta_leads(report: str) -> str:
     return collapse_blank_lines(cleaned)
 
 
+_LABEL_CUES = (
+    "对交易应该怎么做",
+    "这意味着什么",
+    "这意味著什么",
+    "对交易应怎么做",
+    "交易该怎么做",
+    "交易应该怎么做",
+    "交易应怎么做",
+    "交易建议",
+    "交易指引",
+    "交易含义",
+    "市场含义",
+    "配置含义",
+    "判断",
+    "证据",
+    "合约信号",
+    "关键价位",
+    "条件情景",
+    "结论",
+    "核心结论",
+    "导语",
+    "章节导语",
+    "本章节导语",
+    "信号总结",
+    "章节总结",
+    "信号小结",
+)
+
+_LEADING_LABEL_PREFIX_RE = re.compile(
+    r"(?m)^(\s*(?:#{1,6}\s*)?[▌►▶▸👉]?\s*\*{0,2})"
+    r"(?:(?:（|【)?(?:导语|章节导语|本章节导语|信号总结|章节总结|信号小结)(?:）|】)?"
+    r"|(?:"
+    + "|".join(re.escape(label) for label in _LABEL_CUES)
+    + r"))"
+    r"(?:\*{0,2}\s*[：:？?]\s*|\*{0,2}\s+)"
+)
+
 _QA_LABEL_RE = re.compile(
-    r"(?m)^\s*(?:对交易应该怎么做|这意味着什么|这意味著什么|对交易应怎么做|交易建议|交易含义|市场含义|配置含义)[：:][^\n]*\n?"
-    r"|^\s*结论[：:]\s*(?:偏多|偏空|中性|看多|看空|看涨|看跌|买入|卖出|持有|增持|减持)[^\n]*\n?"
-    r"|^\s*（导语）[^\n]*\n?"
+    r"(?m)^\s*(?:#{1,6}\s*)?[▌►▶▸👉]?\s*\*{0,2}"
+    r"(?:(?:（|【)?(?:导语|章节导语|本章节导语|信号总结|章节总结|信号小结)(?:）|】)?"
+    r"|(?:"
+    + "|".join(re.escape(label) for label in _LABEL_CUES)
+    + r"))"
+    r"(?:\*{0,2}\s*[：:？?]\s*)?\*{0,2}\s*$\n?"
 )
 
 _TERM_BLOCK_RE = re.compile(
-    r"（附首次出现关键术语[^）]*）",
+    r"（(?:附首次出现关键术语|关键术语交易含义速览|关键术语解释|术语速览|术语说明|关键技术[^）]*|技术术语[^）]*|技术指标[^）]*|指标速览[^）]*|指标说明[^）]*)）",
     re.DOTALL,
+)
+
+_ARTIFACT_ONLY_LINE_RE = re.compile(r"^[\s│|╭╮╰╯┌┐└┘├┤┬┴┼─━—-]+$")
+_INTERROGATIVE_CUE_RE = re.compile(
+    r"(?:吗|么|呢|为何|为什么|如何|是否|是不是|能否|可否|会否|多少|几时|几月|几日|哪个|哪些|哪类|哪种|哪一|谁|什么|怎么|怎麽|咋|what|why|how|whether|when|where|which|who)",
+    re.IGNORECASE,
 )
 
 
@@ -248,7 +294,8 @@ def strip_qa_labels(report: str) -> str:
     """Remove Q&A-style label lines like '对交易应该怎么做：...' from report text."""
     if not report:
         return ""
-    cleaned = _QA_LABEL_RE.sub("", report)
+    cleaned = _LEADING_LABEL_PREFIX_RE.sub(r"\1", report)
+    cleaned = _QA_LABEL_RE.sub("", cleaned)
     cleaned = _TERM_BLOCK_RE.sub("", cleaned)
     return collapse_blank_lines(cleaned)
 
@@ -256,10 +303,29 @@ def strip_qa_labels(report: str) -> str:
 _REFINE_PREAMBLE_RE = re.compile(
     r"(?m)^\s*"
     r"(?:以下是|根据|按照|依据|参照|基于)"
-    r"[^。\n]{0,40}"
+    r"[^\n]{0,160}"
     r"(?:修正|修订|修改|改进|完善|优化|调整|评审|审核)"
-    r"[^。\n]*[。\n]?"
+    r"[^\n]*\n?"
 )
+
+_META_OPENER_RE = re.compile(
+    r"(?m)^\s*"
+    r"(?:本报告(?:将|围绕|聚焦|基于)|本分析(?:将|围绕|聚焦|基于)|本文(?:将|围绕|聚焦|基于)|下文(?:将|围绕|聚焦)"
+    r"|This report(?: provides| aims| reviews| analyzes| focuses on)|This analysis(?: provides| aims| reviews| presents| focuses on)?)"
+    r"[^\n]*\n?"
+)
+
+
+def _strip_leading_artifact_lines(report: str) -> str:
+    lines = (report or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    first_content = 0
+    while first_content < len(lines):
+        stripped = lines[first_content].strip()
+        if not stripped or _ARTIFACT_ONLY_LINE_RE.fullmatch(stripped):
+            first_content += 1
+            continue
+        break
+    return collapse_blank_lines("\n".join(lines[first_content:]))
 
 
 def strip_refine_preamble(report: str) -> str:
@@ -267,6 +333,40 @@ def strip_refine_preamble(report: str) -> str:
     if not report:
         return ""
     cleaned = _REFINE_PREAMBLE_RE.sub("", report)
+    return _strip_leading_artifact_lines(cleaned)
+
+
+def strip_meta_openers(report: str) -> str:
+    """Remove meta-description openers like '本报告将…', '本分析基于…', 'This report provides...'."""
+    if not report:
+        return ""
+    cleaned = _META_OPENER_RE.sub("", report)
+    return _strip_leading_artifact_lines(cleaned)
+
+
+def strip_declarative_question_marks(report: str) -> str:
+    """Turn stray declarative sentence-ending question marks into periods."""
+    if not report:
+        return ""
+
+    def _replace(match: re.Match) -> str:
+        sentence = match.group(1)
+        if _INTERROGATIVE_CUE_RE.search(sentence) or _looks_like_section_heading(sentence.strip()):
+            return match.group(0)
+        return f"{sentence}。"
+
+    cleaned = re.sub(r"([^\n。！？!?]{2,})[？?]", _replace, report)
     return collapse_blank_lines(cleaned)
 
 
+def clean_generated_report(report: str) -> str:
+    """Normalize common report-format artifacts from analyst output."""
+    if not report:
+        return ""
+    cleaned = strip_refine_preamble(report)
+    cleaned = strip_report_title(cleaned)
+    cleaned = strip_qa_labels(cleaned)
+    cleaned = strip_meta_openers(cleaned)
+    cleaned = strip_self_referential_meta_leads(cleaned)
+    cleaned = strip_declarative_question_marks(cleaned)
+    return collapse_blank_lines(cleaned)

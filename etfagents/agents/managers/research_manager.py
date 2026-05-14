@@ -136,6 +136,10 @@ Use this exact output order with Markdown headings:
 {_research_detail_instruction("action")}
 
 ## {localize_label("Positioning Recommendation", "持仓建议")}
+        - When writing in Chinese, split this section into exactly two second-level subsections: `（一）评级` and `（二）建议`.
+        - Do NOT create extra top-level headings such as `四、评级` or `五、建议`; both must stay under `持仓建议`.
+        - Put the single explicit recommendation label only in `（一）评级`.
+        - Put all execution detail, allocation band, add / reduce / rotate conditions, rebalance triggers, risk controls, and monitoring priorities in `（二）建议`.
         - Give a clear, actionable ETF allocation recommendation—{localize_rating_term("Buy")}, {localize_rating_term("Overweight")}, {localize_rating_term("Hold")}, {localize_rating_term("Underweight")}, or {localize_rating_term("Sell")}—grounded in the debate's strongest arguments.
         - Include concrete execution guidance for the trader: initial allocation band, add / reduce / rotate conditions, rebalance triggers, risk controls, and what to monitor next.
         - The rating field and the positioning recommendation text must point to the same action. Do not restate a different recommendation in prose.

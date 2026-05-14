@@ -9,13 +9,10 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
+    clean_generated_report,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
-    strip_report_title,
-    strip_qa_labels,
-    strip_refine_preamble,
-    strip_self_referential_meta_leads,
 )
 from etfagents.agents.utils.validate_refine import validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
@@ -160,10 +157,7 @@ def create_etf_structure_analyst(llm):
         )
         report = normalize_chinese_role_terms(report) if report else report
         report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
-        report = strip_report_title(report) if report else report
-        report = strip_qa_labels(report) if report else report
-        report = strip_refine_preamble(report) if report else report
-        report = strip_self_referential_meta_leads(report) if report else report
+        report = clean_generated_report(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

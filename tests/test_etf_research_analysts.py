@@ -24,8 +24,10 @@ from etfagents.agents.analysts.etf_stock_research_analyst import (
 )
 from etfagents.agents.utils.agent_utils import build_report_title
 from etfagents.agents.utils.report_leads import (
+    clean_generated_report,
     ensure_h1_title,
     strip_report_title,
+    strip_refine_preamble,
 )
 
 
@@ -304,6 +306,76 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         cleaned = strip_report_title(report)
         self.assertNotIn("# 舆情与事件影响分析", cleaned)
         self.assertTrue(cleaned.startswith("导语内容。"))
+
+    def test_strip_refine_preamble_removes_prompt_echo_and_box_lines(self):
+        report = (
+            "以下是根据评审标准修正后的完整报告，直接陈述核心结论并补充第三部分导语，保留原有正确分析与数据。                                                               │\n"
+            "│                                                                                                                                                                 │\n"
+            "│  -------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            "价格仍站在20日均线上方，短线结构未被破坏。"
+        )
+        cleaned = strip_refine_preamble(report)
+        self.assertEqual(cleaned, "价格仍站在20日均线上方，短线结构未被破坏。")
+
+    def test_clean_generated_report_removes_combined_format_artifacts(self):
+        report = (
+            "以下是根据评审标准修正后的完整报告，直接陈述核心结论并补充第三部分导语，保留原有正确分析与数据。                                                               │\n"
+            "│                                                                                                                                                                 │\n"
+            "│  -------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            "# 技术面与资金流综合诊断\n\n"
+            "本报告将围绕当前ETF的量价结构和资金流给出判断。\n"
+            "结论：偏多，但短线不宜追高。\n"
+            "价格仍站在20日均线上方，MACD维持在零轴上方，趋势仍偏强。\n\n"
+            "一、市场结构与量价诊断\n\n"
+            "本节核心结论指出趋势仍未走坏。\n"
+            "正文内容。"
+        )
+        cleaned = clean_generated_report(report)
+        self.assertTrue(cleaned.startswith("偏多，但短线不宜追高。"))
+        self.assertNotIn("以下是根据评审标准修正后的完整报告", cleaned)
+        self.assertNotIn("# 技术面与资金流综合诊断", cleaned)
+        self.assertNotIn("本报告将围绕", cleaned)
+        self.assertNotIn("结论：偏多", cleaned)
+        self.assertNotIn("本节核心结论指出", cleaned)
+        self.assertIn("价格仍站在20日均线上方，MACD维持在零轴上方，趋势仍偏强。", cleaned)
+        self.assertIn("正文内容。", cleaned)
+
+    def test_clean_generated_report_removes_remaining_format_markers(self):
+        report = (
+            "核心结论：偏多，但不宜追高。\n"
+            "（关键技术指标交易含义速览：MACD 金叉代表动能增强）\n"
+            "本章节导语：价格仍站在20日均线上方？\n"
+            "这意味着什么：趋势尚未破坏？\n"
+            "对交易应该怎么做：等待回踩确认后再加仓。\n"
+        )
+        cleaned = clean_generated_report(report)
+        self.assertNotIn("核心结论：", cleaned)
+        self.assertNotIn("（关键技术指标交易含义速览", cleaned)
+        self.assertNotIn("本章节导语", cleaned)
+        self.assertNotIn("这意味着什么", cleaned)
+        self.assertNotIn("对交易应该怎么做", cleaned)
+        self.assertIn("偏多，但不宜追高。", cleaned)
+        self.assertIn("价格仍站在20日均线上方。", cleaned)
+        self.assertIn("趋势尚未破坏。", cleaned)
+        self.assertIn("等待回踩确认后再加仓。", cleaned)
+
+    def test_clean_generated_report_removes_markdown_heading_labels_for_all_analysts(self):
+        report = (
+            "### 章节导语\n"
+            "盈利修复正在从龙头向产业链扩散。\n\n"
+            "### 信号总结：订单与现金流同步改善。\n"
+            "### 这意味着什么？行业景气度仍在上行。\n"
+            "### 交易该怎么做？优先等待回踩确认，再分批布局。\n"
+        )
+        cleaned = clean_generated_report(report)
+        self.assertNotIn("### 章节导语", cleaned)
+        self.assertNotIn("### 信号总结", cleaned)
+        self.assertNotIn("### 这意味着什么", cleaned)
+        self.assertNotIn("### 交易该怎么做", cleaned)
+        self.assertIn("盈利修复正在从龙头向产业链扩散。", cleaned)
+        self.assertIn("订单与现金流同步改善。", cleaned)
+        self.assertIn("行业景气度仍在上行。", cleaned)
+        self.assertIn("优先等待回踩确认，再分批布局。", cleaned)
 
 
 

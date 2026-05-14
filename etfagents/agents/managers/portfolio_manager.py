@@ -141,10 +141,14 @@ Use this exact output order with Markdown headings:
 {_portfolio_detail_instruction("action")}
 
 ## {localize_label("Positioning Recommendation", "持仓建议")}
-- Give a clear, actionable ETF portfolio recommendation—{localize_rating_term("Buy")}, {localize_rating_term("Overweight")}, {localize_rating_term("Hold")}, {localize_rating_term("Underweight")}, or {localize_rating_term("Sell")}—grounded in the debate's strongest evidence.
-- Include concrete execution guidance: target allocation band, add / reduce / rotate conditions, maximum initial sizing, rebalance triggers, risk controls, and what to monitor next.
-- When writing in Chinese, avoid mixed English labels such as "Time Horizon", "Executive Summary", or "Investment Thesis".
-- The rating, the positioning recommendation text, and the final transaction proposal must all point to the same action. Do not restate a conflicting recommendation in prose.
+ - When writing in Chinese, split this section into exactly two second-level subsections: `（一）评级` and `（二）建议`.
+ - Do NOT create extra top-level headings such as `四、评级` or `五、建议`; both must stay under `持仓建议`.
+ - Put the single explicit rating label only in `（一）评级`, using `研究结论: **买入/增持/持有/减持/卖出**`.
+ - Put all allocation band, add / reduce / rotate / hedge conditions, maximum initial sizing, rebalance triggers, risk controls, and monitoring priorities in `（二）建议`.
+ - Give a clear, actionable ETF portfolio recommendation—{localize_rating_term("Buy")}, {localize_rating_term("Overweight")}, {localize_rating_term("Hold")}, {localize_rating_term("Underweight")}, or {localize_rating_term("Sell")}—grounded in the debate's strongest evidence.
+ - Include concrete execution guidance: target allocation band, add / reduce / rotate conditions, maximum initial sizing, rebalance triggers, risk controls, and what to monitor next.
+ - When writing in Chinese, avoid mixed English labels such as "Time Horizon", "Executive Summary", or "Investment Thesis".
+ - The rating, the positioning recommendation text, and the final transaction proposal must all point to the same action. Do not restate a conflicting recommendation in prose.
 - Keep exactly one explicit final recommendation label in this section and make the rest of the paragraph explanatory rather than repetitive.
 
 {instrument_context}
@@ -179,8 +183,8 @@ Use this exact output order with Markdown headings:
         {localize_label("ETF top holdings research:", "ETF头部持仓研究:")}
         {top_holdings_report}
 
-        Be decisive and ground every conclusion in specific evidence from the analysts. {get_localized_final_proposal_instruction()}
-Only after the three sections above and the final transaction proposal line, append a feedback block in this exact format:
+Be decisive and ground every conclusion in specific evidence from the analysts. {get_localized_final_proposal_instruction()}
+Only after the three sections above, append a feedback block in this exact format:
 {get_snapshot_template()}
 {get_snapshot_writing_instruction()}{get_language_instruction()}"""
 

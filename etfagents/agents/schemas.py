@@ -958,15 +958,28 @@ def render_research_plan(plan: ResearchPlan) -> str:
         positioning_recommendation = _merge_sparse_section_with_default(
             positioning_recommendation, detailed_positioning
         )
-    body = (
-        f"## {localize_label('Debate Conclusion', '辩论结论')}\n"
-        f"{debate_conclusion}\n\n"
-        f"## {localize_label('Action Logic', '行为逻辑')}\n"
-        f"{action_logic}\n\n"
-        f"## {localize_label('Positioning Recommendation', '持仓建议')}\n"
-        f"{localize_label('Research View', '研究结论')}: **{recommendation}**\n"
-        f"{positioning_recommendation}"
-    )
+    if _is_chinese_output():
+        body = (
+            "## 辩论结论\n"
+            f"{debate_conclusion}\n\n"
+            "## 行为逻辑\n"
+            f"{action_logic}\n\n"
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            f"研究结论: **{recommendation}**\n\n"
+            "### （二）建议\n"
+            f"{positioning_recommendation}"
+        )
+    else:
+        body = (
+            f"## {localize_label('Debate Conclusion', '辩论结论')}\n"
+            f"{debate_conclusion}\n\n"
+            f"## {localize_label('Action Logic', '行为逻辑')}\n"
+            f"{action_logic}\n\n"
+            f"## {localize_label('Positioning Recommendation', '持仓建议')}\n"
+            f"{localize_label('Research View', '研究结论')}: **{recommendation}**\n"
+            f"{positioning_recommendation}"
+        )
     snapshot = _render_snapshot(
         _sanitize_snapshot_stance(plan.snapshot_stance, plan.rating),
         _sanitize_section(
@@ -1086,19 +1099,32 @@ def render_portfolio_decision(plan: PortfolioDecision, context_text: str = "") -
         context_text,
     )
     if _is_chinese_output():
-        final_line = f"最终配置建议: **{recommendation}**"
+        final_line = f"研究结论: **{recommendation}**"
     else:
         final_line = f"FINAL ALLOCATION PROPOSAL: **{recommendation.upper()}**"
 
-    body = (
-        f"## {localize_label('Debate Conclusion', '辩论结论')}\n"
-        f"{debate_conclusion}\n\n"
-        f"## {localize_label('Action Logic', '行为逻辑')}\n"
-        f"{action_logic}\n\n"
-        f"## {localize_label('Positioning Recommendation', '持仓建议')}\n"
-        f"{final_line}\n"
-        f"{positioning_recommendation}"
-    )
+    if _is_chinese_output():
+        body = (
+            "## 辩论结论\n"
+            f"{debate_conclusion}\n\n"
+            "## 行为逻辑\n"
+            f"{action_logic}\n\n"
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            f"{final_line}\n\n"
+            "### （二）建议\n"
+            f"{positioning_recommendation}"
+        )
+    else:
+        body = (
+            f"## {localize_label('Debate Conclusion', '辩论结论')}\n"
+            f"{debate_conclusion}\n\n"
+            f"## {localize_label('Action Logic', '行为逻辑')}\n"
+            f"{action_logic}\n\n"
+            f"## {localize_label('Positioning Recommendation', '持仓建议')}\n"
+            f"{final_line}\n"
+            f"{positioning_recommendation}"
+        )
     snapshot = _render_snapshot(
         _sanitize_snapshot_stance(plan.snapshot_stance, plan.rating),
         _sanitize_section(

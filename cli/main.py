@@ -153,6 +153,7 @@ def _relevel_markdown_headings(content: str, target_min_level: int) -> str:
 def _strip_heading_number_prefix(text: str) -> str:
     stripped = (text or "").strip()
     patterns = (
+        r"^#{1,6}\s*",
         r"^[一二三四五六七八九十]+、\s*",
         r"^（[一二三四五六七八九十]+）\s*",
         r"^\d+(?:\.\d+)*\.?\s*",
