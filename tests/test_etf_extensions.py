@@ -150,6 +150,8 @@ class ETFExtensionTests(unittest.TestCase):
             [item["suggested_weight_pct"] for item in ranked],
             [50.0, 33.3, 16.7],
         )
+        self.assertEqual(ranked[0]["backtest_signal"]["source"], "candidate_pool")
+        self.assertEqual(ranked[0]["backtest_signal"]["target_weight_pct"], 50.0)
 
     @patch("etfagents.agents.utils.etf_data_tools.get_broker_reports")
     @patch("etfagents.agents.utils.etf_data_tools._resolve_broker_industry_keyword")
@@ -332,7 +334,61 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertAlmostEqual(result.windows[1].period_return, 0.049505, places=6)
         self.assertAlmostEqual(result.metrics.cumulative_return, 0.154455, places=6)
         self.assertAlmostEqual(result.metrics.average_turnover, 1.0, places=6)
+        self.assertEqual(result.execution_timing, "same_close")
         self.assertEqual(result.to_dict()["top_k"], 1)
+
+    def test_candidate_pool_replay_supports_next_open_execution(self):
+        graph = object.__new__(EtfAgentsGraph)
+
+        def _fake_ranked(_tickers, trade_date):
+            ranked_by_date = {
+                "2026-01-02": [
+                    {"ticker": "159915.SZ", "rating": "BUY", "suggested_weight_pct": 70.0},
+                    {"ticker": "510300.SH", "rating": "HOLD", "suggested_weight_pct": 30.0},
+                ],
+                "2026-01-06": [
+                    {"ticker": "510300.SH", "rating": "BUY", "suggested_weight_pct": 60.0},
+                    {"ticker": "159915.SZ", "rating": "OVERWEIGHT", "suggested_weight_pct": 40.0},
+                ],
+            }
+            return ranked_by_date[trade_date]
+
+        def _fake_prices(ticker, _start_date, _end_date):
+            frames = {
+                "159915.SZ": pd.DataFrame(
+                    {
+                        "Date": pd.to_datetime(["2026-01-02", "2026-01-06", "2026-01-08", "2026-01-10"]),
+                        "Open": [100.0, 101.0, 111.0, 112.0],
+                        "Close": [100.0, 110.0, 111.0, 112.0],
+                    }
+                ),
+                "510300.SH": pd.DataFrame(
+                    {
+                        "Date": pd.to_datetime(["2026-01-02", "2026-01-06", "2026-01-08", "2026-01-10"]),
+                        "Open": [100.0, 101.0, 102.0, 107.0],
+                        "Close": [100.0, 101.0, 106.0, 107.0],
+                    }
+                ),
+            }
+            return frames[ticker]
+
+        graph.analyze_candidate_pool = _fake_ranked
+
+        result = EtfAgentsGraph.replay_candidate_pool(
+            graph,
+            ["159915.SZ", "510300.SH"],
+            "2026-01-02",
+            "2026-01-08",
+            rebalance_interval_days=1,
+            top_k=1,
+            execution_timing="next_open",
+            price_loader=_fake_prices,
+        )
+
+        self.assertEqual(result.execution_timing, "next_open")
+        self.assertAlmostEqual(result.windows[0].period_return, 0.09901, places=6)
+        self.assertAlmostEqual(result.windows[1].period_return, 0.04902, places=6)
+        self.assertAlmostEqual(result.metrics.cumulative_return, 0.152883, places=6)
 
 
 if __name__ == "__main__":

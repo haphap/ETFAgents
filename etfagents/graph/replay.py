@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from io import StringIO
+from datetime import timedelta
 from typing import Callable
 
 import pandas as pd
@@ -38,6 +39,7 @@ class ReplayResult:
     end_date: str
     rebalance_interval_days: int
     top_k: int
+    execution_timing: str
     metrics: ReplayMetrics
     windows: list[ReplayWindowResult]
 
@@ -60,21 +62,58 @@ def _load_price_frame(ticker: str, start_date: str, end_date: str) -> pd.DataFra
     df = _read_tool_csv(payload)
     if df.empty or "Date" not in df.columns or "Close" not in df.columns:
         raise ValueError(f"No replay price history available for '{ticker}'.")
+    return _normalize_price_frame(df, ticker)
+
+
+def _normalize_price_frame(df: pd.DataFrame, ticker: str) -> pd.DataFrame:
     output = df.copy()
     output["Date"] = pd.to_datetime(output["Date"], errors="coerce")
-    output["Close"] = pd.to_numeric(output["Close"], errors="coerce")
+    for column in ("Open", "Close"):
+        if column in output.columns:
+            output[column] = pd.to_numeric(output[column], errors="coerce")
     output = output.dropna(subset=["Date", "Close"]).sort_values("Date").reset_index(drop=True)
     if output.empty:
         raise ValueError(f"No usable replay price rows available for '{ticker}'.")
     return output
 
 
-def _price_on_or_before(df: pd.DataFrame, date_str: str) -> float:
+def _validate_execution_timing(execution_timing: str) -> str:
+    normalized = (execution_timing or "same_close").strip().lower()
+    if normalized not in {"same_close", "next_open", "next_close"}:
+        raise ValueError(
+            "execution_timing must be one of: same_close, next_open, next_close."
+        )
+    return normalized
+
+
+def _price_at_execution(df: pd.DataFrame, date_str: str, execution_timing: str) -> float:
+    timing = _validate_execution_timing(execution_timing)
     date_value = pd.to_datetime(date_str)
-    matches = df[df["Date"] <= date_value]
+    if timing == "same_close":
+        matches = df[df["Date"] <= date_value]
+        if matches.empty:
+            raise ValueError(f"No close price available on or before {date_str}.")
+        return float(matches.iloc[-1]["Close"])
+
+    if timing == "next_close":
+        matches = df[df["Date"] > date_value]
+        if matches.empty:
+            raise ValueError(f"No next close price available after {date_str}.")
+        return float(matches.iloc[0]["Close"])
+
+    if "Open" not in df.columns:
+        raise ValueError("Replay requested next_open execution but price frame has no Open column.")
+    matches = df[df["Date"] > date_value].dropna(subset=["Open"])
     if matches.empty:
-        raise ValueError(f"No price available on or before {date_str}.")
-    return float(matches.iloc[-1]["Close"])
+        raise ValueError(f"No next open price available after {date_str}.")
+    return float(matches.iloc[0]["Open"])
+
+
+def _extend_loader_end_date(end_date: str, execution_timing: str) -> str:
+    timing = _validate_execution_timing(execution_timing)
+    if timing == "same_close":
+        return end_date
+    return (pd.to_datetime(end_date) + timedelta(days=7)).strftime("%Y-%m-%d")
 
 
 def _normalize_candidate_weights(candidates: list[dict[str, object]], top_k: int) -> dict[str, float]:
@@ -159,20 +198,25 @@ def run_candidate_pool_replay(
     end_date: str,
     rebalance_interval_days: int = 21,
     top_k: int = 3,
+    execution_timing: str = "same_close",
     price_loader: Callable[[str, str, str], pd.DataFrame] | None = None,
 ) -> ReplayResult:
     unique_tickers = list(dict.fromkeys(tickers))
     if not unique_tickers:
         raise ValueError("Replay requires at least one ETF ticker.")
 
+    timing = _validate_execution_timing(execution_timing)
     loader = price_loader or _load_price_frame
+    loader_end_date = _extend_loader_end_date(end_date, timing)
     price_cache = {
-        ticker: loader(ticker, start_date, end_date)
+        ticker: _normalize_price_frame(loader(ticker, start_date, loader_end_date), ticker)
         for ticker in unique_tickers
     }
     reference_dates = [
         ts.strftime("%Y-%m-%d")
-        for ts in price_cache[unique_tickers[0]]["Date"].tolist()
+        for ts in price_cache[unique_tickers[0]]
+        .loc[price_cache[unique_tickers[0]]["Date"] <= pd.to_datetime(end_date), "Date"]
+        .tolist()
     ]
     schedule = _build_rebalance_schedule(reference_dates, rebalance_interval_days)
 
@@ -190,8 +234,8 @@ def run_candidate_pool_replay(
         }
         period_return = 0.0
         for ticker, weight in weights.items():
-            entry_price = _price_on_or_before(price_cache[ticker], rebalance_date)
-            exit_price = _price_on_or_before(price_cache[ticker], window_end)
+            entry_price = _price_at_execution(price_cache[ticker], rebalance_date, timing)
+            exit_price = _price_at_execution(price_cache[ticker], window_end, timing)
             period_return += weight * (exit_price / entry_price - 1)
         cumulative_nav *= 1 + period_return
         turnover = _portfolio_turnover(previous_weights, weights)
@@ -215,6 +259,7 @@ def run_candidate_pool_replay(
         end_date=end_date,
         rebalance_interval_days=max(1, int(rebalance_interval_days)),
         top_k=max(1, int(top_k)),
+        execution_timing=timing,
         metrics=_compute_replay_metrics(windows, start_date, end_date),
         windows=windows,
     )

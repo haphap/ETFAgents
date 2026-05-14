@@ -310,6 +310,9 @@ class TradingAgentsGraph:
             "top_holdings_report": get_state_value(final_state, "top_holdings_report", ""),
             "research_allocation_plan": get_state_value(final_state, "research_allocation_plan", ""),
             "final_allocation_decision": get_state_value(final_state, "final_allocation_decision", ""),
+            "trader_backtest_signal": get_state_value(final_state, "trader_backtest_signal", {}),
+            "portfolio_backtest_signal": get_state_value(final_state, "portfolio_backtest_signal", {}),
+            "backtest_signal": get_state_value(final_state, "backtest_signal", {}),
         }
 
         # Save to file

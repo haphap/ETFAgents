@@ -76,6 +76,9 @@ class Propagator:
             "research_allocation_plan": "",
             "trader_allocation_plan": "",
             "final_allocation_decision": "",
+            "trader_backtest_signal": {},
+            "portfolio_backtest_signal": {},
+            "backtest_signal": {},
         })
 
     def get_graph_args(self, callbacks: Optional[List] = None) -> Dict[str, Any]:

@@ -19,6 +19,14 @@ from etfagents.agents.utils.agent_utils import (
     get_news,
 )
 from etfagents.agents.utils.state_keys import get_state_value
+from etfagents.backtest.signals import (
+    build_candidate_backtest_signal,
+    build_state_backtest_signal,
+)
+from etfagents.backtest.backtrader_engine import (
+    BacktraderBacktestResult,
+    run_candidate_pool_backtest,
+)
 from etfagents.default_config import DEFAULT_CONFIG
 
 from .replay import ReplayResult, run_candidate_pool_replay
@@ -122,6 +130,11 @@ class EtfAgentsGraph(TradingAgentsGraph):
                         "final_allocation_decision",
                         "",
                     ),
+                    "backtest_signal": build_state_backtest_signal(
+                        final_state,
+                        default_ticker=ticker,
+                        default_trade_date=trade_date,
+                    ),
                 }
             )
         ranked = sorted(
@@ -134,6 +147,10 @@ class EtfAgentsGraph(TradingAgentsGraph):
             item["suggested_weight_pct"] = (
                 round(conviction / total_conviction * 100, 1) if total_conviction else 0.0
             )
+            item["backtest_signal"] = build_candidate_backtest_signal(
+                item,
+                trade_date,
+            )
         return ranked
 
     def replay_candidate_pool(
@@ -143,6 +160,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
         end_date: str,
         rebalance_interval_days: int = 21,
         top_k: int = 3,
+        execution_timing: str = "same_close",
         price_loader=None,
     ) -> ReplayResult:
         """Replay ranked ETF allocation decisions across historical rebalance windows."""
@@ -153,5 +171,36 @@ class EtfAgentsGraph(TradingAgentsGraph):
             end_date,
             rebalance_interval_days=rebalance_interval_days,
             top_k=top_k,
+            execution_timing=execution_timing,
+            price_loader=price_loader,
+        )
+
+    def backtest_candidate_pool(
+        self,
+        tickers: list[str],
+        start_date: str,
+        end_date: str,
+        rebalance_interval_days: int = 21,
+        top_k: int = 3,
+        execution_timing: str = "same_close",
+        initial_cash: float = 1_000_000.0,
+        commission: float = 0.0,
+        slippage_perc: float = 0.0,
+        cash_buffer_pct: float = 0.0,
+        price_loader=None,
+    ) -> BacktraderBacktestResult:
+        """Run a formal Backtrader backtest over ranked ETF candidate-pool decisions."""
+        return run_candidate_pool_backtest(
+            self,
+            tickers,
+            start_date,
+            end_date,
+            rebalance_interval_days=rebalance_interval_days,
+            top_k=top_k,
+            execution_timing=execution_timing,
+            initial_cash=initial_cash,
+            commission=commission,
+            slippage_perc=slippage_perc,
+            cash_buffer_pct=cash_buffer_pct,
             price_loader=price_loader,
         )

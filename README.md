@@ -95,6 +95,16 @@ etfagents analyze --clear-checkpoints --checkpoint
 
 The CLI walks through ticker selection, analysis date, LLM provider, model choices, research depth, output language, and analyst selection, then streams the graph execution live in the terminal.
 
+Run a candidate-pool backtest from the CLI:
+
+```bash
+etfagents backtest \
+  --tickers 510300.SH,159915.SZ \
+  --start-date 2026-01-02 \
+  --end-date 2026-03-31 \
+  --execution-timing same_close
+```
+
 ## Python Usage
 
 ```python
@@ -117,6 +127,20 @@ config["max_risk_discuss_rounds"] = 1
 graph = EtfAgentsGraph(debug=True, config=config)
 state, decision = graph.propagate("510300.SH", "2024-05-10")
 print(decision)
+
+backtest = graph.backtest_candidate_pool(
+    ["510300.SH", "159915.SZ"],
+    "2026-01-02",
+    "2026-03-31",
+    execution_timing="same_close",
+)
+print(backtest.metrics.cumulative_return)
+```
+
+There is also a thin script example:
+
+```bash
+python scripts/backtest_example.py --help
 ```
 
 ## Repository Layout

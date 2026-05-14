@@ -2,7 +2,10 @@ import functools
 from langchain_core.messages import AIMessage
 
 from etfagents.agents.schemas import TraderProposal, render_trader_proposal
-from etfagents.agents.utils.structured import bind_structured, invoke_structured_or_freetext
+from etfagents.agents.utils.structured import (
+    bind_structured,
+    invoke_structured_or_freetext_with_result,
+)
 from etfagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_localized_execution_bias_instruction,
@@ -12,6 +15,7 @@ from etfagents.agents.utils.agent_utils import (
     truncate_for_prompt,
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value, with_state_aliases
+from etfagents.backtest.signals import build_trader_backtest_signal
 
 
 def _trader_detail_instruction() -> str:
@@ -81,19 +85,25 @@ def create_trader(llm):
             context,
         ]
 
-        rendered_result = normalize_chinese_manager_terms(
-            invoke_structured_or_freetext(
-                structured_llm,
-                llm,
-                messages,
-                functools.partial(render_trader_proposal, context_text=market_flow_report),
-                "Trader",
-            )
+        rendered_result, structured_result = invoke_structured_or_freetext_with_result(
+            structured_llm,
+            llm,
+            messages,
+            functools.partial(render_trader_proposal, context_text=market_flow_report),
+            "Trader",
+        )
+        rendered_result = normalize_chinese_manager_terms(rendered_result)
+        trader_backtest_signal = build_trader_backtest_signal(
+            asset_symbol,
+            str(state.get("trade_date", "")),
+            rendered_result,
+            structured_result,
         )
 
         return with_state_aliases({
             "messages": [AIMessage(content=rendered_result)],
             "trader_allocation_plan": rendered_result,
+            "trader_backtest_signal": trader_backtest_signal,
             "sender": name,
         })
 

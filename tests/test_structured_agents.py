@@ -94,6 +94,8 @@ class StructuredAgentTests(unittest.TestCase):
 
         self.assertIn("## ETF Allocation Thesis", result["trader_investment_plan"])
         self.assertIn("EXECUTION BIAS: **HOLD**", result["trader_investment_plan"])
+        self.assertEqual(result["trader_backtest_signal"]["source"], "trader")
+        self.assertEqual(result["trader_backtest_signal"]["rating"], "HOLD")
 
     def test_research_manager_renders_structured_output(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
@@ -140,6 +142,8 @@ class StructuredAgentTests(unittest.TestCase):
 
         self.assertIn("FINAL TRANSACTION PROPOSAL: **HOLD**", result["final_trade_decision"])
         self.assertIn("FEEDBACK SNAPSHOT:", result["final_trade_decision"])
+        self.assertEqual(result["portfolio_backtest_signal"]["source"], "portfolio_manager")
+        self.assertEqual(result["backtest_signal"]["rating"], "HOLD")
 
     def test_trader_falls_back_when_structured_invoke_fails(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)

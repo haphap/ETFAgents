@@ -6,6 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Install from source: `pip install .`
 - Run the interactive CLI: `etfagents` (installed) or `python -m cli.main` (from source)
+- Run a non-interactive candidate-pool backtest: `etfagents backtest --tickers 510300.SH,159915.SZ --start-date 2026-01-02 --end-date 2026-03-31`
 - Run the full test suite: `python -m unittest discover -s tests -q`
 - Run a single test: `python -m unittest tests.test_data_vendor_routing.DataVendorRoutingTests.test_fallback_when_primary_vendor_unavailable -q`
 - Smoke test structured output: `python scripts/smoke_structured_output.py <provider>`
