@@ -145,7 +145,7 @@ python scripts/backtest_example.py --help
 etfagents backtest --tickers 510300.SH,159915.SZ --benchmark-tickers equal_weight_pool --start-date 2026-01-02 --end-date 2026-03-31
 ```
 
-Saved backtest artifacts now include `summary.md`, `report.html`, `nav_chart.svg`, `benchmarks.csv`, and the existing machine-readable JSON/CSV outputs.
+Saved backtest artifacts now include `summary.md`, `report.html`, `nav_chart.svg`, `benchmarks.csv`, and the existing machine-readable JSON/CSV outputs. The CLI also prints a data-health table plus a rebalance summary table, and structured trigger/risk-rule fields can drive dynamic mid-cycle rebalances inside the Backtrader engine.
 
 ## Repository Layout
 

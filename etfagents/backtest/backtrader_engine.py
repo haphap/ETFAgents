@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from html import escape
 import inspect
@@ -8,11 +8,16 @@ from io import StringIO
 import json
 from math import sqrt
 from pathlib import Path
+import re
 from typing import Any, Callable
 
 import backtrader as bt
 import pandas as pd
-from etfagents.dataflows.config import backtest_context
+from etfagents.dataflows.config import (
+    backtest_context,
+    backtest_health_context,
+    get_backtest_health_state,
+)
 from etfagents.dataflows.interface import route_to_vendor
 
 EQUAL_WEIGHT_BENCHMARK = "equal_weight_pool"
@@ -27,6 +32,8 @@ class BacktraderRebalanceRecord:
     ratings: dict[str, str]
     turnover: float
     signals: list[dict[str, Any]]
+    reason: str = "scheduled"
+    trigger_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -100,6 +107,21 @@ class BacktraderMetrics:
 
 
 @dataclass
+class BacktestHealthMetrics:
+    weight_source_counts: dict[str, int]
+    trigger_bucket_counts: dict[str, int]
+    structured_trigger_count: int
+    risk_rule_count: int
+    execution_timing_mismatch_count: int
+    dynamic_rebalance_count: int
+    trigger_event_count: int
+    unsupported_trigger_count: int
+    missing_price_rows: int
+    clamp_hit_count: int
+    blocked_call_count: int
+
+
+@dataclass
 class BacktraderBacktestResult:
     tickers: list[str]
     benchmarks: list[str]
@@ -121,9 +143,13 @@ class BacktraderBacktestResult:
     orders: list[BacktraderOrderRecord]
     trades: list[BacktraderTradeRecord]
     analyzer_outputs: dict[str, Any]
+    health: BacktestHealthMetrics
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+    def rebalance_summary_rows(self) -> list[dict[str, Any]]:
+        return _build_rebalance_summary_rows(self)
 
 
 class FractionalETFCommissionInfo(bt.CommInfoBase):
@@ -480,6 +506,135 @@ def _compute_benchmark_metrics(
     )
 
 
+def _count_missing_price_rows(df: pd.DataFrame, execution_timing: str) -> int:
+    if df is None or df.empty:
+        return 0
+    working = df.copy()
+    if "Date" in working.columns:
+        working["Date"] = pd.to_datetime(working["Date"], errors="coerce")
+    missing = working["Date"].isna() if "Date" in working.columns else pd.Series(False, index=working.index)
+    if "Close" in working.columns:
+        missing = missing | pd.to_numeric(working["Close"], errors="coerce").isna()
+    if execution_timing == "next_open" and "Open" in working.columns:
+        missing = missing | pd.to_numeric(working["Open"], errors="coerce").isna()
+    return int(missing.sum())
+
+
+def _nav_on_or_before(nav_records: list[BacktraderNavRecord], date_str: str) -> float | None:
+    target = pd.to_datetime(date_str)
+    eligible = [
+        record.nav for record in nav_records
+        if pd.to_datetime(record.date) <= target
+    ]
+    if not eligible:
+        return None
+    return float(eligible[-1])
+
+
+def _build_rebalance_summary_rows(result: BacktraderBacktestResult) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for index, record in enumerate(result.rebalances):
+        start_nav = _nav_on_or_before(result.nav, record.execution_date)
+        next_execution = (
+            result.rebalances[index + 1].execution_date
+            if index + 1 < len(result.rebalances)
+            else result.nav[-1].date if result.nav else record.execution_date
+        )
+        end_nav = _nav_on_or_before(result.nav, next_execution)
+        period_return = (
+            (end_nav / start_nav - 1.0)
+            if start_nav and end_nav and start_nav > 0
+            else 0.0
+        )
+        cumulative_return = (
+            (end_nav / result.initial_cash - 1.0)
+            if end_nav and result.initial_cash > 0
+            else 0.0
+        )
+        weight_sources = sorted(
+            {
+                str(signal.get("weight_source", "unknown"))
+                for signal in record.signals
+                if isinstance(signal, dict)
+            }
+        )
+        rows.append(
+            {
+                "decision_date": record.decision_date,
+                "execution_date": record.execution_date,
+                "reason": record.reason,
+                "selected_tickers": list(record.selected_tickers),
+                "weights": dict(record.weights),
+                "ratings": dict(record.ratings),
+                "weight_sources": weight_sources,
+                "trigger_events": len(record.trigger_events),
+                "period_return": float(period_return),
+                "cumulative_return": float(cumulative_return),
+            }
+        )
+    return rows
+
+
+def _build_health_metrics(
+    execution_timing: str,
+    rebalances: list[BacktraderRebalanceRecord],
+    missing_price_rows: int,
+    unsupported_trigger_count: int,
+    routing_health: Any,
+) -> BacktestHealthMetrics:
+    scheduled_records = [record for record in rebalances if record.reason == "scheduled"]
+    signals = [
+        signal
+        for record in scheduled_records
+        for signal in record.signals
+        if isinstance(signal, dict)
+    ]
+    weight_source_counts: dict[str, int] = {}
+    trigger_bucket_counts = {
+        "add": 0,
+        "reduce": 0,
+        "exit": 0,
+        "rebalance": 0,
+        "risk": 0,
+    }
+    structured_trigger_count = 0
+    risk_rule_count = 0
+    execution_timing_mismatch_count = 0
+    for signal in signals:
+        weight_source = str(signal.get("weight_source", "unknown"))
+        weight_source_counts[weight_source] = weight_source_counts.get(weight_source, 0) + 1
+        trigger_bucket_counts["add"] += len(signal.get("add_triggers", []))
+        trigger_bucket_counts["reduce"] += len(signal.get("reduce_triggers", []))
+        trigger_bucket_counts["exit"] += len(signal.get("exit_triggers", []))
+        trigger_bucket_counts["rebalance"] += len(signal.get("rebalance_triggers", []))
+        trigger_bucket_counts["risk"] += len(signal.get("risk_rules", []))
+        structured_trigger_count += (
+            len(signal.get("add_triggers", []))
+            + len(signal.get("reduce_triggers", []))
+            + len(signal.get("exit_triggers", []))
+            + len(signal.get("rebalance_triggers", []))
+        )
+        risk_rule_count += len(signal.get("risk_rules", []))
+        if str(signal.get("execution_delay", execution_timing)) != execution_timing:
+            execution_timing_mismatch_count += 1
+
+    trigger_event_count = sum(len(record.trigger_events) for record in rebalances)
+    dynamic_rebalance_count = sum(1 for record in rebalances if record.reason == "trigger")
+    return BacktestHealthMetrics(
+        weight_source_counts=weight_source_counts,
+        trigger_bucket_counts=trigger_bucket_counts,
+        structured_trigger_count=structured_trigger_count,
+        risk_rule_count=risk_rule_count,
+        execution_timing_mismatch_count=execution_timing_mismatch_count,
+        dynamic_rebalance_count=dynamic_rebalance_count,
+        trigger_event_count=trigger_event_count,
+        unsupported_trigger_count=int(unsupported_trigger_count),
+        missing_price_rows=int(missing_price_rows),
+        clamp_hit_count=int(routing_health.clamp_hits),
+        blocked_call_count=int(routing_health.blocked_calls),
+    )
+
+
 def _format_pct(value: float) -> str:
     return f"{float(value):.2%}"
 
@@ -529,6 +684,40 @@ def _build_backtest_summary_markdown(result: BacktraderBacktestResult) -> str:
                 f"{metric.benchmark} | {_format_pct(metric.cumulative_return)} | "
                 f"{_format_pct(metric.excess_cumulative_return)} | {_format_pct(metric.max_drawdown)} | "
                 f"{_format_pct(metric.tracking_error)} | {metric.information_ratio:.4f} |"
+        )
+        lines.append("")
+    if result.health.weight_source_counts:
+        lines.extend(
+            [
+                "## Data Health",
+                "",
+                "| Check | Value |",
+                "| --- | --- |",
+                f"| Weight source distribution | {', '.join(f'{key}:{value}' for key, value in sorted(result.health.weight_source_counts.items()))} |",
+                f"| Structured trigger count | {result.health.structured_trigger_count} |",
+                f"| Risk rule count | {result.health.risk_rule_count} |",
+                f"| Execution timing mismatches | {result.health.execution_timing_mismatch_count} |",
+                f"| Clamp hits | {result.health.clamp_hit_count} |",
+                f"| Missing price rows | {result.health.missing_price_rows} |",
+                f"| Unsupported trigger rules | {result.health.unsupported_trigger_count} |",
+                "",
+            ]
+        )
+    summary_rows = _build_rebalance_summary_rows(result)
+    if summary_rows:
+        lines.extend(
+            [
+                "## Rebalance Summary",
+                "",
+                "| Decision Date | Reason | Selected Tickers | Weight Sources | Period Return | Cumulative Return |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in summary_rows:
+            lines.append(
+                "| "
+                f"{row['decision_date']} | {row['reason']} | {', '.join(row['selected_tickers']) or '-'} | "
+                f"{', '.join(row['weight_sources']) or 'unknown'} | {_format_pct(row['period_return'])} | {_format_pct(row['cumulative_return'])} |"
             )
         lines.append("")
     return "\n".join(lines).strip() + "\n"
@@ -666,6 +855,18 @@ def _build_backtest_report_html(result: BacktraderBacktestResult) -> str:
       {benchmark_rows}
     </tbody>
   </table>
+  <h2>Data Health</h2>
+  <table>
+    <tbody>
+      <tr><th>Weight source distribution</th><td>{escape(', '.join(f"{key}:{value}" for key, value in sorted(result.health.weight_source_counts.items())) or 'none')}</td></tr>
+      <tr><th>Structured trigger count</th><td>{result.health.structured_trigger_count}</td></tr>
+      <tr><th>Risk rule count</th><td>{result.health.risk_rule_count}</td></tr>
+      <tr><th>Execution timing mismatches</th><td>{result.health.execution_timing_mismatch_count}</td></tr>
+      <tr><th>Clamp hits</th><td>{result.health.clamp_hit_count}</td></tr>
+      <tr><th>Missing price rows</th><td>{result.health.missing_price_rows}</td></tr>
+      <tr><th>Unsupported trigger rules</th><td>{result.health.unsupported_trigger_count}</td></tr>
+    </tbody>
+  </table>
 </body>
 </html>
 """
@@ -677,6 +878,7 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
         tickers=None,
         rebalance_dates=None,
         execution_dates=None,
+        trading_dates=None,
         top_k=3,
         execution_timing="same_close",
         cash_buffer_pct=0.0,
@@ -686,6 +888,13 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
     def __init__(self):
         self._processed_rebalances: set[str] = set()
         self._pending_rebalances: dict[str, dict[str, Any]] = {}
+        self._data_by_ticker = {data._name: data for data in self.datas}
+        self._active_signals: dict[str, dict[str, Any]] = {}
+        self._active_target_weights: dict[str, float] = {}
+        self._base_target_weights: dict[str, float] = {}
+        self._triggered_rule_keys: set[str] = set()
+        self._unsupported_rule_keys: set[str] = set()
+        self.unsupported_trigger_count: int = 0
         self.rebalance_records: list[BacktraderRebalanceRecord] = []
         self.order_records: list[BacktraderOrderRecord] = []
         self.trade_records: list[BacktraderTradeRecord] = []
@@ -709,16 +918,19 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
                 ratings=payload["ratings"],
                 turnover=payload["turnover"],
                 signals=payload["signals"],
+                reason=payload.get("reason", "scheduled"),
+                trigger_events=list(payload.get("trigger_events", [])),
             )
         )
 
     def next(self):
         current_date = self.datas[0].datetime.date(0).isoformat()
         self._record_daily_nav(current_date)
-        if current_date not in self.p.rebalance_dates or current_date in self._processed_rebalances:
+        if current_date in self.p.rebalance_dates and current_date not in self._processed_rebalances:
+            self._processed_rebalances.add(current_date)
+            self._rebalance(current_date)
             return
-        self._processed_rebalances.add(current_date)
-        self._rebalance(current_date)
+        self._evaluate_dynamic_triggers(current_date)
 
     def notify_order(self, order):
         if order.status != order.Completed:
@@ -792,10 +1004,19 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
             ticker: weight * max(0.0, 1.0 - float(self.p.cash_buffer_pct))
             for ticker, weight in weights.items()
         }
+        signals = {
+            str(candidate["ticker"]): dict(candidate.get("backtest_signal", {}))
+            for candidate in ranked_candidates[: max(1, self.p.top_k)]
+        }
         ratings = {
             str(candidate["ticker"]): str(candidate.get("rating", ""))
             for candidate in ranked_candidates[: max(1, self.p.top_k)]
         }
+        self._active_signals = signals
+        self._base_target_weights = dict(weights)
+        self._active_target_weights = dict(weights)
+        self._triggered_rule_keys.clear()
+        self._unsupported_rule_keys.clear()
         current_weights = self._current_weights()
         turnover = _portfolio_turnover(current_weights, weights)
         execution_date = self.p.execution_dates.get(decision_date, decision_date)
@@ -806,10 +1027,9 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
             "weights": {ticker: round(weight, 6) for ticker, weight in weights.items()},
             "ratings": ratings,
             "turnover": round(float(turnover), 6),
-            "signals": [
-                dict(candidate.get("backtest_signal", {}))
-                for candidate in ranked_candidates[: max(1, self.p.top_k)]
-            ],
+            "signals": list(signals.values()),
+            "reason": "scheduled",
+            "trigger_events": [],
         }
         if self.p.execution_timing == "next_open":
             self._pending_rebalances[execution_date] = record
@@ -824,6 +1044,77 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
                 ratings=record["ratings"],
                 turnover=record["turnover"],
                 signals=record["signals"],
+                reason=record["reason"],
+                trigger_events=record["trigger_events"],
+            )
+        )
+
+    def _evaluate_dynamic_triggers(self, current_date: str) -> None:
+        if not self._active_signals:
+            return
+
+        updated_weights = dict(self._active_target_weights)
+        trigger_events: list[dict[str, Any]] = []
+        for ticker, signal in self._active_signals.items():
+            data = self._data_by_ticker.get(ticker)
+            if data is None:
+                continue
+            current_target = float(updated_weights.get(ticker, 0.0))
+            base_target = float(self._base_target_weights.get(ticker, current_target))
+            current_target, events = self._apply_signal_rules(
+                current_date=current_date,
+                ticker=ticker,
+                signal=signal,
+                data=data,
+                current_target=current_target,
+                base_target=base_target,
+            )
+            updated_weights[ticker] = current_target
+            trigger_events.extend(events)
+
+        if not trigger_events:
+            return
+
+        normalized_weights = self._normalize_target_weights(updated_weights)
+        if self._weights_equal(normalized_weights, self._active_target_weights):
+            return
+        self._active_target_weights = dict(normalized_weights)
+        current_weights = self._current_weights()
+        turnover = _portfolio_turnover(current_weights, normalized_weights)
+        execution_date = (
+            current_date
+            if self.p.execution_timing == "same_close"
+            else self._next_trading_date(current_date)
+        )
+        record = {
+            "decision_date": current_date,
+            "execution_date": execution_date,
+            "selected_tickers": [ticker for ticker, weight in normalized_weights.items() if weight > 1e-9],
+            "weights": {ticker: round(weight, 6) for ticker, weight in normalized_weights.items()},
+            "ratings": {
+                ticker: str(signal.get("rating", ""))
+                for ticker, signal in self._active_signals.items()
+            },
+            "turnover": round(float(turnover), 6),
+            "signals": list(self._active_signals.values()),
+            "reason": "trigger",
+            "trigger_events": trigger_events,
+        }
+        if self.p.execution_timing == "next_open":
+            self._pending_rebalances[execution_date] = record
+            return
+        self._submit_target_orders(record["weights"])
+        self.rebalance_records.append(
+            BacktraderRebalanceRecord(
+                decision_date=record["decision_date"],
+                execution_date=record["execution_date"],
+                selected_tickers=record["selected_tickers"],
+                weights=record["weights"],
+                ratings=record["ratings"],
+                turnover=record["turnover"],
+                signals=record["signals"],
+                reason=record["reason"],
+                trigger_events=record["trigger_events"],
             )
         )
 
@@ -880,6 +1171,264 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
                 **order_kwargs,
             )
 
+    def _apply_signal_rules(
+        self,
+        *,
+        current_date: str,
+        ticker: str,
+        signal: dict[str, Any],
+        data: Any,
+        current_target: float,
+        base_target: float,
+    ) -> tuple[float, list[dict[str, Any]]]:
+        events: list[dict[str, Any]] = []
+        for bucket in ("add_triggers", "reduce_triggers", "exit_triggers", "rebalance_triggers"):
+            for trigger in signal.get(bucket, []):
+                current_target, event = self._evaluate_trigger_rule(
+                    current_date=current_date,
+                    ticker=ticker,
+                    data=data,
+                    signal=signal,
+                    bucket=bucket,
+                    trigger=trigger,
+                    current_target=current_target,
+                    base_target=base_target,
+                )
+                if event is not None:
+                    events.append(event)
+        for rule in signal.get("risk_rules", []):
+            current_target, event = self._evaluate_risk_rule(
+                current_date=current_date,
+                ticker=ticker,
+                data=data,
+                signal=signal,
+                rule=rule,
+                current_target=current_target,
+                base_target=base_target,
+            )
+            if event is not None:
+                events.append(event)
+        return current_target, events
+
+    def _evaluate_trigger_rule(
+        self,
+        *,
+        current_date: str,
+        ticker: str,
+        data: Any,
+        signal: dict[str, Any],
+        bucket: str,
+        trigger: dict[str, Any],
+        current_target: float,
+        base_target: float,
+    ) -> tuple[float, dict[str, Any] | None]:
+        rule_key = self._rule_key(signal, bucket, trigger)
+        if rule_key in self._triggered_rule_keys:
+            return current_target, None
+        observed_value = self._metric_value(data, str(trigger.get("metric", "")), ticker)
+        if observed_value is None:
+            if rule_key not in self._unsupported_rule_keys:
+                self._unsupported_rule_keys.add(rule_key)
+                self.unsupported_trigger_count += 1
+            return current_target, None
+        if not self._compare_value(observed_value, trigger.get("op"), trigger.get("threshold")):
+            return current_target, None
+        new_target = self._apply_trigger_action(trigger, current_target, base_target)
+        if new_target is None or abs(new_target - current_target) <= 1e-12:
+            return current_target, None
+        self._triggered_rule_keys.add(rule_key)
+        return new_target, {
+            "date": current_date,
+            "ticker": ticker,
+            "kind": bucket.replace("_triggers", ""),
+            "metric": trigger.get("metric"),
+            "op": trigger.get("op"),
+            "threshold": trigger.get("threshold"),
+            "observed_value": round(float(observed_value), 6),
+            "action": trigger.get("action"),
+            "resulting_target_pct": round(new_target * 100, 4),
+            "note": str(trigger.get("note", "")),
+        }
+
+    def _evaluate_risk_rule(
+        self,
+        *,
+        current_date: str,
+        ticker: str,
+        data: Any,
+        signal: dict[str, Any],
+        rule: dict[str, Any],
+        current_target: float,
+        base_target: float,
+    ) -> tuple[float, dict[str, Any] | None]:
+        rule_key = self._rule_key(signal, "risk_rules", rule)
+        if rule_key in self._triggered_rule_keys:
+            return current_target, None
+        observed_value = self._metric_value(data, str(rule.get("metric", "")), ticker)
+        if observed_value is None:
+            if rule_key not in self._unsupported_rule_keys:
+                self._unsupported_rule_keys.add(rule_key)
+                self.unsupported_trigger_count += 1
+            return current_target, None
+        if not self._compare_value(observed_value, rule.get("op"), rule.get("threshold")):
+            return current_target, None
+        new_target = self._apply_risk_action(rule, current_target, base_target)
+        if new_target is None or abs(new_target - current_target) <= 1e-12:
+            return current_target, None
+        self._triggered_rule_keys.add(rule_key)
+        return new_target, {
+            "date": current_date,
+            "ticker": ticker,
+            "kind": "risk",
+            "metric": rule.get("metric"),
+            "op": rule.get("op"),
+            "threshold": rule.get("threshold"),
+            "observed_value": round(float(observed_value), 6),
+            "action": rule.get("action"),
+            "resulting_target_pct": round(new_target * 100, 4),
+            "note": str(rule.get("note", "")),
+        }
+
+    def _rule_key(self, signal: dict[str, Any], bucket: str, rule: dict[str, Any]) -> str:
+        return json.dumps(
+            {
+                "ticker": signal.get("ticker"),
+                "decision_date": signal.get("decision_date"),
+                "bucket": bucket,
+                "rule": rule,
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+
+    def _metric_value(self, data: Any, metric: str, ticker: str) -> float | None:
+        normalized = (metric or "").strip().lower()
+        if not normalized:
+            return None
+        if normalized in {"close", "open", "high", "low", "volume"}:
+            line = getattr(data, normalized, None)
+            if line is None:
+                return None
+            return float(line[0])
+        if normalized in {"weight", "weight_pct", "current_weight_pct"}:
+            return float(self._current_weights().get(ticker, 0.0) * 100)
+        if normalized == "pnl_pct":
+            position = self.getposition(data)
+            if not position.size or float(position.price) <= 0:
+                return None
+            return (float(data.close[0]) / float(position.price) - 1.0) * 100
+        sma_match = re.fullmatch(r"(?:sma|ma)_(\d+)|close_(\d+)_sma", normalized)
+        if sma_match:
+            window = int(next(value for value in sma_match.groups() if value))
+            closes = list(data.close.get(size=window))
+            if len(closes) < window:
+                return None
+            return float(sum(closes) / window)
+        volume_match = re.fullmatch(r"volume_ratio_(\d+)d?", normalized)
+        if volume_match:
+            window = int(volume_match.group(1))
+            volumes = list(data.volume.get(size=window))
+            if len(volumes) < window:
+                return None
+            average_volume = sum(volumes) / window
+            if average_volume <= 0:
+                return None
+            return float(volumes[-1] / average_volume)
+        return None
+
+    def _compare_value(self, value: float, op: Any, threshold: Any) -> bool:
+        if op == "in_range":
+            if not isinstance(threshold, (tuple, list)) or len(threshold) != 2:
+                return False
+            low, high = float(threshold[0]), float(threshold[1])
+            return min(low, high) <= value <= max(low, high)
+        if isinstance(threshold, (tuple, list)):
+            return False
+        threshold_value = float(threshold)
+        if op == "<":
+            return value < threshold_value
+        if op == "<=":
+            return value <= threshold_value
+        if op == ">":
+            return value > threshold_value
+        if op == ">=":
+            return value >= threshold_value
+        if op == "==":
+            return abs(value - threshold_value) <= 1e-9
+        return False
+
+    def _apply_trigger_action(self, trigger: dict[str, Any], current_target: float, base_target: float) -> float | None:
+        action = str(trigger.get("action", "")).strip().lower()
+        target_override = trigger.get("target_weight_pct")
+        target_fraction = float(target_override) / 100 if target_override is not None else None
+        delta_value = trigger.get("delta_pct")
+        delta_fraction = float(delta_value) / 100 if delta_value is not None else None
+        if action == "add":
+            if target_fraction is not None:
+                return target_fraction
+            if delta_fraction is not None:
+                return current_target + delta_fraction
+            return None
+        if action == "reduce":
+            if target_fraction is not None:
+                return target_fraction
+            if delta_fraction is not None:
+                return max(0.0, current_target - delta_fraction)
+            return None
+        if action == "exit":
+            return 0.0
+        if action == "rebalance":
+            if target_fraction is not None:
+                return target_fraction
+            return base_target
+        return None
+
+    def _apply_risk_action(self, rule: dict[str, Any], current_target: float, base_target: float) -> float | None:
+        action = str(rule.get("action", "")).strip().lower()
+        max_weight_pct = rule.get("max_weight_pct")
+        min_weight_pct = rule.get("min_weight_pct")
+        if action == "cap":
+            if max_weight_pct is None:
+                return None
+            return min(current_target, float(max_weight_pct) / 100)
+        if action == "floor":
+            if min_weight_pct is None:
+                return None
+            return max(current_target, float(min_weight_pct) / 100)
+        if action == "exit":
+            return 0.0
+        if action == "hold":
+            return base_target
+        return None
+
+    def _normalize_target_weights(self, weights: dict[str, float]) -> dict[str, float]:
+        sanitized = {
+            ticker: max(0.0, float(weight))
+            for ticker, weight in weights.items()
+        }
+        max_total = max(0.0, 1.0 - float(self.p.cash_buffer_pct))
+        total_weight = sum(sanitized.values())
+        if total_weight > max_total > 0:
+            scale = max_total / total_weight
+            sanitized = {
+                ticker: weight * scale
+                for ticker, weight in sanitized.items()
+            }
+        return sanitized
+
+    def _weights_equal(self, left: dict[str, float], right: dict[str, float]) -> bool:
+        universe = set(left) | set(right)
+        return all(abs(float(left.get(ticker, 0.0)) - float(right.get(ticker, 0.0))) <= 1e-9 for ticker in universe)
+
+    def _next_trading_date(self, current_date: str) -> str:
+        trading_dates = list(self.p.trading_dates or [])
+        if current_date not in trading_dates:
+            return current_date
+        index = trading_dates.index(current_date)
+        if index + 1 < len(trading_dates):
+            return trading_dates[index + 1]
+        return current_date
+
 
 def run_candidate_pool_backtest(
     graph,
@@ -904,20 +1453,23 @@ def run_candidate_pool_backtest(
     timing = _validate_execution_timing(execution_timing)
     loader = price_loader or _load_price_frame
     loader_end_date = _extend_loader_end_date(end_date, timing)
-    price_cache = {
-        ticker: _normalize_price_frame(loader(ticker, start_date, loader_end_date), ticker)
-        for ticker in unique_tickers
-    }
+    missing_price_rows = 0
+    price_cache: dict[str, pd.DataFrame] = {}
+    for ticker in unique_tickers:
+        raw_frame = loader(ticker, start_date, loader_end_date)
+        missing_price_rows += _count_missing_price_rows(raw_frame, timing)
+        price_cache[ticker] = _normalize_price_frame(raw_frame, ticker)
     benchmarks = _normalize_benchmark_list(graph, unique_tickers, benchmark_tickers)
     benchmark_price_cache: dict[str, pd.DataFrame] = {}
     for benchmark in benchmarks:
         if benchmark == EQUAL_WEIGHT_BENCHMARK:
             continue
-        benchmark_price_cache[benchmark] = (
-            price_cache[benchmark]
-            if benchmark in price_cache
-            else _normalize_price_frame(loader(benchmark, start_date, loader_end_date), benchmark)
-        )
+        if benchmark in price_cache:
+            benchmark_price_cache[benchmark] = price_cache[benchmark]
+            continue
+        raw_frame = loader(benchmark, start_date, loader_end_date)
+        missing_price_rows += _count_missing_price_rows(raw_frame, timing)
+        benchmark_price_cache[benchmark] = _normalize_price_frame(raw_frame, benchmark)
     reference_dates = [
         ts.strftime("%Y-%m-%d")
         for ts in price_cache[unique_tickers[0]]
@@ -968,6 +1520,7 @@ def run_candidate_pool_backtest(
         tickers=unique_tickers,
         rebalance_dates=set(rebalance_dates),
         execution_dates=execution_dates,
+        trading_dates=reference_dates,
         top_k=max(1, int(top_k)),
         execution_timing=timing,
         cash_buffer_pct=float(cash_buffer_pct),
@@ -977,7 +1530,9 @@ def run_candidate_pool_backtest(
     cerebro.addanalyzer(bt.analyzers.DrawDown, _name="drawdown")
     cerebro.addanalyzer(bt.analyzers.SharpeRatio_A, _name="sharpe")
     cerebro.addanalyzer(bt.analyzers.TradeAnalyzer, _name="trades")
-    results = cerebro.run()
+    with backtest_health_context():
+        results = cerebro.run()
+        routing_health = get_backtest_health_state()
     strategy = results[0]
 
     analyzer_outputs = {
@@ -1012,6 +1567,13 @@ def run_candidate_pool_backtest(
                 float(initial_cash),
             )
         )
+    health = _build_health_metrics(
+        timing,
+        strategy.rebalance_records,
+        missing_price_rows,
+        strategy.unsupported_trigger_count,
+        routing_health,
+    )
 
     return BacktraderBacktestResult(
         tickers=unique_tickers,
@@ -1034,6 +1596,7 @@ def run_candidate_pool_backtest(
         orders=strategy.order_records,
         trades=strategy.trade_records,
         analyzer_outputs=analyzer_outputs,
+        health=health,
     )
 
 
@@ -1065,6 +1628,7 @@ def save_backtest_result(result: BacktraderBacktestResult, output_dir: str | Pat
             {
                 "metrics": asdict(result.metrics),
                 "benchmark_metrics": [asdict(record) for record in result.benchmark_metrics],
+                "health": asdict(result.health),
                 "analyzer_outputs": result.analyzer_outputs,
             },
             ensure_ascii=False,

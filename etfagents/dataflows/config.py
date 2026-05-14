@@ -19,9 +19,19 @@ class BacktestContext:
     as_of_date: str | None = None
 
 
+@dataclass
+class BacktestHealthState:
+    clamp_hits: int = 0
+    blocked_calls: int = 0
+
+
 _backtest_context_var: ContextVar[BacktestContext] = ContextVar(
     "etfagents_backtest_context",
     default=BacktestContext(),
+)
+_backtest_health_var: ContextVar[BacktestHealthState | None] = ContextVar(
+    "etfagents_backtest_health",
+    default=None,
 )
 
 
@@ -66,6 +76,32 @@ def set_backtest_context(as_of_date: str | None, mode: str = "backtest") -> None
 def clear_backtest_context() -> None:
     """Clear the backtest/runtime date context for the current execution context."""
     _backtest_context_var.set(BacktestContext())
+
+
+def get_backtest_health_state() -> BacktestHealthState:
+    state = _backtest_health_var.get()
+    if state is None:
+        return BacktestHealthState()
+    return copy.deepcopy(state)
+
+
+def increment_backtest_health(*, clamp_hit: bool = False, blocked_call: bool = False) -> None:
+    state = _backtest_health_var.get()
+    if state is None:
+        return
+    if clamp_hit:
+        state.clamp_hits += 1
+    if blocked_call:
+        state.blocked_calls += 1
+
+
+@contextmanager
+def backtest_health_context():
+    token = _backtest_health_var.set(BacktestHealthState())
+    try:
+        yield _backtest_health_var.get()
+    finally:
+        _backtest_health_var.reset(token)
 
 
 @contextmanager

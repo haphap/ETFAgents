@@ -126,6 +126,28 @@ _RATING_PATTERNS = (
 
 
 @dataclass
+class BacktestTriggerRule:
+    metric: str
+    op: str
+    threshold: float | tuple[float, float]
+    action: str
+    delta_pct: float | None = None
+    target_weight_pct: float | None = None
+    note: str = ""
+
+
+@dataclass
+class BacktestRiskRule:
+    metric: str
+    op: str
+    threshold: float | tuple[float, float]
+    action: str
+    max_weight_pct: float | None = None
+    min_weight_pct: float | None = None
+    note: str = ""
+
+
+@dataclass
 class BacktestSignal:
     ticker: str
     decision_date: str
@@ -138,6 +160,11 @@ class BacktestSignal:
     weight_source: str = "unknown"
     execution_delay: str = "next_open"
     starter_size_text: str = ""
+    add_triggers: list[BacktestTriggerRule] = field(default_factory=list)
+    reduce_triggers: list[BacktestTriggerRule] = field(default_factory=list)
+    exit_triggers: list[BacktestTriggerRule] = field(default_factory=list)
+    rebalance_triggers: list[BacktestTriggerRule] = field(default_factory=list)
+    risk_rules: list[BacktestRiskRule] = field(default_factory=list)
     add_conditions: list[str] = field(default_factory=list)
     reduce_conditions: list[str] = field(default_factory=list)
     exit_conditions: list[str] = field(default_factory=list)
@@ -300,6 +327,11 @@ def build_candidate_backtest_signal(
             "weight_source": "candidate_pool",
             "execution_delay": signal.get("execution_delay", "next_open"),
             "starter_size_text": signal.get("starter_size_text", ""),
+            "add_triggers": list(signal.get("add_triggers", [])),
+            "reduce_triggers": list(signal.get("reduce_triggers", [])),
+            "exit_triggers": list(signal.get("exit_triggers", [])),
+            "rebalance_triggers": list(signal.get("rebalance_triggers", [])),
+            "risk_rules": list(signal.get("risk_rules", [])),
             "add_conditions": list(signal.get("add_conditions", [])),
             "reduce_conditions": list(signal.get("reduce_conditions", [])),
             "exit_conditions": list(signal.get("exit_conditions", [])),
@@ -341,6 +373,7 @@ def _build_signal(
         target_weight_min_pct = round(low, 4)
         target_weight_max_pct = round(high, 4)
 
+    structured_triggers = _extract_structured_trigger_rules(structured_plan)
     starter_sentence = _extract_sentence_with_hints(primary_text, _INITIAL_HINTS)
     add_conditions = _collect_conditions(primary_text, secondary_text, hints=_ADD_HINTS)
     reduce_conditions = _collect_conditions(primary_text, secondary_text, hints=_REDUCE_HINTS)
@@ -370,6 +403,11 @@ def _build_signal(
         weight_source=weight_source,
         execution_delay=_extract_execution_timing(structured_plan),
         starter_size_text=starter_sentence,
+        add_triggers=structured_triggers["add_triggers"],
+        reduce_triggers=structured_triggers["reduce_triggers"],
+        exit_triggers=structured_triggers["exit_triggers"],
+        rebalance_triggers=structured_triggers["rebalance_triggers"],
+        risk_rules=structured_triggers["risk_rules"],
         add_conditions=add_conditions,
         reduce_conditions=reduce_conditions,
         exit_conditions=exit_conditions,
@@ -398,12 +436,87 @@ def _extract_structured_target_weight(structured_plan: Any) -> tuple[tuple[float
     return None, "unknown"
 
 
+def _extract_structured_trigger_rules(structured_plan: Any) -> dict[str, Any]:
+    if structured_plan is None:
+        return {
+            "add_triggers": [],
+            "reduce_triggers": [],
+            "exit_triggers": [],
+            "rebalance_triggers": [],
+            "risk_rules": [],
+        }
+
+    return {
+        "add_triggers": _coerce_trigger_rules(getattr(structured_plan, "add_triggers", [])),
+        "reduce_triggers": _coerce_trigger_rules(getattr(structured_plan, "reduce_triggers", [])),
+        "exit_triggers": _coerce_trigger_rules(getattr(structured_plan, "exit_triggers", [])),
+        "rebalance_triggers": _coerce_trigger_rules(getattr(structured_plan, "rebalance_triggers", [])),
+        "risk_rules": _coerce_risk_rules(getattr(structured_plan, "risk_controls", [])),
+    }
+
+
 def _extract_execution_timing(structured_plan: Any) -> str:
     raw_value = getattr(structured_plan, "execution_timing", None) if structured_plan is not None else None
     normalized = str(raw_value or "").strip().lower()
     if normalized in {"same_close", "next_open", "next_close"}:
         return normalized
     return "next_open"
+
+
+def _coerce_trigger_rules(raw_rules: Any) -> list[BacktestTriggerRule]:
+    normalized: list[BacktestTriggerRule] = []
+    for rule in raw_rules or []:
+        metric = str(getattr(rule, "metric", "")).strip().lower()
+        op = str(getattr(rule, "op", "")).strip()
+        action = str(getattr(rule, "action", "")).strip().lower()
+        threshold = _coerce_threshold(getattr(rule, "threshold", None))
+        if not metric or not op or not action or threshold is None:
+            continue
+        normalized.append(
+            BacktestTriggerRule(
+                metric=metric,
+                op=op,
+                threshold=threshold,
+                action=action,
+                delta_pct=_coerce_pct(getattr(rule, "delta_pct", None)),
+                target_weight_pct=_coerce_pct(getattr(rule, "target_weight_pct", None)),
+                note=str(getattr(rule, "note", "")).strip(),
+            )
+        )
+    return normalized
+
+
+def _coerce_risk_rules(raw_rules: Any) -> list[BacktestRiskRule]:
+    normalized: list[BacktestRiskRule] = []
+    for rule in raw_rules or []:
+        metric = str(getattr(rule, "metric", "")).strip().lower()
+        op = str(getattr(rule, "op", "")).strip()
+        action = str(getattr(rule, "action", "")).strip().lower()
+        threshold = _coerce_threshold(getattr(rule, "threshold", None))
+        if not metric or not op or not action or threshold is None:
+            continue
+        normalized.append(
+            BacktestRiskRule(
+                metric=metric,
+                op=op,
+                threshold=threshold,
+                action=action,
+                max_weight_pct=_coerce_pct(getattr(rule, "max_weight_pct", None)),
+                min_weight_pct=_coerce_pct(getattr(rule, "min_weight_pct", None)),
+                note=str(getattr(rule, "note", "")).strip(),
+            )
+        )
+    return normalized
+
+
+def _coerce_threshold(value: Any) -> float | tuple[float, float] | None:
+    if isinstance(value, (tuple, list)) and len(value) == 2:
+        low = _coerce_pct(value[0])
+        high = _coerce_pct(value[1])
+        if low is None or high is None:
+            return None
+        return (min(low, high), max(low, high))
+    return _coerce_pct(value)
 
 
 def _extract_target_weight(*texts: str) -> tuple[tuple[float, float] | None, str]:

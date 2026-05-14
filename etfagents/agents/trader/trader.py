@@ -78,7 +78,8 @@ def create_trader(llm):
                     "Do not stack multiple rating labels with different wording. "
                      "If you mention timing in Chinese output, translate it as 时机 or 节奏 instead of leaving the English word. "
                      "For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三. "
-                     "In addition to the prose sections, populate the structured fields target_weight_pct, target_weight_band, and execution_timing whenever the evidence supports them; use null only when the reports truly do not justify a reliable value. "
+                     "In addition to the prose sections, populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values. "
+                     "For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct. "
                      f"{_trader_detail_instruction()} "
                      f"{get_localized_execution_bias_instruction()}{get_language_instruction()}"
                  ),

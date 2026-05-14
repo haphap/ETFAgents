@@ -126,7 +126,8 @@ def create_portfolio_manager(llm, memory=None):
 Your response must evaluate all three risk perspectives before giving a position. Do not jump straight to the final recommendation.
 For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三.
 Output only the finished report. Never copy, quote, or paraphrase the writing rules or bullet instructions from this prompt into the answer, and do not repeat a section heading once it has already appeared.
-Populate the structured fields target_weight_pct, target_weight_band, and execution_timing whenever the evidence supports them; use null only when the reports truly do not justify a reliable value.
+Populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values.
+For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct.
 
 Use this exact output order with Markdown headings:
 ## {localize_label("Debate Conclusion", "辩论结论")}

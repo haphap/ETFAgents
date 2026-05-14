@@ -2319,6 +2319,77 @@ def backtest(
             f"{benchmark_metric.excess_cumulative_return:.4%}",
         )
     console.print(summary)
+    health = Table(title=_localize_cli_label("Backtest Health", "回测健康检查"), box=box.SIMPLE_HEAVY)
+    health.add_column(_localize_cli_label("Check", "检查项"))
+    health.add_column(_localize_cli_label("Value", "数值"))
+    health.add_row(
+        _localize_cli_label("Weight Sources", "权重来源分布"),
+        ", ".join(
+            f"{key}:{value}"
+            for key, value in sorted(result.health.weight_source_counts.items())
+        ) or "none",
+    )
+    health.add_row(
+        _localize_cli_label("Structured Triggers", "结构化触发器"),
+        str(result.health.structured_trigger_count),
+    )
+    health.add_row(
+        _localize_cli_label("Risk Rules", "风控规则"),
+        str(result.health.risk_rule_count),
+    )
+    health.add_row(
+        _localize_cli_label("Trigger Buckets", "触发器分布"),
+        ", ".join(
+            f"{key}:{value}"
+            for key, value in sorted(result.health.trigger_bucket_counts.items())
+        ),
+    )
+    health.add_row(
+        _localize_cli_label("Timing Mismatches", "执行时点不一致"),
+        str(result.health.execution_timing_mismatch_count),
+    )
+    health.add_row(
+        _localize_cli_label("Clamp Hits", "日期夹紧次数"),
+        str(result.health.clamp_hit_count),
+    )
+    health.add_row(
+        _localize_cli_label("Missing Price Rows", "缺失价格行"),
+        str(result.health.missing_price_rows),
+    )
+    health.add_row(
+        _localize_cli_label("Unsupported Trigger Rules", "不支持的触发器规则"),
+        str(result.health.unsupported_trigger_count),
+    )
+    console.print(health)
+
+    rebalance_summary = Table(title=_localize_cli_label("Rebalance Summary", "调仓摘要"), box=box.SIMPLE_HEAVY)
+    rebalance_summary.add_column(_localize_cli_label("Decision", "决策日"))
+    rebalance_summary.add_column(_localize_cli_label("Reason", "原因"))
+    rebalance_summary.add_column(_localize_cli_label("Tickers", "标的"))
+    rebalance_summary.add_column(_localize_cli_label("Weights", "权重"))
+    rebalance_summary.add_column(_localize_cli_label("Ratings", "评级"))
+    rebalance_summary.add_column(_localize_cli_label("Weight Source", "权重来源"))
+    rebalance_summary.add_column(_localize_cli_label("Period Return", "阶段收益"))
+    rebalance_summary.add_column(_localize_cli_label("Cum Return", "累计收益"))
+    for row in result.rebalance_summary_rows():
+        rebalance_summary.add_row(
+            row["decision_date"],
+            row["reason"],
+            ", ".join(row["selected_tickers"]) or "-",
+            ", ".join(
+                f"{ticker}:{weight:.1%}"
+                for ticker, weight in row["weights"].items()
+                if weight > 1e-9
+            ) or "-",
+            ", ".join(
+                f"{ticker}:{rating}"
+                for ticker, rating in row["ratings"].items()
+            ) or "-",
+            ", ".join(row["weight_sources"]) or "unknown",
+            f"{row['period_return']:.4%}",
+            f"{row['cumulative_return']:.4%}",
+        )
+    console.print(rebalance_summary)
     console.print(
         f"[green]{_localize_cli_label('Artifacts saved', '结果已保存')}:[/green] {Path(output_dir).resolve()}"
     )

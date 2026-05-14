@@ -6,6 +6,7 @@ from .signals import (
     build_trader_backtest_signal,
 )
 from .backtrader_engine import (
+    BacktestHealthMetrics,
     BacktraderBacktestResult,
     BacktraderBenchmarkMetrics,
     BacktraderBenchmarkRecord,
@@ -23,6 +24,7 @@ from .cache import BacktestSignalStore
 
 __all__ = [
     "BacktestSignal",
+    "BacktestHealthMetrics",
     "BacktraderBacktestResult",
     "BacktraderBenchmarkMetrics",
     "BacktraderBenchmarkRecord",

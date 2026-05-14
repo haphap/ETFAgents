@@ -40,7 +40,7 @@ from .qlib_local import (
 from .exceptions import DataVendorUnavailable
 
 # Configuration and routing logic
-from .config import get_backtest_context, get_config
+from .config import get_backtest_context, get_config, increment_backtest_health
 
 # Tools organized by category
 TOOLS_CATEGORIES = {
@@ -276,6 +276,7 @@ def _apply_backtest_date_bounds(method: str, args: tuple, kwargs: dict):
         return args, kwargs
 
     if method in _UNBOUNDED_BACKTEST_METHODS:
+        increment_backtest_health(blocked_call=True)
         raise RuntimeError(
             f"Backtest mode does not allow '{method}' because the invocation has no date boundary to clamp."
         )
@@ -295,9 +296,12 @@ def _apply_backtest_date_bounds(method: str, args: tuple, kwargs: dict):
             end_value = bounded_args[end_idx]
         clamped_end = _clamp_iso_date(end_value, as_of_date)
         if start_value and _parse_iso_date(start_value) > _parse_iso_date(clamped_end):
+            increment_backtest_health(blocked_call=True)
             raise RuntimeError(
                 f"Backtest mode rejected '{method}' because start_date {start_value} is after clamped end_date {clamped_end}."
             )
+        if str(end_value or "") != str(clamped_end):
+            increment_backtest_health(clamp_hit=True)
         bounded_args = _replace_arg(bounded_args, end_idx, clamped_end)
         if had_end_kw or len(bounded_args) <= end_idx:
             bounded_kwargs["end_date"] = clamped_end
@@ -314,6 +318,8 @@ def _apply_backtest_date_bounds(method: str, args: tuple, kwargs: dict):
         if current_value is None and len(bounded_args) > current_idx:
             current_value = bounded_args[current_idx]
         clamped_current = _clamp_iso_date(current_value, as_of_date)
+        if str(current_value or "") != str(clamped_current):
+            increment_backtest_health(clamp_hit=True)
         bounded_args = _replace_arg(bounded_args, current_idx, clamped_current)
         if had_curr_kw or len(bounded_args) <= current_idx:
             bounded_kwargs["curr_date"] = clamped_current
@@ -321,6 +327,7 @@ def _apply_backtest_date_bounds(method: str, args: tuple, kwargs: dict):
             bounded_kwargs.pop("curr_date", None)
         return bounded_args, bounded_kwargs
 
+    increment_backtest_health(blocked_call=True)
     raise RuntimeError(
         f"Backtest mode has no date-bound routing rule for '{method}', so the call was blocked."
     )

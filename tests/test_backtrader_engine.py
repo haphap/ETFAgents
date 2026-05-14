@@ -294,6 +294,153 @@ class BacktraderEngineTests(unittest.TestCase):
             self.assertTrue((output_dir / "report.html").exists())
             self.assertTrue((output_dir / "signals" / "2026-01-02.json").exists())
 
+    def test_backtrader_consumes_structured_triggers_for_dynamic_rebalance(self):
+        graph = object.__new__(EtfAgentsGraph)
+
+        def _fake_ranked(_tickers, trade_date):
+            self.assertEqual(trade_date, "2026-01-02")
+            return [
+                {
+                    "ticker": "159915.SZ",
+                    "rating": "BUY",
+                    "suggested_weight_pct": 100.0,
+                    "backtest_signal": {
+                        "ticker": "159915.SZ",
+                        "decision_date": "2026-01-02",
+                        "source": "candidate_pool",
+                        "source_section": "positioning_recommendation",
+                        "rating": "BUY",
+                        "target_weight_pct": 60.0,
+                        "target_weight_min_pct": 60.0,
+                        "target_weight_max_pct": 60.0,
+                        "weight_source": "structured_field",
+                        "execution_delay": "next_close",
+                        "starter_size_text": "",
+                        "add_triggers": [
+                            {
+                                "metric": "close",
+                                "op": ">",
+                                "threshold": 105.0,
+                                "action": "add",
+                                "delta_pct": 20.0,
+                                "target_weight_pct": None,
+                                "note": "price breakout",
+                            }
+                        ],
+                        "reduce_triggers": [
+                            {
+                                "metric": "share_change_pct",
+                                "op": ">",
+                                "threshold": 1.0,
+                                "action": "reduce",
+                                "delta_pct": 5.0,
+                                "target_weight_pct": None,
+                                "note": "unsupported vendor metric",
+                            }
+                        ],
+                        "exit_triggers": [],
+                        "rebalance_triggers": [],
+                        "risk_rules": [
+                            {
+                                "metric": "pnl_pct",
+                                "op": ">",
+                                "threshold": 5.0,
+                                "action": "cap",
+                                "max_weight_pct": 70.0,
+                                "min_weight_pct": None,
+                                "note": "cap after large gain",
+                            }
+                        ],
+                        "add_conditions": [],
+                        "reduce_conditions": [],
+                        "exit_conditions": [],
+                        "rebalance_conditions": [],
+                        "risk_controls": [],
+                        "monitoring_points": [],
+                        "signal_text_snapshot": "structured trigger plan",
+                    },
+                },
+                {
+                    "ticker": "510300.SH",
+                    "rating": "HOLD",
+                    "suggested_weight_pct": 40.0,
+                    "backtest_signal": {
+                        "ticker": "510300.SH",
+                        "decision_date": "2026-01-02",
+                        "source": "candidate_pool",
+                        "source_section": "positioning_recommendation",
+                        "rating": "HOLD",
+                        "target_weight_pct": 40.0,
+                        "target_weight_min_pct": 40.0,
+                        "target_weight_max_pct": 40.0,
+                        "weight_source": "structured_field",
+                        "execution_delay": "same_close",
+                        "starter_size_text": "",
+                        "add_triggers": [],
+                        "reduce_triggers": [],
+                        "exit_triggers": [],
+                        "rebalance_triggers": [],
+                        "risk_rules": [],
+                        "add_conditions": [],
+                        "reduce_conditions": [],
+                        "exit_conditions": [],
+                        "rebalance_conditions": [],
+                        "risk_controls": [],
+                        "monitoring_points": [],
+                        "signal_text_snapshot": "supporting position",
+                    },
+                },
+            ]
+
+        graph.analyze_candidate_pool = _fake_ranked
+
+        def _fake_prices(ticker, _start_date, _end_date):
+            frames = {
+                "159915.SZ": pd.DataFrame(
+                    {
+                        "Date": pd.to_datetime(["2026-01-02", "2026-01-06", "2026-01-08", "2026-01-10"]),
+                        "Open": [100.0, 106.0, 108.0, 109.0],
+                        "High": [100.0, 106.0, 108.0, 109.0],
+                        "Low": [100.0, 106.0, 108.0, 109.0],
+                        "Close": [100.0, 106.0, 108.0, 109.0],
+                        "Volume": [1_000, 1_100, 1_200, 1_300],
+                    }
+                ),
+                "510300.SH": pd.DataFrame(
+                    {
+                        "Date": pd.to_datetime(["2026-01-02", "2026-01-06", "2026-01-08", "2026-01-10"]),
+                        "Open": [100.0, 100.0, 101.0, 101.0],
+                        "High": [100.0, 100.0, 101.0, 101.0],
+                        "Low": [100.0, 100.0, 101.0, 101.0],
+                        "Close": [100.0, 100.0, 101.0, 101.0],
+                        "Volume": [1_000, 1_000, 1_000, 1_000],
+                    }
+                ),
+            }
+            return frames[ticker]
+
+        result = run_candidate_pool_backtest(
+            graph,
+            ["159915.SZ", "510300.SH"],
+            "2026-01-02",
+            "2026-01-10",
+            rebalance_interval_days=10,
+            top_k=2,
+            execution_timing="same_close",
+            initial_cash=1_000_000.0,
+            price_loader=_fake_prices,
+        )
+
+        self.assertEqual([record.reason for record in result.rebalances], ["scheduled", "trigger"])
+        self.assertEqual(len(result.rebalances[1].trigger_events), 2)
+        self.assertGreater(result.rebalances[1].weights["159915.SZ"], 0.6)
+        self.assertEqual(result.health.dynamic_rebalance_count, 1)
+        self.assertEqual(result.health.structured_trigger_count, 2)
+        self.assertEqual(result.health.risk_rule_count, 1)
+        self.assertEqual(result.health.execution_timing_mismatch_count, 1)
+        self.assertEqual(result.health.unsupported_trigger_count, 1)
+        self.assertEqual(result.rebalance_summary_rows()[1]["reason"], "trigger")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,12 @@
 import unittest
 
-from etfagents.agents.schemas import PortfolioDecision, PortfolioRating, TraderProposal
+from etfagents.agents.schemas import (
+    PortfolioDecision,
+    PortfolioRating,
+    RiskRule,
+    TraderProposal,
+    Trigger,
+)
 from etfagents.backtest.signals import (
     build_candidate_backtest_signal,
     build_portfolio_backtest_signal,
@@ -25,6 +31,26 @@ class BacktestSignalTests(unittest.TestCase):
                 rating=PortfolioRating.HOLD,
                 target_weight_band=(20.0, 25.0),
                 execution_timing="next_close",
+                add_triggers=[
+                    Trigger(
+                        metric="close",
+                        op=">",
+                        threshold=2.08,
+                        action="add",
+                        delta_pct=5.0,
+                        note="突破关键价格后加仓",
+                    )
+                ],
+                risk_controls=[
+                    RiskRule(
+                        metric="pnl_pct",
+                        op=">",
+                        threshold=8.0,
+                        action="cap",
+                        max_weight_pct=25.0,
+                        note="浮盈过高时封顶",
+                    )
+                ],
             ),
         )
 
@@ -32,6 +58,8 @@ class BacktestSignalTests(unittest.TestCase):
         self.assertEqual(signal["weight_source"], "structured_field")
         self.assertAlmostEqual(signal["target_weight_pct"], 22.5)
         self.assertEqual(signal["execution_delay"], "next_close")
+        self.assertEqual(signal["add_triggers"][0]["metric"], "close")
+        self.assertEqual(signal["risk_rules"][0]["action"], "cap")
         self.assertIn("再分两次加仓", "\n".join(signal["add_conditions"]))
         self.assertIn("先减仓", "\n".join(signal["reduce_conditions"]))
         self.assertIn("继续跟踪份额变化与资金流", "\n".join(signal["monitoring_points"]))
@@ -51,6 +79,16 @@ class BacktestSignalTests(unittest.TestCase):
                 rating=PortfolioRating.HOLD,
                 target_weight_pct=18.0,
                 execution_timing="same_close",
+                rebalance_triggers=[
+                    Trigger(
+                        metric="sma_20",
+                        op="<",
+                        threshold=2.05,
+                        action="rebalance",
+                        target_weight_pct=12.0,
+                        note="跌破中期均线则回到低配",
+                    )
+                ],
                 snapshot_stance="持有",
                 snapshot_new_and_rebuttal="新增了仓位上限与风险约束。",
                 snapshot_to_verify="继续跟踪均线、成交量和份额变化。",
@@ -61,6 +99,7 @@ class BacktestSignalTests(unittest.TestCase):
         self.assertEqual(signal["weight_source"], "structured_field")
         self.assertAlmostEqual(signal["target_weight_pct"], 18.0)
         self.assertEqual(signal["execution_delay"], "same_close")
+        self.assertEqual(signal["rebalance_triggers"][0]["action"], "rebalance")
         self.assertIn("上调一个档位", "\n".join(signal["add_conditions"]))
         self.assertIn("强制降仓", "\n".join(signal["reduce_conditions"]))
         self.assertIn("按周度再平衡复核", "\n".join(signal["rebalance_conditions"]))
@@ -101,6 +140,21 @@ class BacktestSignalTests(unittest.TestCase):
                     "weight_source": "parsed_target_range",
                     "execution_delay": "next_open",
                     "starter_size_text": "",
+                    "add_triggers": [
+                        {
+                            "metric": "close",
+                            "op": ">",
+                            "threshold": 2.1,
+                            "action": "add",
+                            "delta_pct": 5.0,
+                            "target_weight_pct": None,
+                            "note": "突破后加仓",
+                        }
+                    ],
+                    "reduce_triggers": [],
+                    "exit_triggers": [],
+                    "rebalance_triggers": [],
+                    "risk_rules": [],
                     "add_conditions": ["若放量突破则继续加仓。"],
                     "reduce_conditions": [],
                     "exit_conditions": [],
@@ -118,6 +172,7 @@ class BacktestSignalTests(unittest.TestCase):
         self.assertEqual(signal["target_weight_pct"], 50.0)
         self.assertEqual(signal["target_weight_min_pct"], 50.0)
         self.assertEqual(signal["target_weight_max_pct"], 50.0)
+        self.assertEqual(signal["add_triggers"][0]["action"], "add")
         self.assertIn("若放量突破则继续加仓。", signal["add_conditions"])
 
 
