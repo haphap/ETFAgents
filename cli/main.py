@@ -1127,6 +1127,21 @@ def _normalize_ticker_list(raw_text: str) -> list[str]:
     return tickers
 
 
+def _normalize_benchmark_list(raw_text: str | None) -> list[str]:
+    benchmarks: list[str] = []
+    seen: set[str] = set()
+    for part in re.split(r"[\n,]+", raw_text or ""):
+        value = part.strip()
+        if not value:
+            continue
+        benchmark = "equal_weight_pool" if value.lower() == "equal_weight_pool" else value.upper()
+        if benchmark in seen:
+            continue
+        seen.add(benchmark)
+        benchmarks.append(benchmark)
+    return benchmarks
+
+
 def get_tickers():
     """Get one ETF ticker or a comma-separated candidate pool from user input."""
     while True:
@@ -2209,6 +2224,11 @@ def run_analysis(checkpoint: bool = False):
 @app.command()
 def backtest(
     tickers: str = typer.Option(..., "--tickers", help="Comma-separated ETF tickers."),
+    benchmark_tickers: Optional[str] = typer.Option(
+        None,
+        "--benchmark-tickers",
+        help="Comma-separated benchmark tickers, or include equal_weight_pool for a synthetic equal-weight pool benchmark.",
+    ),
     start_date: str = typer.Option(..., "--start-date", help="Backtest start date (YYYY-MM-DD)."),
     end_date: str = typer.Option(..., "--end-date", help="Backtest end date (YYYY-MM-DD)."),
     rebalance_interval_days: int = typer.Option(21, "--rebalance-interval-days", min=1),
@@ -2227,6 +2247,7 @@ def backtest(
     save_path: Optional[Path] = typer.Option(None, "--save-path"),
 ):
     normalized_tickers = _normalize_ticker_list(tickers)
+    normalized_benchmarks = _normalize_benchmark_list(benchmark_tickers)
     if not normalized_tickers:
         console.print("[red]Error: Please provide at least one ETF ticker.[/red]")
         raise typer.Exit(code=1)
@@ -2270,6 +2291,7 @@ def backtest(
             commission=commission,
             slippage_perc=slippage_perc,
             cash_buffer_pct=cash_buffer_pct,
+            benchmark_tickers=normalized_benchmarks or None,
         )
         save_backtest_result(result, output_dir)
 
@@ -2283,6 +2305,17 @@ def backtest(
     summary.add_row(_localize_cli_label("Sharpe", "夏普"), f"{result.metrics.sharpe_ratio:.4f}")
     summary.add_row(_localize_cli_label("Average Turnover", "平均换手"), f"{result.metrics.average_turnover:.4f}")
     summary.add_row(_localize_cli_label("Trades", "成交笔数"), str(result.metrics.total_trades))
+    if result.benchmarks:
+        summary.add_row(_localize_cli_label("Benchmarks", "基准"), ", ".join(result.benchmarks))
+    for benchmark_metric in result.benchmark_metrics:
+        summary.add_row(
+            _localize_cli_label(f"{benchmark_metric.benchmark} Return", f"{benchmark_metric.benchmark} 收益"),
+            f"{benchmark_metric.cumulative_return:.4%}",
+        )
+        summary.add_row(
+            _localize_cli_label(f"{benchmark_metric.benchmark} Excess", f"{benchmark_metric.benchmark} 超额"),
+            f"{benchmark_metric.excess_cumulative_return:.4%}",
+        )
     console.print(summary)
     console.print(
         f"[green]{_localize_cli_label('Artifacts saved', '结果已保存')}:[/green] {Path(output_dir).resolve()}"

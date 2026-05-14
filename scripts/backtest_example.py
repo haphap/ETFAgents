@@ -13,6 +13,11 @@ from etfagents.graph.etf_graph import EtfAgentsGraph
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run an ETFAgents candidate-pool backtest.")
     parser.add_argument("--tickers", required=True, help="Comma-separated ETF tickers.")
+    parser.add_argument(
+        "--benchmark-tickers",
+        default=None,
+        help="Comma-separated benchmark tickers, or equal_weight_pool for a synthetic equal-weight benchmark.",
+    )
     parser.add_argument("--start-date", required=True, help="Backtest start date (YYYY-MM-DD).")
     parser.add_argument("--end-date", required=True, help="Backtest end date (YYYY-MM-DD).")
     parser.add_argument("--rebalance-interval-days", type=int, default=21)
@@ -34,6 +39,21 @@ def parse_args() -> argparse.Namespace:
 
 def normalize_tickers(raw_text: str) -> list[str]:
     return [ticker.strip().upper() for ticker in raw_text.split(",") if ticker.strip()]
+
+
+def normalize_benchmarks(raw_text: str | None) -> list[str]:
+    benchmarks: list[str] = []
+    seen: set[str] = set()
+    for part in (raw_text or "").split(","):
+        value = part.strip()
+        if not value:
+            continue
+        benchmark = "equal_weight_pool" if value.lower() == "equal_weight_pool" else value.upper()
+        if benchmark in seen:
+            continue
+        seen.add(benchmark)
+        benchmarks.append(benchmark)
+    return benchmarks
 
 
 def main() -> None:
@@ -60,6 +80,7 @@ def main() -> None:
         commission=args.commission,
         slippage_perc=args.slippage_perc,
         cash_buffer_pct=args.cash_buffer_pct,
+        benchmark_tickers=normalize_benchmarks(args.benchmark_tickers) or None,
     )
     if args.save_path:
         save_backtest_result(result, Path(args.save_path))

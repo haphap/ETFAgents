@@ -196,6 +196,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
         commission: float = 0.0,
         slippage_perc: float = 0.0,
         cash_buffer_pct: float = 0.0,
+        benchmark_tickers: list[str] | None = None,
         price_loader=None,
     ) -> BacktraderBacktestResult:
         """Run a formal Backtrader backtest over ranked ETF candidate-pool decisions."""
@@ -211,5 +212,6 @@ class EtfAgentsGraph(TradingAgentsGraph):
             commission=commission,
             slippage_perc=slippage_perc,
             cash_buffer_pct=cash_buffer_pct,
+            benchmark_tickers=benchmark_tickers,
             price_loader=price_loader,
         )

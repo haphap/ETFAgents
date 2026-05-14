@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import timedelta
+from html import escape
 from io import StringIO
 import json
 from math import sqrt
@@ -12,6 +13,8 @@ import backtrader as bt
 import pandas as pd
 from etfagents.dataflows.config import backtest_context
 from etfagents.dataflows.interface import route_to_vendor
+
+EQUAL_WEIGHT_BENCHMARK = "equal_weight_pool"
 
 
 @dataclass
@@ -63,6 +66,27 @@ class BacktraderPositionRecord:
 
 
 @dataclass
+class BacktraderBenchmarkRecord:
+    date: str
+    benchmark: str
+    nav: float
+
+
+@dataclass
+class BacktraderBenchmarkMetrics:
+    benchmark: str
+    final_value: float
+    cumulative_return: float
+    annualized_return: float
+    annualized_volatility: float
+    max_drawdown: float
+    sharpe_ratio: float
+    excess_cumulative_return: float
+    tracking_error: float
+    information_ratio: float
+
+
+@dataclass
 class BacktraderMetrics:
     final_value: float
     cumulative_return: float
@@ -77,6 +101,7 @@ class BacktraderMetrics:
 @dataclass
 class BacktraderBacktestResult:
     tickers: list[str]
+    benchmarks: list[str]
     start_date: str
     end_date: str
     rebalance_interval_days: int
@@ -90,6 +115,8 @@ class BacktraderBacktestResult:
     rebalances: list[BacktraderRebalanceRecord]
     nav: list[BacktraderNavRecord]
     positions: list[BacktraderPositionRecord]
+    benchmark_nav: list[BacktraderBenchmarkRecord]
+    benchmark_metrics: list[BacktraderBenchmarkMetrics]
     orders: list[BacktraderOrderRecord]
     trades: list[BacktraderTradeRecord]
     analyzer_outputs: dict[str, Any]
@@ -260,22 +287,22 @@ def _extract_trade_count(analysis: Any) -> int:
         return 0
 
 
-def _compute_metrics(
-    nav_records: list[BacktraderNavRecord],
-    initial_cash: float,
-    rebalances: list[BacktraderRebalanceRecord],
-    trade_count: int,
-) -> BacktraderMetrics:
-    final_value = nav_records[-1].nav if nav_records else initial_cash
-    cumulative_return = final_value / initial_cash - 1 if initial_cash else 0.0
+def _compute_return_series(nav_values: list[float]) -> pd.Series:
     returns = pd.Series(
         [
-            nav_records[index].nav / nav_records[index - 1].nav - 1
-            for index in range(1, len(nav_records))
-            if nav_records[index - 1].nav
+            nav_values[index] / nav_values[index - 1] - 1
+            for index in range(1, len(nav_values))
+            if nav_values[index - 1]
         ],
         dtype="float64",
     )
+    return returns
+
+
+def _compute_nav_statistics(nav_values: list[float], initial_cash: float) -> dict[str, float]:
+    final_value = nav_values[-1] if nav_values else initial_cash
+    cumulative_return = final_value / initial_cash - 1 if initial_cash else 0.0
+    returns = _compute_return_series(nav_values)
     periods = max(len(returns), 1)
     annualized_return = (1 + cumulative_return) ** (252 / periods) - 1 if periods and final_value > 0 else 0.0
     annualized_volatility = float(returns.std(ddof=0) * sqrt(252)) if not returns.empty else 0.0
@@ -284,25 +311,352 @@ def _compute_metrics(
         if len(returns) > 1 and returns.std(ddof=0) > 0
         else 0.0
     )
-    nav_series = pd.Series([record.nav for record in nav_records], dtype="float64")
+    nav_series = pd.Series(nav_values, dtype="float64")
     running_peak = nav_series.cummax()
     drawdowns = nav_series / running_peak - 1 if not nav_series.empty else pd.Series(dtype="float64")
     max_drawdown = float(drawdowns.min()) if not drawdowns.empty else 0.0
+    return {
+        "final_value": float(final_value),
+        "cumulative_return": float(cumulative_return),
+        "annualized_return": float(annualized_return),
+        "annualized_volatility": float(annualized_volatility),
+        "max_drawdown": max_drawdown,
+        "sharpe_ratio": float(sharpe_ratio),
+    }
+
+
+def _compute_metrics(
+    nav_records: list[BacktraderNavRecord],
+    initial_cash: float,
+    rebalances: list[BacktraderRebalanceRecord],
+    trade_count: int,
+) -> BacktraderMetrics:
+    stats = _compute_nav_statistics([record.nav for record in nav_records], initial_cash)
     average_turnover = (
         float(pd.Series([record.turnover for record in rebalances[1:]], dtype="float64").mean())
         if len(rebalances) > 1
         else 0.0
     )
     return BacktraderMetrics(
-        final_value=float(final_value),
-        cumulative_return=float(cumulative_return),
-        annualized_return=float(annualized_return),
-        annualized_volatility=float(annualized_volatility),
-        max_drawdown=max_drawdown,
-        sharpe_ratio=float(sharpe_ratio),
+        final_value=stats["final_value"],
+        cumulative_return=stats["cumulative_return"],
+        annualized_return=stats["annualized_return"],
+        annualized_volatility=stats["annualized_volatility"],
+        max_drawdown=stats["max_drawdown"],
+        sharpe_ratio=stats["sharpe_ratio"],
         total_trades=int(trade_count),
         average_turnover=float(average_turnover),
     )
+
+
+def _normalize_benchmark_list(
+    graph: Any,
+    tickers: list[str],
+    benchmark_tickers: list[str] | None,
+) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    requested = benchmark_tickers
+    if requested is None:
+        if len(tickers) > 1:
+            requested = [EQUAL_WEIGHT_BENCHMARK]
+        elif hasattr(graph, "_resolve_benchmark_ticker"):
+            requested = [str(graph._resolve_benchmark_ticker(tickers[0]))]
+        else:
+            requested = []
+    for raw in requested:
+        value = str(raw or "").strip()
+        if not value:
+            continue
+        benchmark = (
+            EQUAL_WEIGHT_BENCHMARK
+            if value.lower() == EQUAL_WEIGHT_BENCHMARK
+            else value.upper()
+        )
+        if benchmark in seen:
+            continue
+        seen.add(benchmark)
+        normalized.append(benchmark)
+    return normalized
+
+
+def _align_close_series(df: pd.DataFrame, nav_dates: list[str], ticker: str) -> pd.Series:
+    nav_frame = pd.DataFrame({"Date": pd.to_datetime(nav_dates)})
+    price_frame = _normalize_price_frame(df, ticker)[["Date", "Close"]].sort_values("Date")
+    aligned = pd.merge_asof(nav_frame, price_frame, on="Date", direction="backward")
+    if aligned["Close"].isna().any():
+        raise ValueError(
+            f"Benchmark '{ticker}' does not have prices available for the full backtest window."
+        )
+    return aligned["Close"].astype("float64")
+
+
+def _build_benchmark_nav_records(
+    benchmark: str,
+    nav_dates: list[str],
+    initial_cash: float,
+    price_cache: dict[str, pd.DataFrame],
+) -> list[BacktraderBenchmarkRecord]:
+    if not nav_dates:
+        return []
+
+    if benchmark == EQUAL_WEIGHT_BENCHMARK:
+        aligned = pd.DataFrame(
+            {
+                ticker: _align_close_series(frame, nav_dates, ticker)
+                for ticker, frame in price_cache.items()
+            }
+        )
+        base = aligned.iloc[0]
+        if (base <= 0).any():
+            raise ValueError("Equal-weight benchmark requires positive starting prices.")
+        nav_values = aligned.divide(base).mean(axis=1) * float(initial_cash)
+    else:
+        closes = _align_close_series(price_cache[benchmark], nav_dates, benchmark)
+        base_price = float(closes.iloc[0])
+        if base_price <= 0:
+            raise ValueError(f"Benchmark '{benchmark}' requires a positive starting price.")
+        nav_values = closes / base_price * float(initial_cash)
+
+    return [
+        BacktraderBenchmarkRecord(
+            date=decision_date,
+            benchmark=benchmark,
+            nav=float(nav_value),
+        )
+        for decision_date, nav_value in zip(nav_dates, nav_values.tolist())
+    ]
+
+
+def _compute_benchmark_metrics(
+    benchmark: str,
+    benchmark_nav: list[BacktraderBenchmarkRecord],
+    portfolio_nav: list[BacktraderNavRecord],
+    initial_cash: float,
+) -> BacktraderBenchmarkMetrics:
+    benchmark_values = [record.nav for record in benchmark_nav]
+    portfolio_values = [record.nav for record in portfolio_nav]
+    stats = _compute_nav_statistics(benchmark_values, initial_cash)
+    benchmark_returns = _compute_return_series(benchmark_values)
+    portfolio_returns = _compute_return_series(portfolio_values)
+    active_returns = portfolio_returns - benchmark_returns
+    tracking_error = (
+        float(active_returns.std(ddof=0) * sqrt(252))
+        if len(active_returns) > 1 and active_returns.std(ddof=0) > 0
+        else 0.0
+    )
+    information_ratio = (
+        float((active_returns.mean() / active_returns.std(ddof=0)) * sqrt(252))
+        if len(active_returns) > 1 and active_returns.std(ddof=0) > 0
+        else 0.0
+    )
+    return BacktraderBenchmarkMetrics(
+        benchmark=benchmark,
+        final_value=stats["final_value"],
+        cumulative_return=stats["cumulative_return"],
+        annualized_return=stats["annualized_return"],
+        annualized_volatility=stats["annualized_volatility"],
+        max_drawdown=stats["max_drawdown"],
+        sharpe_ratio=stats["sharpe_ratio"],
+        excess_cumulative_return=(
+            portfolio_nav[-1].nav / initial_cash - 1 - stats["cumulative_return"]
+            if portfolio_nav and initial_cash
+            else 0.0
+        ),
+        tracking_error=tracking_error,
+        information_ratio=information_ratio,
+    )
+
+
+def _format_pct(value: float) -> str:
+    return f"{float(value):.2%}"
+
+
+def _build_backtest_summary_markdown(result: BacktraderBacktestResult) -> str:
+    lines = [
+        "# Backtest Summary",
+        "",
+        "## Run Configuration",
+        "",
+        f"- Tickers: {', '.join(result.tickers)}",
+        f"- Benchmarks: {', '.join(result.benchmarks) if result.benchmarks else 'None'}",
+        f"- Window: {result.start_date} -> {result.end_date}",
+        f"- Rebalance interval days: {result.rebalance_interval_days}",
+        f"- Top K: {result.top_k}",
+        f"- Execution timing: {result.execution_timing}",
+        f"- Initial cash: {result.initial_cash:,.2f}",
+        f"- Commission: {_format_pct(result.commission)}",
+        f"- Slippage: {_format_pct(result.slippage_perc)}",
+        f"- Cash buffer: {_format_pct(result.cash_buffer_pct)}",
+        "",
+        "## Strategy Metrics",
+        "",
+        "| Metric | Value |",
+        "| --- | --- |",
+        f"| Cumulative return | {_format_pct(result.metrics.cumulative_return)} |",
+        f"| Annualized return | {_format_pct(result.metrics.annualized_return)} |",
+        f"| Annualized volatility | {_format_pct(result.metrics.annualized_volatility)} |",
+        f"| Max drawdown | {_format_pct(result.metrics.max_drawdown)} |",
+        f"| Sharpe ratio | {result.metrics.sharpe_ratio:.4f} |",
+        f"| Average turnover | {result.metrics.average_turnover:.4f} |",
+        f"| Total trades | {result.metrics.total_trades} |",
+        "",
+    ]
+    if result.benchmark_metrics:
+        lines.extend(
+            [
+                "## Benchmark Comparison",
+                "",
+                "| Benchmark | Return | Excess Return | Max Drawdown | Tracking Error | Information Ratio |",
+                "| --- | --- | --- | --- | --- | --- |",
+            ]
+        )
+        for metric in result.benchmark_metrics:
+            lines.append(
+                "| "
+                f"{metric.benchmark} | {_format_pct(metric.cumulative_return)} | "
+                f"{_format_pct(metric.excess_cumulative_return)} | {_format_pct(metric.max_drawdown)} | "
+                f"{_format_pct(metric.tracking_error)} | {metric.information_ratio:.4f} |"
+            )
+        lines.append("")
+    return "\n".join(lines).strip() + "\n"
+
+
+def _build_nav_chart_svg(result: BacktraderBacktestResult) -> str:
+    series_map: dict[str, list[tuple[str, float]]] = {
+        "strategy": [(record.date, record.nav) for record in result.nav]
+    }
+    for benchmark in result.benchmarks:
+        series_map[benchmark] = [
+            (record.date, record.nav)
+            for record in result.benchmark_nav
+            if record.benchmark == benchmark
+        ]
+
+    width = 960
+    height = 360
+    padding_left = 64
+    padding_right = 24
+    padding_top = 24
+    padding_bottom = 48
+    palette = ["#2563eb", "#dc2626", "#16a34a", "#9333ea", "#ea580c"]
+    all_values = [value for series in series_map.values() for _, value in series]
+    min_value = min(all_values) if all_values else 0.0
+    max_value = max(all_values) if all_values else 1.0
+    if max_value <= min_value:
+        max_value = min_value + 1.0
+    chart_width = width - padding_left - padding_right
+    chart_height = height - padding_top - padding_bottom
+
+    def _point(index: int, value: float, total_points: int) -> tuple[float, float]:
+        x = padding_left if total_points <= 1 else padding_left + chart_width * index / (total_points - 1)
+        y = padding_top + chart_height * (1 - (value - min_value) / (max_value - min_value))
+        return x, y
+
+    lines: list[str] = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-label="Backtest NAV chart">',
+        '<rect width="100%" height="100%" fill="#ffffff"/>',
+        f'<line x1="{padding_left}" y1="{padding_top}" x2="{padding_left}" y2="{padding_top + chart_height}" stroke="#cbd5e1" />',
+        f'<line x1="{padding_left}" y1="{padding_top + chart_height}" x2="{padding_left + chart_width}" y2="{padding_top + chart_height}" stroke="#cbd5e1" />',
+    ]
+
+    for idx, label in enumerate(series_map):
+        series = series_map[label]
+        if not series:
+            continue
+        color = palette[idx % len(palette)]
+        points = [
+            _point(point_index, value, len(series))
+            for point_index, (_, value) in enumerate(series)
+        ]
+        path = " ".join(
+            f"{'M' if point_index == 0 else 'L'} {x:.2f} {y:.2f}"
+            for point_index, (x, y) in enumerate(points)
+        )
+        lines.append(f'<path d="{path}" fill="none" stroke="{color}" stroke-width="2.5"/>')
+        last_x, last_y = points[-1]
+        lines.append(
+            f'<text x="{last_x + 8:.2f}" y="{last_y + 4:.2f}" font-size="12" fill="{color}">{escape(label)}</text>'
+        )
+
+    if result.nav:
+        first_date = result.nav[0].date
+        last_date = result.nav[-1].date
+        lines.append(
+            f'<text x="{padding_left}" y="{height - 16}" font-size="12" fill="#475569">{escape(first_date)}</text>'
+        )
+        lines.append(
+            f'<text x="{padding_left + chart_width - 72}" y="{height - 16}" font-size="12" fill="#475569">{escape(last_date)}</text>'
+        )
+    lines.append(
+        f'<text x="16" y="{padding_top + 12}" font-size="12" fill="#475569">{min_value:,.0f} - {max_value:,.0f}</text>'
+    )
+    lines.append("</svg>")
+    return "\n".join(lines)
+
+
+def _build_backtest_report_html(result: BacktraderBacktestResult) -> str:
+    benchmark_rows = "".join(
+        (
+            "<tr>"
+            f"<td>{escape(metric.benchmark)}</td>"
+            f"<td>{_format_pct(metric.cumulative_return)}</td>"
+            f"<td>{_format_pct(metric.excess_cumulative_return)}</td>"
+            f"<td>{_format_pct(metric.max_drawdown)}</td>"
+            f"<td>{_format_pct(metric.tracking_error)}</td>"
+            f"<td>{metric.information_ratio:.4f}</td>"
+            "</tr>"
+        )
+        for metric in result.benchmark_metrics
+    ) or '<tr><td colspan="6">No benchmark configured.</td></tr>'
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ETFAgents Backtest Report</title>
+  <style>
+    body {{ font-family: Arial, sans-serif; margin: 24px; color: #0f172a; }}
+    h1, h2 {{ margin-bottom: 8px; }}
+    .grid {{ display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 16px 0 24px; }}
+    .card {{ border: 1px solid #cbd5e1; border-radius: 8px; padding: 12px; background: #f8fafc; }}
+    table {{ border-collapse: collapse; width: 100%; margin-top: 12px; }}
+    th, td {{ border: 1px solid #cbd5e1; padding: 8px; text-align: left; }}
+    th {{ background: #e2e8f0; }}
+    .meta {{ color: #475569; }}
+  </style>
+</head>
+<body>
+  <h1>ETFAgents Backtest Report</h1>
+  <p class="meta">{escape(', '.join(result.tickers))} | {escape(result.start_date)} to {escape(result.end_date)} | {escape(result.execution_timing)}</p>
+  <div class="grid">
+    <div class="card"><strong>Cumulative return</strong><br />{_format_pct(result.metrics.cumulative_return)}</div>
+    <div class="card"><strong>Annualized return</strong><br />{_format_pct(result.metrics.annualized_return)}</div>
+    <div class="card"><strong>Max drawdown</strong><br />{_format_pct(result.metrics.max_drawdown)}</div>
+    <div class="card"><strong>Sharpe ratio</strong><br />{result.metrics.sharpe_ratio:.4f}</div>
+    <div class="card"><strong>Average turnover</strong><br />{result.metrics.average_turnover:.4f}</div>
+    <div class="card"><strong>Total trades</strong><br />{result.metrics.total_trades}</div>
+  </div>
+  <h2>NAV Chart</h2>
+  <img src="nav_chart.svg" alt="Backtest NAV chart" />
+  <h2>Benchmark Comparison</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Benchmark</th>
+        <th>Return</th>
+        <th>Excess Return</th>
+        <th>Max Drawdown</th>
+        <th>Tracking Error</th>
+        <th>Information Ratio</th>
+      </tr>
+    </thead>
+    <tbody>
+      {benchmark_rows}
+    </tbody>
+  </table>
+</body>
+</html>
+"""
 
 
 class ETFAgentsBacktraderStrategy(bt.Strategy):
@@ -521,6 +875,7 @@ def run_candidate_pool_backtest(
     commission: float = 0.0,
     slippage_perc: float = 0.0,
     cash_buffer_pct: float = 0.0,
+    benchmark_tickers: list[str] | None = None,
     price_loader: Callable[[str, str, str], pd.DataFrame] | None = None,
 ) -> BacktraderBacktestResult:
     unique_tickers = list(dict.fromkeys(tickers))
@@ -534,6 +889,16 @@ def run_candidate_pool_backtest(
         ticker: _normalize_price_frame(loader(ticker, start_date, loader_end_date), ticker)
         for ticker in unique_tickers
     }
+    benchmarks = _normalize_benchmark_list(graph, unique_tickers, benchmark_tickers)
+    benchmark_price_cache: dict[str, pd.DataFrame] = {}
+    for benchmark in benchmarks:
+        if benchmark == EQUAL_WEIGHT_BENCHMARK:
+            continue
+        benchmark_price_cache[benchmark] = (
+            price_cache[benchmark]
+            if benchmark in price_cache
+            else _normalize_price_frame(loader(benchmark, start_date, loader_end_date), benchmark)
+        )
     reference_dates = [
         ts.strftime("%Y-%m-%d")
         for ts in price_cache[unique_tickers[0]]
@@ -608,9 +973,29 @@ def run_candidate_pool_backtest(
         strategy.rebalance_records,
         trade_count,
     )
+    nav_dates = [record.date for record in strategy.nav_records]
+    benchmark_nav: list[BacktraderBenchmarkRecord] = []
+    benchmark_metrics: list[BacktraderBenchmarkMetrics] = []
+    for benchmark in benchmarks:
+        records = _build_benchmark_nav_records(
+            benchmark,
+            nav_dates,
+            float(initial_cash),
+            price_cache if benchmark == EQUAL_WEIGHT_BENCHMARK else benchmark_price_cache,
+        )
+        benchmark_nav.extend(records)
+        benchmark_metrics.append(
+            _compute_benchmark_metrics(
+                benchmark,
+                records,
+                strategy.nav_records,
+                float(initial_cash),
+            )
+        )
 
     return BacktraderBacktestResult(
         tickers=unique_tickers,
+        benchmarks=benchmarks,
         start_date=start_date,
         end_date=end_date,
         rebalance_interval_days=max(1, int(rebalance_interval_days)),
@@ -624,6 +1009,8 @@ def run_candidate_pool_backtest(
         rebalances=strategy.rebalance_records,
         nav=strategy.nav_records,
         positions=strategy.position_records,
+        benchmark_nav=benchmark_nav,
+        benchmark_metrics=benchmark_metrics,
         orders=strategy.order_records,
         trades=strategy.trade_records,
         analyzer_outputs=analyzer_outputs,
@@ -637,6 +1024,7 @@ def save_backtest_result(result: BacktraderBacktestResult, output_dir: str | Pat
         json.dumps(
             {
                 "tickers": result.tickers,
+                "benchmarks": result.benchmarks,
                 "start_date": result.start_date,
                 "end_date": result.end_date,
                 "rebalance_interval_days": result.rebalance_interval_days,
@@ -656,6 +1044,7 @@ def save_backtest_result(result: BacktraderBacktestResult, output_dir: str | Pat
         json.dumps(
             {
                 "metrics": asdict(result.metrics),
+                "benchmark_metrics": [asdict(record) for record in result.benchmark_metrics],
                 "analyzer_outputs": result.analyzer_outputs,
             },
             ensure_ascii=False,
@@ -668,6 +1057,7 @@ def save_backtest_result(result: BacktraderBacktestResult, output_dir: str | Pat
         encoding="utf-8",
     )
     pd.DataFrame(asdict(record) for record in result.nav).to_csv(path / "nav.csv", index=False)
+    pd.DataFrame(asdict(record) for record in result.benchmark_nav).to_csv(path / "benchmarks.csv", index=False)
     pd.DataFrame(asdict(record) for record in result.positions).to_csv(path / "positions.csv", index=False)
     pd.DataFrame(asdict(record) for record in result.orders).to_csv(path / "orders.csv", index=False)
     pd.DataFrame(asdict(record) for record in result.trades).to_csv(path / "trades.csv", index=False)
@@ -678,4 +1068,16 @@ def save_backtest_result(result: BacktraderBacktestResult, output_dir: str | Pat
             json.dumps(record.signals, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+    (path / "summary.md").write_text(
+        _build_backtest_summary_markdown(result),
+        encoding="utf-8",
+    )
+    (path / "nav_chart.svg").write_text(
+        _build_nav_chart_svg(result),
+        encoding="utf-8",
+    )
+    (path / "report.html").write_text(
+        _build_backtest_report_html(result),
+        encoding="utf-8",
+    )
     return path

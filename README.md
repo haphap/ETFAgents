@@ -133,6 +133,7 @@ backtest = graph.backtest_candidate_pool(
     "2026-01-02",
     "2026-03-31",
     execution_timing="same_close",
+    benchmark_tickers=["equal_weight_pool"],
 )
 print(backtest.metrics.cumulative_return)
 ```
@@ -141,7 +142,10 @@ There is also a thin script example:
 
 ```bash
 python scripts/backtest_example.py --help
+etfagents backtest --tickers 510300.SH,159915.SZ --benchmark-tickers equal_weight_pool --start-date 2026-01-02 --end-date 2026-03-31
 ```
+
+Saved backtest artifacts now include `summary.md`, `report.html`, `nav_chart.svg`, `benchmarks.csv`, and the existing machine-readable JSON/CSV outputs.
 
 ## Repository Layout
 
