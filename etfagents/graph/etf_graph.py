@@ -23,6 +23,7 @@ from etfagents.backtest.signals import (
     build_candidate_backtest_signal,
     build_state_backtest_signal,
 )
+from etfagents.backtest.cache import BacktestSignalStore
 from etfagents.backtest.backtrader_engine import (
     BacktraderBacktestResult,
     run_candidate_pool_backtest,
@@ -108,35 +109,43 @@ class EtfAgentsGraph(TradingAgentsGraph):
     def analyze_candidate_pool(self, tickers: list[str], trade_date: str) -> list[dict[str, object]]:
         """Analyze a candidate pool sequentially and rank it by final allocation rating."""
         results: list[dict[str, object]] = []
+        cache = BacktestSignalStore(
+            getattr(self, "config", self.DEFAULT_GRAPH_CONFIG),
+            getattr(self, "selected_analysts", self.DEFAULT_SELECTED_ANALYSTS),
+        )
         for ticker in tickers:
+            cached = cache.get(ticker, trade_date)
+            if cached is not None:
+                results.append(dict(cached))
+                continue
             final_state, rating = self.propagate(ticker, trade_date)
-            results.append(
-                {
-                    "ticker": ticker,
-                    "rating": rating,
-                    "score": str(self._RATING_SCORE.get(rating, 0)),
-                    "research_allocation_plan": get_state_value(
-                        final_state,
-                        "research_allocation_plan",
-                        "",
-                    ),
-                    "trader_allocation_plan": get_state_value(
-                        final_state,
-                        "trader_allocation_plan",
-                        "",
-                    ),
-                    "final_allocation_decision": get_state_value(
-                        final_state,
-                        "final_allocation_decision",
-                        "",
-                    ),
-                    "backtest_signal": build_state_backtest_signal(
-                        final_state,
-                        default_ticker=ticker,
-                        default_trade_date=trade_date,
-                    ),
-                }
-            )
+            result = {
+                "ticker": ticker,
+                "rating": rating,
+                "score": str(self._RATING_SCORE.get(rating, 0)),
+                "research_allocation_plan": get_state_value(
+                    final_state,
+                    "research_allocation_plan",
+                    "",
+                ),
+                "trader_allocation_plan": get_state_value(
+                    final_state,
+                    "trader_allocation_plan",
+                    "",
+                ),
+                "final_allocation_decision": get_state_value(
+                    final_state,
+                    "final_allocation_decision",
+                    "",
+                ),
+                "backtest_signal": build_state_backtest_signal(
+                    final_state,
+                    default_ticker=ticker,
+                    default_trade_date=trade_date,
+                ),
+            }
+            cache.put(ticker, trade_date, result)
+            results.append(result)
         ranked = sorted(
             results,
             key=lambda item: (-int(item["score"]), item["ticker"]),

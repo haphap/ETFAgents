@@ -16,6 +16,7 @@ from .backtrader_engine import (
     run_candidate_pool_backtest,
     save_backtest_result,
 )
+from .cache import BacktestSignalStore
 
 __all__ = [
     "BacktestSignal",
@@ -26,6 +27,7 @@ __all__ = [
     "BacktraderPositionRecord",
     "BacktraderRebalanceRecord",
     "BacktraderTradeRecord",
+    "BacktestSignalStore",
     "build_candidate_backtest_signal",
     "build_portfolio_backtest_signal",
     "build_state_backtest_signal",

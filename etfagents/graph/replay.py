@@ -7,6 +7,7 @@ from typing import Callable
 
 import pandas as pd
 
+from etfagents.dataflows.config import backtest_context
 from etfagents.dataflows.interface import route_to_vendor
 
 
@@ -225,7 +226,8 @@ def run_candidate_pool_replay(
     cumulative_nav = 1.0
 
     for rebalance_date, window_end in zip(schedule[:-1], schedule[1:]):
-        ranked_candidates = graph.analyze_candidate_pool(unique_tickers, rebalance_date)
+        with backtest_context(rebalance_date):
+            ranked_candidates = graph.analyze_candidate_pool(unique_tickers, rebalance_date)
         weights = _normalize_candidate_weights(ranked_candidates, top_k)
         selected_tickers = list(weights.keys())
         ratings = {

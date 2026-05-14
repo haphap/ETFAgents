@@ -4,7 +4,7 @@ from contextvars import copy_context
 from unittest.mock import patch
 
 from etfagents.default_config import DEFAULT_CONFIG
-from etfagents.dataflows.config import get_config, set_config
+from etfagents.dataflows.config import backtest_context, get_config, set_config
 from etfagents.dataflows.exceptions import DataVendorUnavailable
 from etfagents.dataflows.interface import VENDOR_LIST, VENDOR_METHODS, route_to_vendor
 
@@ -233,6 +233,68 @@ class DataVendorRoutingTests(unittest.TestCase):
 
         self.assertEqual(get_config()["output_language"], "English")
         self.assertEqual(isolated.run(get_config)["output_language"], "Chinese")
+
+    def test_backtest_context_clamps_range_end_date_before_vendor_call(self):
+        cfg = self._base_config()
+        cfg["tool_vendors"] = {"get_stock_data": "tushare"}
+        set_config(cfg)
+        captured = {}
+
+        def _tushare(*args, **_kwargs):
+            captured["args"] = args
+            return "stock_tushare"
+
+        with patch.dict(
+            VENDOR_METHODS,
+            {
+                "get_stock_data": {"tushare": _tushare},
+            },
+            clear=False,
+        ):
+            with backtest_context("2024-01-15"):
+                result = route_to_vendor(
+                    "get_stock_data",
+                    "000001.SZ",
+                    "2024-01-01",
+                    "2024-01-31",
+                )
+
+        self.assertEqual(result, "stock_tushare")
+        self.assertEqual(captured["args"], ("000001.SZ", "2024-01-01", "2024-01-15"))
+
+    def test_backtest_context_clamps_curr_date_before_vendor_call(self):
+        cfg = self._base_config()
+        cfg["tool_vendors"] = {"get_global_news": "opencli"}
+        set_config(cfg)
+        captured = {}
+
+        def _opencli(*args, **_kwargs):
+            captured["args"] = args
+            return "opencli-global"
+
+        with patch.dict(
+            VENDOR_METHODS,
+            {
+                "get_global_news": {"opencli": _opencli},
+            },
+            clear=False,
+        ):
+            with backtest_context("2024-01-15"):
+                result = route_to_vendor("get_global_news", "2024-01-31", 7, 5)
+
+        self.assertEqual(result, "opencli-global")
+        self.assertEqual(captured["args"], ("2024-01-15", 7, 5))
+
+    def test_backtest_context_rejects_unbounded_method(self):
+        cfg = self._base_config()
+        cfg["tool_vendors"] = {"get_insider_transactions": "tushare"}
+        set_config(cfg)
+
+        with backtest_context("2024-01-15"):
+            with self.assertRaises(RuntimeError) as ctx:
+                route_to_vendor("get_insider_transactions", "002155.SZ")
+
+        self.assertIn("no date boundary", str(ctx.exception))
 
     def test_a_share_insider_transactions_prefers_tushare(self):
         cfg = self._base_config()

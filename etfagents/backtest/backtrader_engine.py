@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 import backtrader as bt
 import pandas as pd
+from etfagents.dataflows.config import backtest_context
 from etfagents.dataflows.interface import route_to_vendor
 
 
@@ -412,7 +413,8 @@ class ETFAgentsBacktraderStrategy(bt.Strategy):
         )
 
     def _rebalance(self, decision_date: str) -> None:
-        ranked_candidates = self.p.graph.analyze_candidate_pool(self.p.tickers, decision_date)
+        with backtest_context(decision_date):
+            ranked_candidates = self.p.graph.analyze_candidate_pool(self.p.tickers, decision_date)
         weights = _normalize_candidate_weights(ranked_candidates, self.p.top_k)
         weights = {
             ticker: weight * max(0.0, 1.0 - float(self.p.cash_buffer_pct))
