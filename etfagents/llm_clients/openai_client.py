@@ -62,16 +62,32 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
 
     # --- response handling ---
 
-    def _create_chat_result(self, response: dict, generation_info: dict | None = None):
+    def _create_chat_result(self, response, generation_info: dict | None = None):
         result = super()._create_chat_result(response, generation_info)
         # Promote reasoning_content into additional_kwargs for each
         # generation so downstream code can access the chain-of-thought.
+        # response may be a dict or an OpenAI ChatCompletion pydantic object.
+        choices = (
+            response.get("choices", [])
+            if isinstance(response, dict)
+            else getattr(response, "choices", None) or []
+        )
         for gen in result.generations:
             msg = gen.message
             if not msg or not hasattr(msg, "additional_kwargs"):
                 continue
-            for choice in response.get("choices", []):
-                rc = (choice.get("message") or {}).get("reasoning_content")
+            for choice in choices:
+                choice_msg = (
+                    choice.get("message")
+                    if isinstance(choice, dict)
+                    else getattr(choice, "message", None)
+                )
+                rc = (
+                    (choice_msg or {}).get("reasoning_content")
+                    if isinstance(choice_msg, dict)
+                    else getattr(choice_msg, "reasoning_content", None) if choice_msg
+                    else None
+                )
                 if rc:
                     msg.additional_kwargs["reasoning_content"] = rc
                     break
