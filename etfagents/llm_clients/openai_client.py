@@ -62,8 +62,8 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
 
     # --- response handling ---
 
-    def _create_chat_result(self, response: dict):
-        result = super()._create_chat_result(response)
+    def _create_chat_result(self, response: dict, generation_info: dict | None = None):
+        result = super()._create_chat_result(response, generation_info)
         # Promote reasoning_content into additional_kwargs for each
         # generation so downstream code can access the chain-of-thought.
         for gen in result.generations:
