@@ -216,6 +216,8 @@ _CURRENT_DATE_METHODS = {
 
 _UNBOUNDED_BACKTEST_METHODS = {
     "get_insider_transactions",
+    "get_news",
+    "get_global_news",
 }
 
 def get_category_for_method(method: str) -> str:

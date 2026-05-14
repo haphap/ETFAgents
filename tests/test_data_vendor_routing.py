@@ -264,26 +264,26 @@ class DataVendorRoutingTests(unittest.TestCase):
 
     def test_backtest_context_clamps_curr_date_before_vendor_call(self):
         cfg = self._base_config()
-        cfg["tool_vendors"] = {"get_global_news": "opencli"}
+        cfg["tool_vendors"] = {"get_etf_info": "tushare"}
         set_config(cfg)
         captured = {}
 
-        def _opencli(*args, **_kwargs):
+        def _tushare(*args, **_kwargs):
             captured["args"] = args
-            return "opencli-global"
+            return "etf-info"
 
         with patch.dict(
             VENDOR_METHODS,
             {
-                "get_global_news": {"opencli": _opencli},
+                "get_etf_info": {"tushare": _tushare},
             },
             clear=False,
         ):
             with backtest_context("2024-01-15"):
-                result = route_to_vendor("get_global_news", "2024-01-31", 7, 5)
+                result = route_to_vendor("get_etf_info", "510300.SH", "2024-01-31")
 
-        self.assertEqual(result, "opencli-global")
-        self.assertEqual(captured["args"], ("2024-01-15", 7, 5))
+        self.assertEqual(result, "etf-info")
+        self.assertEqual(captured["args"], ("510300.SH", "2024-01-15"))
 
     def test_backtest_context_rejects_unbounded_method(self):
         cfg = self._base_config()
@@ -293,6 +293,28 @@ class DataVendorRoutingTests(unittest.TestCase):
         with backtest_context("2024-01-15"):
             with self.assertRaises(RuntimeError) as ctx:
                 route_to_vendor("get_insider_transactions", "002155.SZ")
+
+        self.assertIn("no date boundary", str(ctx.exception))
+
+    def test_backtest_context_rejects_news_method(self):
+        cfg = self._base_config()
+        cfg["tool_vendors"] = {"get_news": "opencli"}
+        set_config(cfg)
+
+        with backtest_context("2024-01-15"):
+            with self.assertRaises(RuntimeError) as ctx:
+                route_to_vendor("get_news", "AAPL", "2024-01-01", "2024-01-31")
+
+        self.assertIn("no date boundary", str(ctx.exception))
+
+    def test_backtest_context_rejects_global_news_method(self):
+        cfg = self._base_config()
+        cfg["tool_vendors"] = {"get_global_news": "opencli"}
+        set_config(cfg)
+
+        with backtest_context("2024-01-15"):
+            with self.assertRaises(RuntimeError) as ctx:
+                route_to_vendor("get_global_news", "2024-01-31", 7, 5)
 
         self.assertIn("no date boundary", str(ctx.exception))
 
