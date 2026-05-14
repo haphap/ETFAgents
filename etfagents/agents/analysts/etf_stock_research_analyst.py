@@ -14,6 +14,7 @@ from etfagents.agents.utils.report_leads import (
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
     strip_report_title,
+    strip_qa_labels,
     strip_refine_preamble,
     strip_self_referential_meta_leads,
 )
@@ -143,6 +144,7 @@ def create_etf_stock_research_analyst(llm):
         report = normalize_chinese_role_terms(report) if report else report
         report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
         report = strip_report_title(report) if report else report
+        report = strip_qa_labels(report) if report else report
         report = strip_refine_preamble(report) if report else report
         report = strip_self_referential_meta_leads(report) if report else report
         if report and not getattr(result, "tool_calls", None):

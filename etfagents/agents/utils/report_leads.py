@@ -228,6 +228,19 @@ def strip_self_referential_meta_leads(report: str) -> str:
     return collapse_blank_lines(cleaned)
 
 
+_QA_LABEL_RE = re.compile(
+    r"(?m)^\s*(?:对交易应该怎么做|这意味着什么|这意味著什么|对交易应怎么做|交易建议|交易含义|市场含义|配置含义)[：:][^\n]*\n?"
+)
+
+
+def strip_qa_labels(report: str) -> str:
+    """Remove Q&A-style label lines like '对交易应该怎么做：...' from report text."""
+    if not report:
+        return ""
+    cleaned = _QA_LABEL_RE.sub("", report)
+    return collapse_blank_lines(cleaned)
+
+
 _REFINE_PREAMBLE_RE = re.compile(
     r"(?m)^\s*"
     r"(?:以下是|根据|按照|依据|参照|基于)"

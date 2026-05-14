@@ -19,6 +19,7 @@ from etfagents.agents.utils.report_leads import (
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
     strip_report_title,
+    strip_qa_labels,
     strip_refine_preamble,
     strip_self_referential_meta_leads,
 )
@@ -115,7 +116,8 @@ def create_etf_market_analyst(llm):
             "- 导语段落必须高于小节层面：综合方向、动量质量、资金确认与交易含义，不得简单复述下方小节内容。\n"
             '- 使用上述精确的三段章节结构，不得引入"核心交易信号"、"结论依据"等额外标题。\n'
             '- 若使用"多头排列"、"金叉"、"发散"、"背离"、"放量突破"等技术术语，必须立即用通俗语言解释并说明交易含义，不得出现"标准多头发散形态"等未解释行话。\n'
-            '- 每个主要信号之后必须回答两个问题："这意味着什么"和"对交易应该怎么做"。\n'
+            '- 每个主要信号之后必须回答两个问题："这意味着什么"和"对交易应该怎么做"。'
+            '但不得将"这意味着什么""对交易应该怎么做"作为标题或标签输出，应将答案自然融入段落中。\n'
             '- 第三部分采用段落式表达，不得使用"判断："、"证据："、"关键价位："、"条件情景："等标签。信号、判断、证据、信心水平与触发路径应融入完整的策略段落中。\n'
             "- 反面示例（禁止）：'判断：偏多。关键价位：448-450。条件情景：若放量突破则继续加仓。'\n"
             "- 正面示例（目标风格）：'当前448-450一带既是20日均线与前期密集成交区重叠的支撑带，也是判断这轮偏多结构是否仍有效的第一道关口。若价格回踩后成交量没有明显失速、且VWMA继续向上抬升，说明资金承接并未破坏，基准情景仍是震荡后继续上攻；反之，一旦跌破该区间且量能放大为抛压主导，就应把情景切换为结构转弱并优先减仓。'\n\n"
@@ -176,6 +178,7 @@ def create_etf_market_analyst(llm):
         report = normalize_chinese_role_terms(report) if report else report
         report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
         report = strip_report_title(report) if report else report
+        report = strip_qa_labels(report) if report else report
         report = strip_refine_preamble(report) if report else report
         report = strip_self_referential_meta_leads(report) if report else report
         if report and not getattr(result, "tool_calls", None):
