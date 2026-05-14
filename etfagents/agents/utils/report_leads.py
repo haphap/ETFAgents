@@ -228,3 +228,20 @@ def strip_self_referential_meta_leads(report: str) -> str:
     return collapse_blank_lines(cleaned)
 
 
+_REFINE_PREAMBLE_RE = re.compile(
+    r"(?m)^\s*"
+    r"(?:以下是|根据|按照|依据|参照|基于)"
+    r"[^。\n]{0,40}"
+    r"(?:修正|修订|修改|改进|完善|优化|调整|评审|审核)"
+    r"[^。\n]*[。\n]?"
+)
+
+
+def strip_refine_preamble(report: str) -> str:
+    """Remove meta-commentary from the refine step, e.g. '以下是根据评审标准修正后的完整报告...'."""
+    if not report:
+        return ""
+    cleaned = _REFINE_PREAMBLE_RE.sub("", report)
+    return collapse_blank_lines(cleaned)
+
+
