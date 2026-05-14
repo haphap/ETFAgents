@@ -20,8 +20,7 @@ from etfagents.agents.utils.agent_utils import (
     synthesize_side_report,
 )
 from etfagents.agents.utils.analysis_memory import (
-    build_memory_prompt_block,
-    get_memory_usage_instruction,
+    build_memory_prompt_section,
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value, with_state_aliases
 from etfagents.agents.schemas import PortfolioDecision, render_portfolio_decision
@@ -105,7 +104,7 @@ def create_portfolio_manager(llm, memory=None):
         conservative_snapshot_display = risk_debate_state.get("conservative_snapshot", "")
         neutral_snapshot_display = risk_debate_state.get("neutral_snapshot", "")
         debate_brief = risk_debate_state.get("debate_brief", "")
-        memory_block = build_memory_prompt_block(state, role="portfolio_manager")
+        memory_section = build_memory_prompt_section(state, role="portfolio_manager")
 
         # Load full snapshots from files
         aggressive_snapshot_full = load_snapshot_file(risk_debate_state.get("aggressive_snapshot_path", "")) or aggressive_snapshot_display
@@ -125,8 +124,8 @@ def create_portfolio_manager(llm, memory=None):
                 else "Lessons from resolved past decisions (internal only; do not quote verbatim)"
             )
             lessons_block = f"**{lessons_header}:**\n{past_context}\n\n"
-        if memory_block:
-            lessons_block += f"{memory_block}\n\n{get_memory_usage_instruction()}\n\n"
+        if memory_section:
+            lessons_block += f"{memory_section}\n\n"
 
         prompt = f"""As the Portfolio Manager, synthesize the full risk debate and deliver the final ETF portfolio allocation decision.
 

@@ -55,6 +55,12 @@ DEFAULT_CONFIG = {
     "method_brief_char_limit": 1500,
     "playbook_active_days": 90,
     "playbook_max_active_per_scope": 20,
+    "role_brief_specs": {
+        "analyst": ["summary", "key_drivers", "watch_items", "invalidation_signals"],
+        "trader": ["trader_summary", "stance", "trigger_summary", "invalidation_signals"],
+        "research_manager": ["summary", "stance", "research_summary", "watch_items", "invalidation_signals"],
+        "portfolio_manager": ["summary", "stance", "portfolio_summary", "watch_items", "invalidation_signals"],
+    },
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {

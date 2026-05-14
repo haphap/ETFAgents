@@ -21,6 +21,7 @@ class BacktestSignalStore:
     config: Mapping[str, Any]
     selected_analysts: Sequence[str]
     force_refresh: bool = False
+    memory_signature: str | None = None
 
     def is_enabled(self) -> bool:
         context = get_backtest_context()
@@ -66,6 +67,7 @@ class BacktestSignalStore:
             "backend_url": self.config.get("backend_url"),
             "data_vendors": self.config.get("data_vendors"),
             "tool_vendors": self.config.get("tool_vendors"),
+            "memory_signature": self.memory_signature or "",
         }
         encoded = json.dumps(material, sort_keys=True, ensure_ascii=False).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()[:16]

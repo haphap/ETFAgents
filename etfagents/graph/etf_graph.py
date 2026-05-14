@@ -115,12 +115,18 @@ class EtfAgentsGraph(TradingAgentsGraph):
     ) -> list[dict[str, object]]:
         """Analyze a candidate pool sequentially and rank it by final allocation rating."""
         results: list[dict[str, object]] = []
-        cache = BacktestSignalStore(
-            getattr(self, "config", self.DEFAULT_GRAPH_CONFIG),
-            getattr(self, "selected_analysts", self.DEFAULT_SELECTED_ANALYSTS),
-            force_refresh=force_refresh,
-        )
         for ticker in tickers:
+            memory_signature = None
+            if getattr(self, "config", {}).get("memory_in_backtest"):
+                store = getattr(self, "analysis_memory_store", None)
+                if store is not None:
+                    memory_signature = store.memory_signature(ticker, trade_date)
+            cache = BacktestSignalStore(
+                getattr(self, "config", self.DEFAULT_GRAPH_CONFIG),
+                getattr(self, "selected_analysts", self.DEFAULT_SELECTED_ANALYSTS),
+                force_refresh=force_refresh,
+                memory_signature=memory_signature,
+            )
             cached = cache.get(ticker, trade_date)
             if cached is not None:
                 results.append(dict(cached))

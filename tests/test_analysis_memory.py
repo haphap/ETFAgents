@@ -255,6 +255,22 @@ class AnalysisMemoryFlowTests(unittest.TestCase):
 
             self.assertEqual([], active)
 
+    def test_analysis_entry_update_rewrites_in_place_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = self._make_config(tmpdir)
+            set_config(cfg)
+            store = AnalysisMemoryStore(cfg, ["market_flow"])
+            node = create_memory_writer(store, config=cfg, selected_analysts=["market_flow"])
+            node(_base_state())
+
+            entry = store.load_analysis_entries("510300.SH")[0]
+            entry.outcome_status = "confirmed_correct"
+            store.append_analysis(entry)
+
+            entries = store.load_analysis_entries("510300.SH")
+            self.assertEqual(1, len(entries))
+            self.assertEqual("confirmed_correct", entries[0].outcome_status)
+
     def test_trader_prompt_includes_memory_contexts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg = self._make_config(tmpdir)

@@ -21,8 +21,7 @@ from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value,
 from etfagents.agents.schemas import ResearchPlan, render_research_plan
 from etfagents.agents.utils.structured import bind_structured, invoke_structured_or_freetext
 from etfagents.agents.utils.analysis_memory import (
-    build_memory_prompt_block,
-    get_memory_usage_instruction,
+    build_memory_prompt_section,
 )
 
 
@@ -112,8 +111,7 @@ def create_research_manager(llm, memory=None):
         bear_history = investment_debate_state.get("bear_history", "")
         bull_report = synthesize_side_report(llm, "Bull Analyst", bull_history, bull_snapshot_full)
         bear_report = synthesize_side_report(llm, "Bear Analyst", bear_history, bear_snapshot_full)
-        memory_block = build_memory_prompt_block(state, role="research_manager")
-        memory_section = f"{memory_block}\n\n{get_memory_usage_instruction()}\n\n" if memory_block else ""
+        memory_section = build_memory_prompt_section(state, role="research_manager")
 
         prompt = f"""As the ETF research manager and debate facilitator, your role is to critically evaluate the full multi-round debate and make a definitive allocation decision: align with the {localize_role_name("Bear Analyst")}, the {localize_role_name("Bull Analyst")}, or choose {localize_rating_term("Hold")} only if it is strongly justified based on the arguments presented.
 

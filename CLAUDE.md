@@ -62,7 +62,7 @@ ETFAgents is a multi-agent LLM ETF investment framework built on LangGraph. It d
 
 ### Configuration
 
-- `etfagents/default_config.py` — `DEFAULT_CONFIG` dict. Key fields: `llm_provider`, `deep_think_llm`, `quick_think_llm`, `max_debate_rounds`, `output_language`, `data_vendors`, `tool_vendors`, `checkpoint_enabled`, `memory_log_path`, `memory_mode`, `memory_in_backtest`, `continuity_brief_char_limit`, `lesson_brief_char_limit`, `method_brief_char_limit`, `report_context_char_limit`, `debate_history_char_limit`.
+- `etfagents/default_config.py` — `DEFAULT_CONFIG` dict. Key fields: `llm_provider`, `deep_think_llm`, `quick_think_llm`, `max_debate_rounds`, `output_language`, `data_vendors`, `tool_vendors`, `checkpoint_enabled`, `memory_log_path`, `memory_mode`, `memory_in_backtest`, `continuity_brief_char_limit`, `lesson_brief_char_limit`, `method_brief_char_limit`, `role_brief_specs`, `report_context_char_limit`, `debate_history_char_limit`.
 - CLI memory controls: `etfagents analyze --memory-mode ...`, `etfagents backtest --memory-mode ... [--memory-in-backtest]`, and `etfagents memory promote-playbook --id ...`.
 - Config is global state. `set_config(config)` is called by the graph constructors; helpers read via `get_config()`. When mutating nested config, always start from `copy.deepcopy(DEFAULT_CONFIG)` — `DEFAULT_CONFIG.copy()` is shallow.
 
@@ -76,7 +76,7 @@ ETFAgents is a multi-agent LLM ETF investment framework built on LangGraph. It d
 
 - Logs/reports default to `~/.etfagents/logs` (override with `ETFAGENTS_RESULTS_DIR`). Cache data defaults to `~/.etfagents/cache` (override with `ETFAGENTS_CACHE_DIR`). Legacy `TRADINGAGENTS_*` env vars are supported as fallbacks.
 - Snapshot files are workflow artifacts, not just UI formatting. Researchers and risk debaters save full snapshots to disk; managers reload them to synthesize multi-round position reports. Preserve both `*_snapshot` and `*_snapshot_path` state fields.
-- Structured memory artifacts live under `<results_dir>/memory/` as NDJSON files per ticker/playbook; live runs use them by default, while backtests keep memory disabled unless explicitly re-enabled in config. Auto-generated playbooks start as `draft` and only enter prompts after explicit promotion.
+- Structured memory artifacts live under `<results_dir>/memory/` as NDJSON files per ticker/playbook; live runs use them by default, while backtests keep memory disabled unless explicitly re-enabled in config. Auto-generated playbooks start as `draft` and only enter prompts after explicit promotion. Prompt briefs are built with rule-based summarization and `role_brief_specs`, not an extra summarizer LLM call.
 
 ## Key conventions
 

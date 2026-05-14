@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 import json
 from pathlib import Path
 import re
+import hashlib
 from typing import Any, Mapping, Sequence
 
 from etfagents.agents.utils.agent_utils import get_output_language
@@ -158,6 +159,14 @@ def _is_chinese_output() -> bool:
     return get_output_language().strip().lower() in {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
 
 
+_DEFAULT_ROLE_BRIEF_SPECS: dict[str, list[str]] = {
+    "analyst": ["summary", "key_drivers", "watch_items", "invalidation_signals"],
+    "trader": ["trader_summary", "stance", "trigger_summary", "invalidation_signals"],
+    "research_manager": ["summary", "stance", "research_summary", "watch_items", "invalidation_signals"],
+    "portfolio_manager": ["summary", "stance", "portfolio_summary", "watch_items", "invalidation_signals"],
+}
+
+
 @dataclass
 class AnalysisMemoryEntry:
     id: str
@@ -259,17 +268,17 @@ class AnalysisMemoryStore:
     def append_analysis(self, entry: AnalysisMemoryEntry) -> None:
         if not self.is_enabled():
             return
-        self._append_ndjson(self._analysis_path(entry.ticker), entry.to_dict())
+        self._upsert_entry(self._analysis_path(entry.ticker), entry)
 
     def append_outcome(self, entry: OutcomeLessonEntry) -> None:
         if not self.is_enabled():
             return
-        self._append_ndjson(self._outcome_path(entry.ticker), entry.to_dict())
+        self._upsert_entry(self._outcome_path(entry.ticker), entry)
 
     def append_playbook(self, entry: MethodPlaybookEntry) -> None:
         if not self.is_enabled():
             return
-        self._append_ndjson(self._playbook_path(entry.role, entry.ticker), entry.to_dict())
+        self._upsert_entry(self._playbook_path(entry.role, entry.ticker), entry)
 
     def load_playbook_entries(self, role: str | None = None, ticker: str | None = None) -> list[MethodPlaybookEntry]:
         if role is not None:
@@ -302,9 +311,31 @@ class AnalysisMemoryStore:
             status="active",
             expires_at=expiry,
         )
-        self._append_ndjson(path, promoted.to_dict())
+        self._upsert_entry(path, promoted)
         self._enforce_active_limit(path, max_active=max_active)
         return promoted
+
+    def memory_signature(self, ticker: str, trade_date: str) -> str:
+        if not self.is_enabled():
+            return ""
+        memory_mode = str(self.config.get("memory_mode", "full")).strip().lower()
+        roles = list(dict.fromkeys([*self.selected_analysts, "research_manager", "trader", "portfolio_manager"]))
+        parts: list[str] = [f"mode:{memory_mode}"]
+        latest = self.get_latest_before(ticker, trade_date)
+        if latest is not None:
+            parts.append(f"analysis:{latest.id}")
+        if memory_mode != "continuity-only":
+            parts.extend(f"lesson:{entry.id}" for entry in self.get_recent_lessons(ticker, trade_date))
+        if memory_mode == "full":
+            playbook_ids: set[str] = set()
+            for role in roles:
+                playbook_ids.update(
+                    entry.id
+                    for entry in self.get_active_playbook_entries(role, ticker, trade_date)
+                )
+            parts.extend(f"playbook:{entry_id}" for entry_id in sorted(playbook_ids))
+        encoded = json.dumps(parts, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()[:16]
 
     def get_latest_before(self, ticker: str, trade_date: str) -> AnalysisMemoryEntry | None:
         entries = self._filtered_analyses(ticker, trade_date)
@@ -438,7 +469,7 @@ class AnalysisMemoryStore:
                 created_at=_utc_now_iso(),
                 status="deprecated",
             )
-            self._append_ndjson(path, deprecated.to_dict())
+            self._upsert_entry(path, deprecated)
 
     @staticmethod
     def _is_active_playbook(entry: MethodPlaybookEntry, cutoff: date) -> bool:
@@ -472,6 +503,21 @@ class AnalysisMemoryStore:
                 entry = entry_type.from_dict(payload)
                 items[getattr(entry, "id")] = entry
         return list(items.values())
+
+    @staticmethod
+    def _write_entries(path: Path, entries: Sequence[Any]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        ordered = sorted(entries, key=lambda entry: (getattr(entry, "created_at", ""), getattr(entry, "id", "")))
+        with path.open("w", encoding="utf-8") as handle:
+            for entry in ordered:
+                payload = entry.to_dict() if hasattr(entry, "to_dict") else dict(entry)
+                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+
+    def _upsert_entry(self, path: Path, entry: Any) -> None:
+        entries = self._load_entries(path, type(entry))
+        items = {getattr(existing, "id"): existing for existing in entries}
+        items[getattr(entry, "id")] = entry
+        self._write_entries(path, list(items.values()))
 
 
 class MemoryContextBuilder:
@@ -525,48 +571,12 @@ class MemoryContextBuilder:
         signal = entry.signal or {}
         target_summary = _signal_target_summary(signal)
         limit = int(self.config.get("continuity_brief_char_limit", 2000) or 2000)
-
-        if role in {"trader"}:
-            parts = [
-                f"Latest same-ticker execution snapshot ({entry.trade_date}): {entry.trader_summary or entry.thesis_summary}",
-            ]
-            if target_summary:
-                parts.append(f"Last sizing/execution: {target_summary}")
-            trigger_bits = []
-            for key in ("add_triggers", "reduce_triggers", "exit_triggers", "risk_rules"):
-                trigger_bits.extend(_signal_rule_list(signal, key, max_items=1))
-            if trigger_bits:
-                parts.append("Last execution triggers: " + "; ".join(trigger_bits[:3]))
-            if entry.invalidation_signals:
-                parts.append("Last invalidation signals: " + "; ".join(entry.invalidation_signals[:3]))
-            return _truncate("\n".join(parts), limit)
-
-        if role in {"research_manager", "portfolio_manager"}:
-            parts = [
-                f"Latest same-ticker analysis ({entry.trade_date}): {entry.thesis_summary}",
-            ]
-            if target_summary:
-                parts.append(f"Last stance: {target_summary}")
-            if entry.research_summary:
-                parts.append("Research summary: " + entry.research_summary)
-            if entry.portfolio_summary:
-                parts.append("Portfolio summary: " + entry.portfolio_summary)
-            if entry.watch_items:
-                parts.append("Watch next: " + "; ".join(entry.watch_items[:3]))
-            if entry.invalidation_signals:
-                parts.append("Invalidation: " + "; ".join(entry.invalidation_signals[:3]))
-            return _truncate("\n".join(parts), limit)
-
-        analyst_thesis = entry.research_summary or _strip_explicit_recommendation(entry.thesis_summary)
+        continuity_fields = self._continuity_field_map(entry, signal, target_summary)
         parts = [
-            f"Latest same-ticker thesis ({entry.trade_date}): {analyst_thesis}",
+            continuity_fields[field]
+            for field in self._role_brief_spec(role)
+            if continuity_fields.get(field)
         ]
-        if entry.key_drivers:
-            parts.append("Prior key drivers: " + "; ".join(entry.key_drivers[:3]))
-        if entry.watch_items:
-            parts.append("Prior watch items: " + "; ".join(entry.watch_items[:3]))
-        if entry.invalidation_signals:
-            parts.append("Prior invalidation signals: " + "; ".join(entry.invalidation_signals[:3]))
         return _truncate("\n".join(parts), limit)
 
     def _render_lessons(self, lessons: Sequence[OutcomeLessonEntry]) -> str:
@@ -584,7 +594,7 @@ class MemoryContextBuilder:
             return ""
         limit = int(self.config.get("method_brief_char_limit", 1500) or 1500)
         rendered = [
-            f"[{entry.role}{'/' + entry.ticker if entry.ticker else ''}] {entry.rule}"
+            f"[{self._playbook_scope_label(entry)}] {entry.rule}"
             for entry in entries
         ]
         return _truncate("\n".join(rendered), limit)
@@ -601,6 +611,46 @@ class MemoryContextBuilder:
             )
             lines.append(entry.lesson_summary)
         return "\n".join(lines).strip()
+
+    def _role_brief_spec(self, role: str) -> list[str]:
+        configured = self.config.get("role_brief_specs") or {}
+        if role in configured:
+            return list(configured[role])
+        if role in {"trader", "research_manager", "portfolio_manager"}:
+            return list(configured.get(role, _DEFAULT_ROLE_BRIEF_SPECS[role]))
+        return list(configured.get("analyst", _DEFAULT_ROLE_BRIEF_SPECS["analyst"]))
+
+    @staticmethod
+    def _playbook_scope_label(entry: MethodPlaybookEntry) -> str:
+        if entry.role == "all" and entry.ticker:
+            return f"General/{entry.ticker}"
+        if entry.role == "all":
+            return "General"
+        if entry.ticker:
+            return f"{entry.role}/{entry.ticker}"
+        return entry.role
+
+    @staticmethod
+    def _continuity_field_map(
+        entry: AnalysisMemoryEntry,
+        signal: Mapping[str, Any],
+        target_summary: str,
+    ) -> dict[str, str]:
+        analyst_thesis = entry.research_summary or _strip_explicit_recommendation(entry.thesis_summary)
+        trigger_bits = []
+        for key in ("add_triggers", "reduce_triggers", "exit_triggers", "risk_rules"):
+            trigger_bits.extend(_signal_rule_list(signal, key, max_items=1))
+        return {
+            "summary": f"Latest same-ticker thesis ({entry.trade_date}): {analyst_thesis}",
+            "stance": f"Last stance: {target_summary}" if target_summary else "",
+            "research_summary": f"Research summary: {entry.research_summary}" if entry.research_summary else "",
+            "trader_summary": f"Latest same-ticker execution snapshot ({entry.trade_date}): {entry.trader_summary or entry.thesis_summary}",
+            "portfolio_summary": f"Portfolio summary: {entry.portfolio_summary}" if entry.portfolio_summary else "",
+            "key_drivers": "Prior key drivers: " + "; ".join(entry.key_drivers[:3]) if entry.key_drivers else "",
+            "watch_items": "Prior watch items: " + "; ".join(entry.watch_items[:3]) if entry.watch_items else "",
+            "invalidation_signals": "Prior invalidation signals: " + "; ".join(entry.invalidation_signals[:3]) if entry.invalidation_signals else "",
+            "trigger_summary": "Last execution triggers: " + "; ".join(trigger_bits[:3]) if trigger_bits else "",
+        }
 
 
 def build_analysis_memory_entry(
@@ -786,6 +836,24 @@ def build_memory_prompt_block(
     if method:
         blocks.append(f"**{labels['method']}:**\n{method}")
     return "\n\n".join(blocks).strip()
+
+
+def build_memory_prompt_section(
+    state: Mapping[str, Any],
+    *,
+    role: str,
+    aliases: Sequence[str] = (),
+) -> str:
+    block = build_memory_prompt_block(state, role=role, aliases=aliases)
+    if not block:
+        return ""
+    return f"{block}\n\n{get_memory_usage_instruction()}"
+
+
+def inject_memory_prompt_section(system_message: str, memory_section: str) -> str:
+    if not memory_section:
+        return system_message
+    return f"{memory_section}\n\n{system_message}".strip()
 
 
 def get_memory_usage_instruction() -> str:
