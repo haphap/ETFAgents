@@ -1,7 +1,7 @@
 import os
 from typing import Any, List, Optional
 
-from langchain_core.messages import BaseMessage
+from langchain_core.messages import AIMessage, BaseMessage
 from langchain_core.prompt_values import ChatPromptValue
 from langchain_openai import ChatOpenAI
 
