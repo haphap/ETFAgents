@@ -11,6 +11,8 @@ from etfagents.agents.schemas import (
     TraderProposal,
 )
 from etfagents.agents.trader.trader import create_trader
+from etfagents.dataflows.config import set_config
+from etfagents.default_config import DEFAULT_CONFIG
 
 
 class _FakeResponse:
@@ -75,6 +77,9 @@ def _base_state():
 
 class StructuredAgentTests(unittest.TestCase):
     def test_trader_renders_structured_output(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "English"
+        set_config(cfg)
         llm = MagicMock()
         structured = MagicMock()
         structured.invoke.return_value = TraderProposal(
@@ -91,6 +96,9 @@ class StructuredAgentTests(unittest.TestCase):
         self.assertIn("EXECUTION BIAS: **HOLD**", result["trader_investment_plan"])
 
     def test_research_manager_renders_structured_output(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "English"
+        set_config(cfg)
         llm = MagicMock()
         llm.invoke.return_value = _FakeResponse("Side synthesis.")
         structured = MagicMock()
@@ -112,6 +120,9 @@ class StructuredAgentTests(unittest.TestCase):
         self.assertIn("FEEDBACK SNAPSHOT:", result["investment_plan"])
 
     def test_portfolio_manager_falls_back_to_freetext(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "English"
+        set_config(cfg)
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("unsupported")
         llm.invoke.return_value = _FakeResponse(
@@ -131,6 +142,9 @@ class StructuredAgentTests(unittest.TestCase):
         self.assertIn("FEEDBACK SNAPSHOT:", result["final_trade_decision"])
 
     def test_trader_falls_back_when_structured_invoke_fails(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "English"
+        set_config(cfg)
         llm = MagicMock()
         structured = MagicMock()
         structured.invoke.side_effect = ValueError("bad structured payload")

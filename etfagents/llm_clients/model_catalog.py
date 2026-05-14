@@ -104,6 +104,7 @@ MODEL_OPTIONS: ProviderModeOptions = {
         ],
         "deep": [
             ("DeepSeek V4 Pro - Most capable reasoning model", "deepseek-v4-pro"),
+            ("DeepSeek V4 Flash - Fast, cost-efficient", "deepseek-v4-flash"),
             ("DeepSeek Reasoner - Extended thinking (no tool_choice, no structured output)", "deepseek-reasoner"),
             ("DeepSeek Chat - General purpose", "deepseek-chat"),
         ],

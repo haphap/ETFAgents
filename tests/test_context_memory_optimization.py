@@ -129,6 +129,9 @@ class ContextMemoryOptimizationTests(unittest.TestCase):
         self.assertIn("2026年5月1日至2026年6月30日", normalized)
 
     def test_feedback_snapshot_helpers(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "English"
+        set_config(cfg)
         response = (
             "Argument body here.\n\n"
             "FEEDBACK SNAPSHOT:\n"
