@@ -17,6 +17,10 @@ from etfagents.agents.utils.report_leads import (
 )
 from etfagents.agents.utils.validate_refine import validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
+from etfagents.agents.utils.analysis_memory import (
+    build_memory_prompt_block,
+    get_memory_usage_instruction,
+)
 from etfagents.tool_report_utils import run_tool_report_chain
 
 
@@ -35,13 +39,20 @@ def create_etf_industry_research_analyst(llm):
         current_date = state["trade_date"]
         asset_symbol = get_asset_symbol(state)
         instrument_context = build_instrument_context(asset_symbol)
+        memory_block = build_memory_prompt_block(
+            state,
+            role="holdings_industry",
+            aliases=("broker_research", "etf_macro"),
+        )
+        memory_section = f"{memory_block}\n\n{get_memory_usage_instruction()}\n\n" if memory_block else ""
         tools = [get_etf_holdings, get_etf_industry_research]
 
         system_message = (
             "你是一名资深ETF行业研究分析师，专注于机构行业研究报告的深度交叉分析。"
             "你的任务是从ETF重仓股出发，追溯这些持仓在券商研究报告中实际使用的行业关键词，"
             "然后产出一份有证据支撑的ETF主导行业暴露交叉分析。\n\n"
-            "## 第一步：数据获取\n"
+            + memory_section
+            + "## 第一步：数据获取\n"
             "1. 调用 get_etf_holdings(ticker, curr_date) 获取ETF前十大持仓与集中度结构。\n"
             "2. 调用 get_etf_industry_research(ticker, curr_date) 获取基于重仓股衍生的行业研究。"
             "该工具已尽可能从持仓级个股报告中解析出券商搜索关键词，视为本ETF的权威行业报告集。\n"

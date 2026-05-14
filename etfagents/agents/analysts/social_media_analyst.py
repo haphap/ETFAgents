@@ -24,6 +24,10 @@ from etfagents.agents.utils.report_leads import (
 from etfagents.agents.utils.validate_refine import validate_and_refine
 from etfagents.dataflows.opencli_news import get_global_news, get_news, get_news_for_queries
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
+from etfagents.agents.utils.analysis_memory import (
+    build_memory_prompt_block,
+    get_memory_usage_instruction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -138,6 +142,8 @@ def create_social_media_analyst(llm):
         end_date = current_date
         start_date = (datetime.strptime(end_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
         instrument_context = build_instrument_context(asset_symbol)
+        memory_block = build_memory_prompt_block(state, role="catalyst_sentiment", aliases=("social",))
+        memory_section = f"{memory_block}\n\n{get_memory_usage_instruction()}\n\n" if memory_block else ""
 
         # Phase 1: ETF context (fast tushare calls)
         etf_info = get_etf_info.func(asset_symbol, current_date)
@@ -171,6 +177,8 @@ def create_social_media_analyst(llm):
             holdings_news=holdings_news,
             global_news=global_news,
         )
+        if memory_section:
+            system_message = memory_section + system_message
 
         prompt_template = ChatPromptTemplate.from_messages(
             [

@@ -14,6 +14,10 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_manager_terms,
     truncate_for_prompt,
 )
+from etfagents.agents.utils.analysis_memory import (
+    build_memory_prompt_block,
+    get_memory_usage_instruction,
+)
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value, with_state_aliases
 from etfagents.backtest.signals import build_trader_backtest_signal
 
@@ -58,6 +62,8 @@ def create_trader(llm):
         meso_commodity_report = truncate_for_prompt(get_state_value(state, "meso_commodity_report", ""))
         holdings_industry_report = get_state_value(state, "holdings_industry_report", "")
         top_holdings_report = get_state_value(state, "top_holdings_report", "")
+        memory_block = build_memory_prompt_block(state, role="trader")
+        memory_section = f"\n\n{memory_block}\n\n{get_memory_usage_instruction()}\n" if memory_block else ""
 
         context = {
             "role": "user",
@@ -79,11 +85,11 @@ def create_trader(llm):
                      "If you mention timing in Chinese output, translate it as 时机 or 节奏 instead of leaving the English word. "
                      "For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三. "
                      "In addition to the prose sections, populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values. "
-                     "For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct. "
-                     f"{_trader_detail_instruction()} "
-                     f"{get_localized_execution_bias_instruction()}{get_language_instruction()}"
-                 ),
-             },
+                      "For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct. "
+                      f"{_trader_detail_instruction()} "
+                      f"{get_localized_execution_bias_instruction()}{get_language_instruction()}{memory_section}"
+                  ),
+              },
             context,
         ]
 

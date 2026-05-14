@@ -24,7 +24,7 @@ ETFAgents is a multi-agent LLM ETF investment framework built on LangGraph. It d
 
 ### Graph orchestration
 
-- `etfagents/graph/trading_graph.py` — `TradingAgentsGraph` base class. Pushes config into `etfagents.dataflows.config`, creates quick/deep LLM clients via `etfagents.llm_clients`, resolves deferred reflections via `TradingMemoryLog`, builds LangGraph tool nodes from `agent_utils`, and compiles the workflow.
+- `etfagents/graph/trading_graph.py` — `TradingAgentsGraph` base class. Pushes config into `etfagents.dataflows.config`, creates quick/deep LLM clients via `etfagents.llm_clients`, resolves deferred reflections via `TradingMemoryLog`, builds structured continuity/lesson/method memory via `AnalysisMemoryStore` and `MemoryContextBuilder`, adds a post-PM memory writer node, and compiles the workflow.
 - `etfagents/graph/etf_graph.py` — `EtfAgentsGraph(TradingAgentsGraph)` adds ETF-specific analyst mappings, tool nodes, and `analyze_candidate_pool()` / `replay_candidate_pool()`.
 - `etfagents/graph/setup.py` / `etfsetup.py` — LangGraph `StateGraph` assembly: selected analyst nodes run first (sequentially), then bull/bear research debate loops, `Research Manager`, `Trader`, aggressive/conservative/neutral risk debate loop, and `Portfolio Manager`.
 - `etfagents/graph/conditional_logic.py` — Controls debate round counts and handoff between stages.
@@ -56,12 +56,13 @@ ETFAgents is a multi-agent LLM ETF investment framework built on LangGraph. It d
 - `etfagents/agents/utils/agent_states.py` — `InvestDebateState`, `RiskDebateState`, and main `AgentState` TypedDicts.
 - `etfagents/agents/utils/state_keys.py` — Canonical state key accessors.
 - `etfagents/agents/utils/memory.py` — `TradingMemoryLog` for persistent trading decision memory.
+- `etfagents/agents/utils/analysis_memory.py` — Structured `AnalysisMemoryEntry` / `OutcomeLessonEntry` / `MethodPlaybookEntry` storage plus role-aware prompt-brief construction.
 - `etfagents/agents/utils/rating.py` — Five-tier rating system (BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL).
 - `etfagents/agents/utils/structured.py` — Structured output helpers for manager/trader agents.
 
 ### Configuration
 
-- `etfagents/default_config.py` — `DEFAULT_CONFIG` dict. Key fields: `llm_provider`, `deep_think_llm`, `quick_think_llm`, `max_debate_rounds`, `output_language`, `data_vendors`, `tool_vendors`, `checkpoint_enabled`, `memory_log_path`, `report_context_char_limit`, `debate_history_char_limit`.
+- `etfagents/default_config.py` — `DEFAULT_CONFIG` dict. Key fields: `llm_provider`, `deep_think_llm`, `quick_think_llm`, `max_debate_rounds`, `output_language`, `data_vendors`, `tool_vendors`, `checkpoint_enabled`, `memory_log_path`, `memory_mode`, `memory_in_backtest`, `continuity_brief_char_limit`, `lesson_brief_char_limit`, `method_brief_char_limit`, `report_context_char_limit`, `debate_history_char_limit`.
 - Config is global state. `set_config(config)` is called by the graph constructors; helpers read via `get_config()`. When mutating nested config, always start from `copy.deepcopy(DEFAULT_CONFIG)` — `DEFAULT_CONFIG.copy()` is shallow.
 
 ### Output and localization
@@ -74,6 +75,7 @@ ETFAgents is a multi-agent LLM ETF investment framework built on LangGraph. It d
 
 - Logs/reports default to `~/.etfagents/logs` (override with `ETFAGENTS_RESULTS_DIR`). Cache data defaults to `~/.etfagents/cache` (override with `ETFAGENTS_CACHE_DIR`). Legacy `TRADINGAGENTS_*` env vars are supported as fallbacks.
 - Snapshot files are workflow artifacts, not just UI formatting. Researchers and risk debaters save full snapshots to disk; managers reload them to synthesize multi-round position reports. Preserve both `*_snapshot` and `*_snapshot_path` state fields.
+- Structured memory artifacts live under `<results_dir>/memory/` as NDJSON files per ticker/playbook; live runs use them by default, while backtests keep memory disabled unless explicitly re-enabled in config.
 
 ## Key conventions
 

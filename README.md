@@ -13,7 +13,7 @@ The project coordinates specialist analyst agents, a bull/bear research debate, 
 - **Multiple LLM providers** including OpenAI, Google, Anthropic, xAI, MiniMax, OpenRouter, and Ollama/OpenAI-compatible backends
 - **Vendor-routed market data** with fallback across Tushare, yfinance, qlib, Brave Search, and OpenCLI news aggregation
 - **Checkpoint/resume support** for long-running runs
-- **Persistent memory log** for storing prior decisions and deferred reflections
+- **Layered agent memory** with latest-analysis continuity, resolved lessons, and reusable method reminders
 - **English and Chinese output** for reports and final decisions
 
 ## Analyst Stack
@@ -71,6 +71,7 @@ Notes:
 - `TUSHARE_TOKEN` is important for the ETF-specific China-market workflow.
 - Local OpenAI-compatible backends can be used by setting `llm_provider` to `ollama` and configuring `backend_url`.
 - Runtime logs default to `~/.etfagents/logs`; cache defaults to `~/.etfagents/cache`.
+- Structured continuity memory is stored under `<results_dir>/memory/`; `memory_mode` defaults to `full`, while memory stays disabled in backtests unless `memory_in_backtest=True`.
 
 ## CLI Usage
 
@@ -164,6 +165,7 @@ main.py               Minimal programmatic example
 - `cli/main.py` builds the runtime config from user selections and streams execution into the terminal UI.
 - `etfagents/graph/etf_graph.py` defines the ETF-specific graph on top of the shared trading graph base.
 - `etfagents/graph/setup.py` assembles the LangGraph workflow.
+- `etfagents/agents/utils/analysis_memory.py` stores structured analysis snapshots, resolved outcome lessons, and reusable method rules, then builds role-aware continuity / lesson / method briefs for later runs.
 - `etfagents/dataflows/interface.py` routes tool calls to the configured data vendors with fallback behavior.
 - `etfagents/llm_clients/factory.py` normalizes LLM provider setup behind a single client factory.
 

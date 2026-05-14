@@ -47,6 +47,12 @@ DEFAULT_CONFIG = {
         "trading_memory.md",
     ),
     "memory_log_max_entries": None,
+    "memory_mode": "full",
+    "memory_in_backtest": False,
+    "continuity_max_age_days": 30,
+    "continuity_brief_char_limit": 2000,
+    "lesson_brief_char_limit": 1500,
+    "method_brief_char_limit": 1500,
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {

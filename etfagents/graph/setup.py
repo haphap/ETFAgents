@@ -40,12 +40,14 @@ class GraphSetup:
         deep_thinking_llm: Any,
         tool_nodes: Dict[str, ToolNode],
         conditional_logic: ConditionalLogic,
+        memory_writer_node: Callable[[Any], Any] | None = None,
     ):
         """Initialize with required components."""
         self.quick_thinking_llm = quick_thinking_llm
         self.deep_thinking_llm = deep_thinking_llm
         self.tool_nodes = tool_nodes
         self.conditional_logic = conditional_logic
+        self.memory_writer_node = memory_writer_node
 
     # Display names for analysts with underscores in their keys
     _ANALYST_DISPLAY_NAMES: Dict[str, str] = {}
@@ -148,6 +150,8 @@ class GraphSetup:
         workflow.add_node("Neutral Analyst", neutral_analyst)
         workflow.add_node("Conservative Analyst", conservative_analyst)
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
+        if self.memory_writer_node is not None:
+            workflow.add_node("Memory Writer", self.memory_writer_node)
 
         # Define edges
         # Start with the first analyst
@@ -220,6 +224,10 @@ class GraphSetup:
             },
         )
 
-        workflow.add_edge("Portfolio Manager", END)
+        if self.memory_writer_node is not None:
+            workflow.add_edge("Portfolio Manager", "Memory Writer")
+            workflow.add_edge("Memory Writer", END)
+        else:
+            workflow.add_edge("Portfolio Manager", END)
 
         return workflow

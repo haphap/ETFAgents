@@ -17,7 +17,13 @@ class Propagator:
         self.max_recur_limit = max_recur_limit
 
     def create_initial_state(
-        self, asset_symbol: str, trade_date: str, past_context: str = ""
+        self,
+        asset_symbol: str,
+        trade_date: str,
+        past_context: str = "",
+        continuity_context: dict[str, str] | None = None,
+        lesson_context: dict[str, str] | None = None,
+        method_context: dict[str, str] | None = None,
     ) -> Dict[str, Any]:
         """Create the initial state for the agent graph."""
         return with_state_aliases({
@@ -25,6 +31,9 @@ class Propagator:
             "asset_of_interest": asset_symbol,
             "trade_date": str(trade_date),
             "past_context": past_context or "",
+            "continuity_context": dict(continuity_context or {}),
+            "lesson_context": dict(lesson_context or {}),
+            "method_context": dict(method_context or {}),
             "investment_debate_state": InvestDebateState(
                 {
                     "bull_history": "",
@@ -79,6 +88,7 @@ class Propagator:
             "trader_backtest_signal": {},
             "portfolio_backtest_signal": {},
             "backtest_signal": {},
+            "analysis_memory_entry": {},
         })
 
     def get_graph_args(self, callbacks: Optional[List] = None) -> Dict[str, Any]:

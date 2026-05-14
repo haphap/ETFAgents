@@ -17,6 +17,10 @@ from etfagents.agents.utils.report_leads import (
 )
 from etfagents.agents.utils.validate_refine import validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
+from etfagents.agents.utils.analysis_memory import (
+    build_memory_prompt_block,
+    get_memory_usage_instruction,
+)
 from etfagents.tool_report_utils import run_tool_report_chain
 
 
@@ -35,13 +39,16 @@ def create_etf_stock_research_analyst(llm):
         current_date = state["trade_date"]
         asset_symbol = get_asset_symbol(state)
         instrument_context = build_instrument_context(asset_symbol)
+        memory_block = build_memory_prompt_block(state, role="top_holdings", aliases=("stock_research",))
+        memory_section = f"{memory_block}\n\n{get_memory_usage_instruction()}\n\n" if memory_block else ""
         tools = [get_etf_holdings, get_etf_top_holdings_research]
 
         system_message = (
             "你是一名资深ETF头部持仓研究分析师，专注于券商个股研究报告的深度交叉分析。"
             "你的任务是检索ETF最重要持仓的近期报告，深入分析每份报告，"
             "产出以ETF为优先的机构观点交叉分析。\n\n"
-            "## 第一步：数据获取\n"
+            + memory_section
+            + "## 第一步：数据获取\n"
             "1. 调用 get_etf_holdings(ticker, curr_date) 获取ETF前十大持仓与集中度结构。\n"
             "2. 调用 get_etf_top_holdings_research(ticker, curr_date) 获取ETF头部披露持仓的近期个股报告。\n"
             "3. 逐份研读报告摘要全文——不得仅凭标题判断。\n\n"
