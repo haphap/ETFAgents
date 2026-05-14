@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
-from datetime import UTC, date, datetime
+from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, date, datetime, timedelta
 import json
 from pathlib import Path
 import re
@@ -20,6 +20,10 @@ def _safe_path_token(value: str) -> str:
 
 def _utc_now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _date_after_days(days: int) -> str:
+    return (datetime.now(UTC).date() + timedelta(days=int(days))).isoformat()
 
 
 def _parse_iso_date(value: str | None) -> date | None:
@@ -215,7 +219,8 @@ class MethodPlaybookEntry:
     source_lesson_id: str
     rule: str
     rationale: str = ""
-    status: str = "active"
+    status: str = "draft"
+    expires_at: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -266,6 +271,41 @@ class AnalysisMemoryStore:
             return
         self._append_ndjson(self._playbook_path(entry.role, entry.ticker), entry.to_dict())
 
+    def load_playbook_entries(self, role: str | None = None, ticker: str | None = None) -> list[MethodPlaybookEntry]:
+        if role is not None:
+            paths = [self._playbook_path(role, ticker)]
+        else:
+            playbook_dir = self.root_dir / "playbook"
+            paths = sorted(playbook_dir.glob("*.ndjson")) if playbook_dir.exists() else []
+        entries: dict[str, MethodPlaybookEntry] = {}
+        for path in paths:
+            for entry in self._load_entries(path, MethodPlaybookEntry):
+                entries[entry.id] = entry
+        return list(entries.values())
+
+    def promote_playbook(
+        self,
+        entry_id: str,
+        *,
+        expires_days: int | None = None,
+        max_active: int | None = None,
+    ) -> MethodPlaybookEntry:
+        path, entry = self._find_playbook_entry(entry_id)
+        if entry is None or path is None:
+            raise KeyError(entry_id)
+
+        promoted_at = _utc_now_iso()
+        expiry = _date_after_days(expires_days or int(self.config.get("playbook_active_days", 90) or 90))
+        promoted = replace(
+            entry,
+            created_at=promoted_at,
+            status="active",
+            expires_at=expiry,
+        )
+        self._append_ndjson(path, promoted.to_dict())
+        self._enforce_active_limit(path, max_active=max_active)
+        return promoted
+
     def get_latest_before(self, ticker: str, trade_date: str) -> AnalysisMemoryEntry | None:
         entries = self._filtered_analyses(ticker, trade_date)
         return entries[-1] if entries else None
@@ -289,7 +329,10 @@ class AnalysisMemoryStore:
         eligible = [
             entry
             for entry in self.load_outcome_entries(ticker)
-            if _parse_iso_date(entry.trade_date) is not None and _parse_iso_date(entry.trade_date) <= cutoff
+            if _parse_iso_date(entry.trade_date) is not None
+            and _parse_iso_date(entry.trade_date) <= cutoff
+            and _parse_iso_date(entry.created_at) is not None
+            and _parse_iso_date(entry.created_at) <= cutoff
         ]
         eligible.sort(key=lambda entry: (entry.trade_date, entry.created_at))
         return eligible[-limit:]
@@ -308,10 +351,7 @@ class AnalysisMemoryStore:
         candidates: dict[str, MethodPlaybookEntry] = {}
         for path in self._playbook_query_paths(role, ticker):
             for entry in self._load_entries(path, MethodPlaybookEntry):
-                if entry.status != "active":
-                    continue
-                created_date = _parse_iso_date(entry.created_at)
-                if created_date is not None and created_date > cutoff:
+                if not self._is_active_playbook(entry, cutoff):
                     continue
                 candidates[entry.id] = entry
         ordered = sorted(candidates.values(), key=lambda entry: entry.created_at)
@@ -367,6 +407,50 @@ class AnalysisMemoryStore:
             self._playbook_path("all", ticker),
             self._playbook_path(role, ticker),
         ]
+
+    def _find_playbook_entry(self, entry_id: str) -> tuple[Path | None, MethodPlaybookEntry | None]:
+        playbook_dir = self.root_dir / "playbook"
+        if not playbook_dir.exists():
+            return None, None
+        for path in sorted(playbook_dir.glob("*.ndjson")):
+            entries = self._load_entries(path, MethodPlaybookEntry)
+            for entry in entries:
+                if entry.id == entry_id:
+                    return path, entry
+        return None, None
+
+    def _enforce_active_limit(self, path: Path, *, max_active: int | None = None) -> None:
+        limit = int(max_active or self.config.get("playbook_max_active_per_scope", 20) or 20)
+        if limit <= 0:
+            return
+        today = datetime.now(UTC).date()
+        entries = self._load_entries(path, MethodPlaybookEntry)
+        active = [
+            entry
+            for entry in entries
+            if self._is_active_playbook(entry, today)
+        ]
+        active.sort(key=lambda entry: entry.created_at)
+        stale = active[:-limit]
+        for entry in stale:
+            deprecated = replace(
+                entry,
+                created_at=_utc_now_iso(),
+                status="deprecated",
+            )
+            self._append_ndjson(path, deprecated.to_dict())
+
+    @staticmethod
+    def _is_active_playbook(entry: MethodPlaybookEntry, cutoff: date) -> bool:
+        if entry.status != "active":
+            return False
+        created_date = _parse_iso_date(entry.created_at)
+        if created_date is not None and created_date > cutoff:
+            return False
+        expires_date = _parse_iso_date(entry.expires_at)
+        if expires_date is not None and expires_date <= cutoff:
+            return False
+        return True
 
     @staticmethod
     def _append_ndjson(path: Path, payload: Mapping[str, Any]) -> None:
@@ -648,7 +732,7 @@ def build_method_playbook_entry(lesson: OutcomeLessonEntry) -> MethodPlaybookEnt
             260,
         ),
         rationale=f"{lesson.ticker} {lesson.trade_date} resolved as {lesson.outcome_status} with raw {lesson.raw_return:+.1%} and alpha {lesson.alpha_return:+.1%}.",
-        status="active",
+        status="draft",
     )
 
 

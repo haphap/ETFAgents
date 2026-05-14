@@ -53,6 +53,8 @@ DEFAULT_CONFIG = {
     "continuity_brief_char_limit": 2000,
     "lesson_brief_char_limit": 1500,
     "method_brief_char_limit": 1500,
+    "playbook_active_days": 90,
+    "playbook_max_active_per_scope": 20,
     # Data vendor configuration
     # Category-level configuration (default for all tools in category)
     "data_vendors": {

@@ -29,6 +29,7 @@ from urllib.parse import urlparse
 
 from etfagents.graph.etf_graph import EtfAgentsGraph
 from etfagents.backtest import save_backtest_result
+from etfagents.agents.utils.analysis_memory import AnalysisMemoryStore
 from etfagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
 from cli.utils import *
@@ -59,9 +60,12 @@ app = typer.Typer(
     add_completion=True,  # Enable shell completion
     pretty_exceptions_show_locals=False,
 )
+memory_app = typer.Typer(help="Structured analysis memory utilities.")
+app.add_typer(memory_app, name="memory")
 
 
 CHINESE_OUTPUT_VALUES = {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
+MEMORY_MODE_VALUES = {"disabled", "continuity-only", "lesson", "full"}
 
 CLI_SECTION_TITLES = {
     "market_flow_report": ("Market & Flow Analysis", "市场与资金流分析"),
@@ -128,6 +132,15 @@ def _localize_cli_role_title(role: str) -> str:
 def _localize_cli_section_title(section_name: str) -> str:
     english, chinese = CLI_SECTION_TITLES.get(section_name, (section_name, section_name))
     return _localize_cli_label(english, chinese)
+
+
+def _normalize_memory_mode(value: str) -> str:
+    normalized = (value or DEFAULT_CONFIG.get("memory_mode", "full")).strip().lower()
+    if normalized not in MEMORY_MODE_VALUES:
+        raise typer.BadParameter(
+            f"memory-mode must be one of: {', '.join(sorted(MEMORY_MODE_VALUES))}"
+        )
+    return normalized
 
 
 def _relevel_markdown_headings(content: str, target_min_level: int) -> str:
@@ -1808,7 +1821,7 @@ def _format_runtime_failure(exc: Exception, selections: dict) -> str:
     return f"Analysis failed: {message}"
 
 
-def run_analysis(checkpoint: bool = False):
+def run_analysis(checkpoint: bool = False, memory_mode: str | None = None):
     # First get all user selections
     selections = get_user_selections()
 
@@ -1826,6 +1839,7 @@ def run_analysis(checkpoint: bool = False):
     config["anthropic_effort"] = selections.get("anthropic_effort")
     config["output_language"] = selections.get("output_language", "English")
     config["checkpoint_enabled"] = checkpoint
+    config["memory_mode"] = _normalize_memory_mode(memory_mode or config.get("memory_mode", "full"))
 
     # Create stats callback handler for tracking LLM/tool calls
     stats_handler = StatsCallbackHandler()
@@ -2244,6 +2258,8 @@ def backtest(
     deep_think_llm: str = typer.Option(DEFAULT_CONFIG["deep_think_llm"], "--deep-think-llm"),
     quick_think_llm: str = typer.Option(DEFAULT_CONFIG["quick_think_llm"], "--quick-think-llm"),
     output_language: str = typer.Option(DEFAULT_CONFIG["output_language"], "--output-language"),
+    memory_mode: str = typer.Option(DEFAULT_CONFIG["memory_mode"], "--memory-mode", help="disabled, continuity-only, lesson, or full."),
+    memory_in_backtest: bool = typer.Option(False, "--memory-in-backtest/--no-memory-in-backtest", help="Allow memory retrieval during backtests. Off by default for reproducibility."),
     backend_url: Optional[str] = typer.Option(None, "--backend-url"),
     save_path: Optional[Path] = typer.Option(None, "--save-path"),
 ):
@@ -2270,6 +2286,8 @@ def backtest(
     config["max_risk_discuss_rounds"] = research_depth
     config["output_language"] = output_language
     config["backend_url"] = backend_url
+    config["memory_mode"] = _normalize_memory_mode(memory_mode)
+    config["memory_in_backtest"] = memory_in_backtest
 
     try:
         _preflight_local_backend(llm_provider, backend_url)
@@ -2407,13 +2425,45 @@ def analyze(
         "--clear-checkpoints",
         help="Delete all saved checkpoints before running.",
     ),
+    memory_mode: str = typer.Option(
+        DEFAULT_CONFIG["memory_mode"],
+        "--memory-mode",
+        help="disabled, continuity-only, lesson, or full.",
+    ),
 ):
     if clear_checkpoints:
         from etfagents.graph.checkpointer import clear_all_checkpoints
 
         deleted = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {deleted} checkpoint(s).[/yellow]")
-    run_analysis(checkpoint=checkpoint)
+    run_analysis(checkpoint=checkpoint, memory_mode=memory_mode)
+
+
+@memory_app.command("promote-playbook")
+def promote_playbook(
+    playbook_id: str = typer.Option(..., "--id", help="Playbook entry id to promote."),
+    expires_days: int = typer.Option(90, "--expires-days", min=1, help="Days before the promoted rule expires."),
+    max_active: int = typer.Option(20, "--max-active", min=1, help="Maximum active rules to keep within the same playbook scope."),
+    results_dir: Optional[Path] = typer.Option(None, "--results-dir", help="Override results_dir when locating memory artifacts."),
+):
+    config = copy.deepcopy(DEFAULT_CONFIG)
+    if results_dir is not None:
+        config["results_dir"] = str(results_dir)
+    store = AnalysisMemoryStore(config, [])
+    try:
+        promoted = store.promote_playbook(
+            playbook_id,
+            expires_days=expires_days,
+            max_active=max_active,
+        )
+    except KeyError:
+        console.print(f"[red]Playbook entry not found:[/red] {playbook_id}")
+        raise typer.Exit(code=1)
+
+    console.print(f"[green]Promoted playbook:[/green] {promoted.id}")
+    console.print(f"[green]Status:[/green] {promoted.status}")
+    if promoted.expires_at:
+        console.print(f"[green]Expires:[/green] {promoted.expires_at}")
 
 
 if __name__ == "__main__":

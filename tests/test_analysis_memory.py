@@ -1,4 +1,5 @@
 import copy
+from datetime import UTC, datetime, timedelta
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
@@ -11,6 +12,8 @@ from etfagents.agents.trader.trader import create_trader
 from etfagents.agents.utils.analysis_memory import (
     AnalysisMemoryStore,
     MemoryContextBuilder,
+    MethodPlaybookEntry,
+    OutcomeLessonEntry,
     create_memory_writer,
 )
 from etfagents.dataflows.config import backtest_context, clear_backtest_context, set_config
@@ -158,7 +161,7 @@ class AnalysisMemoryFlowTests(unittest.TestCase):
             self.assertEqual("", bundle.lesson_context["portfolio_manager"])
             self.assertEqual("", bundle.method_context["trader"])
 
-    def test_resolve_analysis_outcomes_creates_lessons_and_method_rules(self):
+    def test_resolve_analysis_outcomes_creates_lessons_and_draft_playbook(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             cfg = self._make_config(tmpdir)
             set_config(cfg)
@@ -178,9 +181,79 @@ class AnalysisMemoryFlowTests(unittest.TestCase):
             self.assertEqual("confirmed_correct", outcomes[0].outcome_status)
             updated_entry = store.load_analysis_entries("510300.SH")[0]
             self.assertEqual("confirmed_correct", updated_entry.outcome_status)
-            playbooks = store.get_active_playbook_entries("trader", "510300.SH", "2026-12-20")
+            drafts = store.load_playbook_entries()
+            self.assertEqual(1, len(drafts))
+            self.assertEqual("draft", drafts[0].status)
+            self.assertEqual([], store.get_active_playbook_entries("trader", "510300.SH", "2026-12-20"))
+
+            promoted = store.promote_playbook(drafts[0].id, expires_days=30)
+            active_cutoff = (datetime.now(UTC).date() + timedelta(days=7)).isoformat()
+            playbooks = store.get_active_playbook_entries("trader", "510300.SH", active_cutoff)
             self.assertTrue(playbooks)
+            self.assertEqual(promoted.id, playbooks[-1].id)
             self.assertIn("confirmation signal mattered", playbooks[-1].rule)
+
+    def test_recent_lessons_respect_created_at_clamp(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = self._make_config(tmpdir)
+            cfg["memory_in_backtest"] = True
+            set_config(cfg)
+            store = AnalysisMemoryStore(cfg, ["market_flow"])
+            store.append_outcome(
+                OutcomeLessonEntry(
+                    id="late-lesson",
+                    ticker="510300.SH",
+                    trade_date="2026-01-10",
+                    created_at="2026-04-15T00:00:00Z",
+                    source_analysis_id="analysis-1",
+                    raw_return=0.03,
+                    alpha_return=0.01,
+                    holding_days=5,
+                    outcome_status="confirmed_correct",
+                    lesson_summary="This lesson was only known later.",
+                )
+            )
+
+            with backtest_context("2026-02-01"):
+                lessons = store.get_recent_lessons("510300.SH", "2026-02-01")
+
+            self.assertEqual([], lessons)
+
+    def test_continuity_filters_out_entries_older_than_max_age(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = self._make_config(tmpdir)
+            cfg["continuity_max_age_days"] = 30
+            set_config(cfg)
+            store = AnalysisMemoryStore(cfg, ["market_flow"])
+            state = _base_state()
+            state["trade_date"] = "2026-01-01"
+            create_memory_writer(store, config=cfg, selected_analysts=["market_flow"])(state)
+
+            bundle = MemoryContextBuilder(store, cfg, ["market_flow"]).build("510300.SH", "2026-02-15")
+
+            self.assertEqual("", bundle.continuity_context["market_flow"])
+
+    def test_active_playbooks_ignore_expired_entries(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = self._make_config(tmpdir)
+            set_config(cfg)
+            store = AnalysisMemoryStore(cfg, ["market_flow"])
+            store.append_playbook(
+                MethodPlaybookEntry(
+                    id="expired-rule",
+                    role="all",
+                    ticker="510300.SH",
+                    created_at="2026-01-01T00:00:00Z",
+                    source_lesson_id="lesson-1",
+                    rule="Old rule.",
+                    status="active",
+                    expires_at="2026-02-01",
+                )
+            )
+
+            active = store.get_active_playbook_entries("trader", "510300.SH", "2026-03-10")
+
+            self.assertEqual([], active)
 
     def test_trader_prompt_includes_memory_contexts(self):
         with tempfile.TemporaryDirectory() as tmpdir:
