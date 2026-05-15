@@ -16,6 +16,10 @@ from etfagents.agents.utils.report_leads import (
 )
 from etfagents.agents.utils.validate_refine import validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
+from etfagents.agents.utils.analysis_memory import (
+    build_memory_prompt_section,
+    inject_memory_prompt_section,
+)
 from etfagents.tool_report_utils import run_tool_report_chain
 
 
@@ -37,11 +41,12 @@ def create_etf_structure_analyst(llm):
             raise KeyError("trade_date")
         asset_symbol = get_asset_symbol(state)
         instrument_context = build_instrument_context(asset_symbol)
+        memory_section = build_memory_prompt_section(state, role="meso_commodity", aliases=("etf_structure",))
         tools = [get_commodity_cluster_data]
 
-        system_message = (
+        system_message = inject_memory_prompt_section((
             "你是一名中观商品分析师。核心使命是从商品价格异常和跨市场信号中发现宏观经济与产业层面的机会和问题。\n\n"
-            "优先使用Tushare期货和仓单的直接证据，而非股票或ETF代理工具。\n\n"
+            + "优先使用Tushare期货和仓单的直接证据，而非股票或ETF代理工具。\n\n"
             "## 分析原则\n"
             "1. **冲突驱动，非目录驱动**：不得逐一罗列商品。识别2-3个跨商品矛盾（如'上游通胀 vs 下游通缩'、'制造业复苏 vs 投机性囤库'），追溯每个矛盾在多个合约上的表现。每个矛盾就是一个论点，不是数据堆砌。\n"
             "2. **强制跨链验证**：当上下游商品同时可得（如原油→PTA→聚酯；焦煤→焦炭→钢铁；豆粕→饲料），必须验证成本转嫁是否完整。将'上游涨、下游跌'标记为结构性宏观问题。\n"
@@ -125,7 +130,7 @@ def create_etf_structure_analyst(llm):
             "- 引用数字时必须成对呈现（如'30D +8%, 90D -2%'）以显示动量背景。\n"
             "- 像向只想看结论的投资组合经理汇报一样写作。"
             + get_language_instruction()
-        )
+        ), memory_section)
 
         prompt_template = ChatPromptTemplate.from_messages(
             [

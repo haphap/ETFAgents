@@ -71,6 +71,9 @@ class AgentState(MessagesState):
     company_of_interest: Annotated[str, "Legacy alias for asset_of_interest"]
     trade_date: Annotated[str, "What date we are trading at"]
     past_context: Annotated[str, "Resolved lessons from prior decisions"]
+    continuity_context: Annotated[dict[str, str], "Role-aware continuity briefs from the latest same-ticker analysis"]
+    lesson_context: Annotated[dict[str, str], "Role-aware resolved historical lessons"]
+    method_context: Annotated[dict[str, str], "Role-aware reusable analysis-method reminders"]
 
     sender: Annotated[str, "Agent that sent this message"]
 
@@ -124,4 +127,8 @@ class AgentState(MessagesState):
     backtest_signal: Annotated[
         dict[str, object],
         "Preferred final backtest signal for this analysis run",
+    ]
+    analysis_memory_entry: Annotated[
+        dict[str, object],
+        "Structured memory snapshot written after the final portfolio decision",
     ]

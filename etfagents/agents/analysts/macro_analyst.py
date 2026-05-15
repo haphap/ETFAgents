@@ -23,6 +23,10 @@ from langchain_core.messages import AIMessage
 from etfagents.tool_report_utils import run_tool_report_chain
 from etfagents.dataflows.config import get_config
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
+from etfagents.agents.utils.analysis_memory import (
+    build_memory_prompt_section,
+    inject_memory_prompt_section,
+)
 
 
 _VALIDATION_RULES = (
@@ -41,6 +45,7 @@ def create_macro_analyst(llm):
             raise KeyError("trade_date")
         asset_symbol = get_asset_symbol(state)
         instrument_context = build_instrument_context(asset_symbol)
+        memory_section = build_memory_prompt_section(state, role="macro_regime", aliases=("news",))
 
         tools = [
             get_etf_info,
@@ -50,11 +55,11 @@ def create_macro_analyst(llm):
             get_news,
         ]
 
-        system_message = (
+        system_message = inject_memory_prompt_section((
             "你是一名ETF宏观分析师。你的任务是将ETF暴露结构、全球宏观定价、中国宏观发布日历数据和已验证的新闻催化剂整合为一个连贯的配置框架。"
             "先调用 get_etf_info 和 get_etf_holdings 识别基准/风格/行业暴露，再调用 get_macro_regime_data(curr_date, look_back_days) 构建跨资产制度图谱（含Tushare经济日历，通过cn_schedule实现）。"
             "仅使用 get_global_news 和针对性 get_news 验证或挑战数据已暗示的驱动因素。\n\n"
-            "不得产出割裂的清单。建立一条逻辑链：ETF暴露 → 宏观与政策制度 → 异常信号 → 情景敏感性 → 下个再平衡窗口催化剂 → 配置含义。\n\n"
+            + "不得产出割裂的清单。建立一条逻辑链：ETF暴露 → 宏观与政策制度 → 异常信号 → 情景敏感性 → 下个再平衡窗口催化剂 → 配置含义。\n\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
@@ -82,7 +87,7 @@ def create_macro_analyst(llm):
             "标题导语与每个一级章节导语直接陈述结论。"
             "不得使用'本节''本部分''该部分''这一节'等自指式开头（如'本节核心结论指出''本部分结论表明''该部分说明'）。"
             + get_language_instruction()
-        )
+        ), memory_section)
 
         prompt_template = ChatPromptTemplate.from_messages(
             [

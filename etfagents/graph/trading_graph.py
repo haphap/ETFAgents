@@ -2,7 +2,7 @@ import logging
 import os
 from pathlib import Path
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import copy
 from typing import Any, Dict, List, Optional
 
@@ -11,6 +11,13 @@ from langgraph.prebuilt import ToolNode
 from etfagents.llm_clients import create_llm_client
 
 from etfagents.default_config import DEFAULT_CONFIG
+from etfagents.agents.utils.analysis_memory import (
+    AnalysisMemoryStore,
+    MemoryContextBuilder,
+    build_method_playbook_entry,
+    build_outcome_lesson_entry,
+    create_memory_writer,
+)
 from etfagents.agents.utils.memory import TradingMemoryLog
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value
 from etfagents.dataflows.config import set_config
@@ -68,6 +75,17 @@ class TradingAgentsGraph:
         self.deep_thinking_llm, self.quick_thinking_llm = self._create_llms()
 
         self.memory_log = TradingMemoryLog(self.config)
+        self.analysis_memory_store = AnalysisMemoryStore(self.config, self.selected_analysts)
+        self.memory_context_builder = MemoryContextBuilder(
+            self.analysis_memory_store,
+            self.config,
+            self.selected_analysts,
+        )
+        self.memory_writer_node = create_memory_writer(
+            self.analysis_memory_store,
+            config=self.config,
+            selected_analysts=self.selected_analysts,
+        )
 
         # Create tool nodes
         self.tool_nodes = self._create_tool_nodes()
@@ -82,6 +100,7 @@ class TradingAgentsGraph:
             self.deep_thinking_llm,
             self.tool_nodes,
             self.conditional_logic,
+            memory_writer_node=self.memory_writer_node,
         )
 
         self.propagator = Propagator(
@@ -238,10 +257,14 @@ class TradingAgentsGraph:
 
         init_agent_state = None
         if not resumed:
+            memory_bundle = self.memory_context_builder.build(asset_symbol, trade_date_str)
             init_agent_state = self.propagator.create_initial_state(
                 asset_symbol,
                 trade_date,
-                past_context=self.memory_log.get_past_context(asset_symbol),
+                past_context=memory_bundle.past_context or self.memory_log.get_past_context(asset_symbol),
+                continuity_context=memory_bundle.continuity_context,
+                lesson_context=memory_bundle.lesson_context,
+                method_context=memory_bundle.method_context,
             )
 
         args = self.propagator.get_graph_args(callbacks=callbacks)
@@ -313,6 +336,7 @@ class TradingAgentsGraph:
             "trader_backtest_signal": get_state_value(final_state, "trader_backtest_signal", {}),
             "portfolio_backtest_signal": get_state_value(final_state, "portfolio_backtest_signal", {}),
             "backtest_signal": get_state_value(final_state, "backtest_signal", {}),
+            "analysis_memory_entry": get_state_value(final_state, "analysis_memory_entry", {}),
         }
 
         # Save to file
@@ -414,6 +438,36 @@ class TradingAgentsGraph:
 
         if updates:
             self.memory_log.batch_update_with_outcomes(updates)
+        self._resolve_analysis_memory_outcomes(ticker)
+
+    def _resolve_analysis_memory_outcomes(self, ticker: str) -> None:
+        if not self.analysis_memory_store.is_enabled():
+            return
+
+        today = datetime.now(UTC).date().isoformat()
+        for entry in self.analysis_memory_store.get_pending_analyses(ticker, today):
+            raw_return, alpha_return, holding_days = self._fetch_returns(entry.ticker, entry.trade_date)
+            if raw_return is None or alpha_return is None or holding_days is None:
+                continue
+            final_decision = str(entry.signal.get("signal_text_snapshot") or entry.portfolio_summary or entry.thesis_summary)
+            reflection = self.reflector.reflect_on_final_decision(
+                final_decision=final_decision,
+                raw_return=raw_return,
+                alpha_return=alpha_return,
+            )
+            lesson = build_outcome_lesson_entry(
+                entry,
+                raw_return=raw_return,
+                alpha_return=alpha_return,
+                holding_days=holding_days,
+                reflection=reflection,
+            )
+            self.analysis_memory_store.append_outcome(lesson)
+            updated_entry = entry
+            updated_entry.outcome_status = lesson.outcome_status
+            updated_entry.outcome_lesson_id = lesson.id
+            self.analysis_memory_store.append_analysis(updated_entry)
+            self.analysis_memory_store.append_playbook(build_method_playbook_entry(lesson))
 
     def reflect_and_remember(self, returns_losses):
         raise RuntimeError(

@@ -14,6 +14,10 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_manager_terms,
     truncate_for_prompt,
 )
+from etfagents.agents.utils.analysis_memory import (
+    build_memory_prompt_section,
+    inject_memory_prompt_section,
+)
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value, with_state_aliases
 from etfagents.backtest.signals import build_trader_backtest_signal
 
@@ -58,6 +62,7 @@ def create_trader(llm):
         meso_commodity_report = truncate_for_prompt(get_state_value(state, "meso_commodity_report", ""))
         holdings_industry_report = get_state_value(state, "holdings_industry_report", "")
         top_holdings_report = get_state_value(state, "top_holdings_report", "")
+        memory_section = build_memory_prompt_section(state, role="trader")
 
         context = {
             "role": "user",
@@ -68,22 +73,27 @@ def create_trader(llm):
             {
                 "role": "system",
                 "content": (
-                    "You are an ETF allocation strategist analyzing market data to make ETF exposure decisions. "
-                    "Provide a clear allocation thesis, an execution plan, and explicit rebalance and risk controls. "
-                    "Your first sentence in each section must state the current base-case view rather than circling around it. "
-                    "The three sections must open with DIFFERENT sentences — never use the same or near-identical first sentence across sections. "
-                    "In the ETF allocation thesis (section 一), the opening sentence must state WHY the evidence supports this stance (e.g., '当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整'); do not mention sizing, levels, or execution steps. "
-                    "In the execution plan (section 二), the opening sentence must state WHAT to do and at what levels (e.g., '先以目标仓位的20%—30%建立试探仓，价格站回50日均线上方后逐步加仓'); do not restate the thesis rationale. "
-                    "In rebalance and risk controls (section 三), focus on failure conditions, rebalance triggers, cut or restore rules, and what must be monitored next; do not repeat the thesis or execution sentence verbatim. "
-                    "Do not stack multiple rating labels with different wording. "
-                     "If you mention timing in Chinese output, translate it as 时机 or 节奏 instead of leaving the English word. "
-                     "For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三. "
-                     "In addition to the prose sections, populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values. "
-                     "For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct. "
-                     f"{_trader_detail_instruction()} "
-                     f"{get_localized_execution_bias_instruction()}{get_language_instruction()}"
-                 ),
-             },
+                    inject_memory_prompt_section(
+                        (
+                            "You are an ETF allocation strategist analyzing market data to make ETF exposure decisions. "
+                            "Provide a clear allocation thesis, an execution plan, and explicit rebalance and risk controls. "
+                            "Your first sentence in each section must state the current base-case view rather than circling around it. "
+                            "The three sections must open with DIFFERENT sentences — never use the same or near-identical first sentence across sections. "
+                            "In the ETF allocation thesis (section 一), the opening sentence must state WHY the evidence supports this stance (e.g., '当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整'); do not mention sizing, levels, or execution steps. "
+                            "In the execution plan (section 二), the opening sentence must state WHAT to do and at what levels (e.g., '先以目标仓位的20%—30%建立试探仓，价格站回50日均线上方后逐步加仓'); do not restate the thesis rationale. "
+                            "In rebalance and risk controls (section 三), focus on failure conditions, rebalance triggers, cut or restore rules, and what must be monitored next; do not repeat the thesis or execution sentence verbatim. "
+                            "Do not stack multiple rating labels with different wording. "
+                            "If you mention timing in Chinese output, translate it as 时机 or 节奏 instead of leaving the English word. "
+                            "For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三. "
+                            "In addition to the prose sections, populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values. "
+                            "For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct. "
+                            f"{_trader_detail_instruction()} "
+                            f"{get_localized_execution_bias_instruction()}{get_language_instruction()}"
+                        ),
+                        memory_section,
+                    )
+                  ),
+              },
             context,
         ]
 

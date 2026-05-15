@@ -14,6 +14,10 @@ from etfagents.agents.utils.agent_utils import (
     get_language_instruction,
     normalize_chinese_role_terms,
 )
+from etfagents.agents.utils.analysis_memory import (
+    build_memory_prompt_section,
+    inject_memory_prompt_section,
+)
 from etfagents.agents.utils.report_leads import (
     clean_generated_report,
     get_concise_heading_instruction,
@@ -67,10 +71,11 @@ def create_etf_market_analyst(llm):
         current_date = state["trade_date"]
         asset_symbol = get_asset_symbol(state)
         instrument_context = build_instrument_context(asset_symbol)
+        memory_section = build_memory_prompt_section(state, role="market_flow", aliases=("market",))
 
         tools = [get_etf_price_data, get_etf_indicators, get_etf_share, get_etf_nav, get_etf_universe]
 
-        system_message = (
+        system_message = inject_memory_prompt_section((
             "你是一名ETF市场与资金流分析师，聚焦入场时机、流动性与执行质量。"
             "基于价格走势、均线、动量、波动率、份额变化、NAV线索与执行深度，为目标ETF构建一份技术面与资金流综合诊断报告。\n\n"
             "## 数据获取\n"
@@ -142,7 +147,7 @@ def create_etf_market_analyst(llm):
             "## 语言\n"
             "分析文本使用中文。工具名称、指标ID与行情代码保持英文。\n"
             + get_language_instruction()
-        )
+        ), memory_section)
 
         prompt_template = ChatPromptTemplate.from_messages(
             [
