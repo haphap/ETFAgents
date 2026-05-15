@@ -184,6 +184,7 @@ class AnalysisMemoryFlowTests(unittest.TestCase):
             drafts = store.load_playbook_entries()
             self.assertEqual(1, len(drafts))
             self.assertEqual("draft", drafts[0].status)
+            self.assertEqual(drafts[0].created_at, drafts[0].first_seen_at)
             self.assertEqual([], store.get_active_playbook_entries("trader", "510300.SH", "2026-12-20"))
 
             promoted = store.promote_playbook(drafts[0].id, expires_days=30)
@@ -254,6 +255,54 @@ class AnalysisMemoryFlowTests(unittest.TestCase):
             active = store.get_active_playbook_entries("trader", "510300.SH", "2026-03-10")
 
             self.assertEqual([], active)
+
+    def test_promoted_playbook_preserves_first_seen_at_for_audit(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = self._make_config(tmpdir)
+            set_config(cfg)
+            store = AnalysisMemoryStore(cfg, ["market_flow"])
+            store.append_playbook(
+                MethodPlaybookEntry(
+                    id="draft-rule",
+                    role="all",
+                    ticker="510300.SH",
+                    created_at="2026-01-05T00:00:00Z",
+                    first_seen_at="2026-01-05T00:00:00Z",
+                    source_lesson_id="lesson-1",
+                    rule="Keep explicit invalidation levels.",
+                    status="draft",
+                )
+            )
+
+            with patch("etfagents.agents.utils.analysis_memory._utc_now_iso", return_value="2026-01-10T00:00:00Z"):
+                promoted = store.promote_playbook("draft-rule", expires_days=30)
+
+            self.assertEqual("2026-01-10T00:00:00Z", promoted.created_at)
+            self.assertEqual("2026-01-05T00:00:00Z", promoted.first_seen_at)
+
+    def test_method_scope_label_localizes_general_for_chinese_output(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = self._make_config(tmpdir)
+            cfg["output_language"] = "Chinese"
+            set_config(cfg)
+            store = AnalysisMemoryStore(cfg, ["market_flow"])
+            store.append_playbook(
+                MethodPlaybookEntry(
+                    id="cn-rule",
+                    role="all",
+                    ticker="510300.SH",
+                    created_at="2026-01-05T00:00:00Z",
+                    first_seen_at="2026-01-05T00:00:00Z",
+                    source_lesson_id="lesson-1",
+                    rule="优先检查失效条件。",
+                    status="active",
+                    expires_at="2026-03-01",
+                )
+            )
+
+            bundle = MemoryContextBuilder(store, cfg, ["market_flow"]).build("510300.SH", "2026-01-15")
+
+            self.assertIn("[通用/510300.SH]", bundle.method_context["trader"])
 
     def test_analysis_entry_update_rewrites_in_place_without_duplicates(self):
         with tempfile.TemporaryDirectory() as tmpdir:

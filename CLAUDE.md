@@ -77,6 +77,7 @@ ETFAgents is a multi-agent LLM ETF investment framework built on LangGraph. It d
 - Logs/reports default to `~/.etfagents/logs` (override with `ETFAGENTS_RESULTS_DIR`). Cache data defaults to `~/.etfagents/cache` (override with `ETFAGENTS_CACHE_DIR`). Legacy `TRADINGAGENTS_*` env vars are supported as fallbacks.
 - Snapshot files are workflow artifacts, not just UI formatting. Researchers and risk debaters save full snapshots to disk; managers reload them to synthesize multi-round position reports. Preserve both `*_snapshot` and `*_snapshot_path` state fields.
 - Structured memory artifacts live under `<results_dir>/memory/` as NDJSON files per ticker/playbook; live runs use them by default, while backtests keep memory disabled unless explicitly re-enabled in config. Auto-generated playbooks start as `draft` and only enter prompts after explicit promotion. Prompt briefs are built with rule-based summarization and `role_brief_specs`, not an extra summarizer LLM call.
+- Enabling `memory_in_backtest` lowers cache hit rates because the backtest signal cache includes retrievable memory state in its hash.
 
 ## Key conventions
 

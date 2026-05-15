@@ -72,6 +72,7 @@ Notes:
 - Local OpenAI-compatible backends can be used by setting `llm_provider` to `ollama` and configuring `backend_url`.
 - Runtime logs default to `~/.etfagents/logs`; cache defaults to `~/.etfagents/cache`.
 - Structured continuity memory is stored under `<results_dir>/memory/`; `memory_mode` defaults to `full`, while memory stays disabled in backtests unless `memory_in_backtest=True`.
+- Enabling `--memory-in-backtest` makes cache keys depend on retrievable memory state, so cache hit rate drops and backtests can take noticeably longer.
 - Memory briefs are generated with rule-based summarization plus configurable `role_brief_specs`, so different analyst/manager roles receive different continuity fields without an extra LLM summarizer call.
 - Use `--memory-mode` on `etfagents analyze` / `etfagents backtest` to compare `disabled`, `continuity-only`, `lesson`, and `full`; promoted method rules can be activated with `etfagents memory promote-playbook --id <entry-id>`.
 

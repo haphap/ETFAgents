@@ -230,6 +230,7 @@ class MethodPlaybookEntry:
     rationale: str = ""
     status: str = "draft"
     expires_at: str | None = None
+    first_seen_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -308,6 +309,7 @@ class AnalysisMemoryStore:
         promoted = replace(
             entry,
             created_at=promoted_at,
+            first_seen_at=entry.first_seen_at or entry.created_at,
             status="active",
             expires_at=expiry,
         )
@@ -622,10 +624,11 @@ class MemoryContextBuilder:
 
     @staticmethod
     def _playbook_scope_label(entry: MethodPlaybookEntry) -> str:
+        general = "通用" if _is_chinese_output() else "General"
         if entry.role == "all" and entry.ticker:
-            return f"General/{entry.ticker}"
+            return f"{general}/{entry.ticker}"
         if entry.role == "all":
-            return "General"
+            return general
         if entry.ticker:
             return f"{entry.role}/{entry.ticker}"
         return entry.role
@@ -770,11 +773,12 @@ def build_outcome_lesson_entry(
 
 
 def build_method_playbook_entry(lesson: OutcomeLessonEntry) -> MethodPlaybookEntry:
+    created_at = _utc_now_iso()
     return MethodPlaybookEntry(
         id=f"{lesson.id}__method",
         role="all",
         ticker=lesson.ticker,
-        created_at=_utc_now_iso(),
+        created_at=created_at,
         source_lesson_id=lesson.id,
         rule=_truncate(
             lesson.lesson_summary
@@ -783,6 +787,7 @@ def build_method_playbook_entry(lesson: OutcomeLessonEntry) -> MethodPlaybookEnt
         ),
         rationale=f"{lesson.ticker} {lesson.trade_date} resolved as {lesson.outcome_status} with raw {lesson.raw_return:+.1%} and alpha {lesson.alpha_return:+.1%}.",
         status="draft",
+        first_seen_at=created_at,
     )
 
 
