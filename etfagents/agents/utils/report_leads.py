@@ -359,8 +359,39 @@ def strip_declarative_question_marks(report: str) -> str:
     return collapse_blank_lines(cleaned)
 
 
-def clean_generated_report(report: str) -> str:
-    """Normalize common report-format artifacts from analyst output."""
+def contains_qa_label_artifacts(report: str) -> bool:
+    """Public detector: True when QA-label structures (judgement / evidence / etc.) appear."""
+    if not report:
+        return False
+    if _LEADING_LABEL_PREFIX_RE.search(report):
+        return True
+    if _QA_LABEL_RE.search(report):
+        return True
+    return bool(_TERM_BLOCK_RE.search(report))
+
+
+def contains_self_referential_meta_leads(report: str) -> bool:
+    """Public detector: True when self-referential leads (本节锁定…) appear."""
+    if not report:
+        return False
+    return bool(_SELF_REFERENTIAL_META_LEAD_RE.search(report))
+
+
+def contains_meta_openers(report: str) -> bool:
+    """Public detector: True when 本报告将… / This report provides… style openers appear."""
+    if not report:
+        return False
+    return bool(_META_OPENER_RE.search(report))
+
+
+def pre_judge_clean(report: str) -> str:
+    """Idempotent regex cleanups that should run BEFORE the LLM judge / refine.
+
+    Stripping these artifacts up front avoids triggering the judge on issues we
+    can already fix locally (refine preambles, H1 titles, QA labels, self-referential
+    meta-leads, generic ``本报告将…`` openers). Running this pass before validation
+    keeps the judge focused on substantive content quality.
+    """
     if not report:
         return ""
     cleaned = strip_refine_preamble(report)
@@ -368,5 +399,32 @@ def clean_generated_report(report: str) -> str:
     cleaned = strip_qa_labels(cleaned)
     cleaned = strip_meta_openers(cleaned)
     cleaned = strip_self_referential_meta_leads(cleaned)
+    return collapse_blank_lines(cleaned)
+
+
+def post_judge_clean(report: str) -> str:
+    """Cleanups that should run AFTER the LLM refine step.
+
+    Re-runs ``pre_judge_clean`` (idempotent) so any artifact reintroduced by the
+    refine call is normalised, then performs the punctuation pass that should
+    only happen on the final output to avoid corrupting question-style headings
+    inside the original report.
+    """
+    if not report:
+        return ""
+    cleaned = pre_judge_clean(report)
     cleaned = strip_declarative_question_marks(cleaned)
     return collapse_blank_lines(cleaned)
+
+
+def clean_generated_report(report: str) -> str:
+    """Backward-compatible alias covering ``pre_judge_clean`` + ``post_judge_clean``.
+
+    Existing call sites that wrap the entire pipeline in a single post-pass keep
+    working unchanged. New analyst pipelines should call ``pre_judge_clean``
+    before ``validate_and_refine`` and ``post_judge_clean`` after, to avoid the
+    LLM judge being triggered on artifacts the regex layer can fix locally.
+    """
+    if not report:
+        return ""
+    return post_judge_clean(report)

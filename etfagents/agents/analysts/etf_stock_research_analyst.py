@@ -10,12 +10,13 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
-    clean_generated_report,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    post_judge_clean,
+    pre_judge_clean,
 )
-from etfagents.agents.utils.validate_refine import validate_and_refine
+from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.agents.utils.analysis_memory import (
     build_memory_prompt_section,
@@ -24,13 +25,16 @@ from etfagents.agents.utils.analysis_memory import (
 from etfagents.tool_report_utils import run_tool_report_chain
 
 
-_VALIDATION_RULES = (
-    "### 内容覆盖\n"
-    "- 是否逐份分析每份个股报告的论点、数据和评级？\n"
-    "- 是否进行了跨报告交叉分析（共识分歧、盈利预测、估值对比）？\n"
-    "- 是否将个股结论转化为ETF权重、归因和组合风险含义？\n"
-    "- 是否统计了机构评级分布？\n"
-    "- 末尾是否附研报总览表？"
+_REPORT_SPEC = AnalystReportSpec(
+    analyst_name="top_holdings",
+    custom_rules_markdown=(
+        "### 内容覆盖\n"
+        "- 是否逐份分析每份个股报告的论点、数据和评级？\n"
+        "- 是否进行了跨报告交叉分析（共识分歧、盈利预测、估值对比）？\n"
+        "- 是否将个股结论转化为ETF权重、归因和组合风险含义？\n"
+        "- 是否统计了机构评级分布？\n"
+        "- 末尾是否附研报总览表？"
+    ),
 )
 
 
@@ -144,8 +148,9 @@ def create_etf_stock_research_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
-        report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
-        report = clean_generated_report(report) if report else report
+        report = pre_judge_clean(report) if report else report
+        report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
+        report = post_judge_clean(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 
