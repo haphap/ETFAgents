@@ -402,6 +402,20 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         self.assertNotIn("失速。  （一）", cleaned)
         self.assertNotIn("## （一）", cleaned)
 
+    def test_post_judge_clean_removes_opening_parenthetical_term_explanations(self):
+        report = (
+            "铜与热卷需求能否驱动焦煤仓单去化，是本轮中观判断的核心路标"
+            "（仓单是指交易所注册库存，用来衡量现货压力）。若去化不能兑现，首要动作应是减仓。\n\n"
+            "一、核心矛盾与主线判断\n"
+            "制造业需求与上游成本正在争夺利润分配。"
+        )
+
+        cleaned = post_judge_clean(report)
+
+        self.assertNotIn("（仓单是指交易所注册库存，用来衡量现货压力）", cleaned)
+        self.assertIn("核心路标。若去化不能兑现", cleaned)
+        self.assertIn("一、核心矛盾与主线判断", cleaned)
+
 
 
 class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
