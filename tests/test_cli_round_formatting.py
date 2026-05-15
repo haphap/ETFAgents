@@ -238,6 +238,35 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertNotIn("#### 反馈快照摘要", formatted)
         self.assertNotIn("反馈快照", formatted)
 
+    def test_research_manager_dedupes_repeated_rating_and_advice_subsections(self):
+        debate_state = {
+            "bull_history": "",
+            "bear_history": "",
+            "judge_decision": (
+                "## 辩论结论\n"
+                "双方证据仍不足以支持加仓。\n\n"
+                "## 持仓建议\n"
+                "### （一）评级\n"
+                "研究结论: **持有**\n"
+                "### （二）建议\n"
+                "维持当前仓位。\n\n"
+                "## 评级\n"
+                "研究结论: **持有**\n\n"
+                "## 建议\n"
+                "继续等待量价确认。"
+            ),
+        }
+
+        formatted = format_research_team_history(debate_state)
+
+        self.assertEqual(formatted.count("##### （一）评级"), 1)
+        self.assertEqual(formatted.count("##### （二）建议"), 1)
+        self.assertEqual(formatted.count("研究结论: **持有**"), 1)
+        self.assertNotIn("##### （三）评级", formatted)
+        self.assertNotIn("##### （四）建议", formatted)
+        self.assertIn("维持当前仓位。", formatted)
+        self.assertIn("继续等待量价确认。", formatted)
+
     def test_research_manager_dedupes_repeated_feedback_snapshots(self):
         repeated_snapshot = (
             "反馈快照:\n"
@@ -368,6 +397,24 @@ class CliRoundFormattingTests(unittest.TestCase):
 
         self.assertIn("#### 激进风险分析师", formatted)
         self.assertNotIn("### 投资组合经理结论", formatted)
+
+    def test_risk_management_history_splits_inline_markdown_headings_in_body(self):
+        risk_state = {
+            "aggressive_history": (
+                "激进风险分析师: ## 一、宏观定价与产业周期的激进共振 ## （一）实际利率高企非压制而是洗盘\n"
+                "风险预算仍要绑定价格确认。"
+            ),
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": "",
+        }
+
+        formatted = format_risk_management_history(risk_state, include_manager=False)
+
+        self.assertIn("一、宏观定价与产业周期的激进共振\n（一）实际利率高企非压制而是洗盘", formatted)
+        self.assertNotIn("## 一、", formatted)
+        self.assertNotIn("## （一）", formatted)
+        self.assertNotIn("共振 ##", formatted)
 
     def test_portfolio_manager_normalizes_mixed_english_headings_and_terms(self):
         risk_state = {

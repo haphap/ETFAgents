@@ -833,6 +833,26 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertEqual(normalized.count("研究结论: **持有**"), 1)
         self.assertIn("维持当前仓位，等待价格、量能与份额变化共同确认后再决定是否调整敞口。", normalized)
 
+    def test_manager_normalization_uses_later_corrected_rating_when_merging_sections(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **持有**\n"
+            "### （二）建议\n"
+            "先维持当前仓位。\n\n"
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **增持**\n"
+            "### （二）建议\n"
+            "后续若量价确认，应小幅加仓。"
+        )
+
+        self.assertEqual(normalized.count("研究结论:"), 1)
+        self.assertIn("研究结论: **增持**", normalized)
+        self.assertNotIn("研究结论: **持有**", normalized)
+        self.assertIn("先维持当前仓位。", normalized)
+        self.assertIn("后续若量价确认，应小幅加仓。", normalized)
+
     def test_manager_normalization_dedupes_inline_rating_labels_in_positioning_section(self):
         normalized = normalize_chinese_manager_terms(
             "## 持仓建议\n"
