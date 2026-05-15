@@ -282,6 +282,13 @@ _TERM_BLOCK_RE = re.compile(
     r"（(?:附首次出现关键术语|关键术语交易含义速览|关键术语解释|术语速览|术语说明|关键技术[^）]*|技术术语[^）]*|技术指标[^）]*|指标速览[^）]*|指标说明[^）]*)）",
     re.DOTALL,
 )
+_OPENING_SECTION_MARKER_RE = re.compile(r"(?m)^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+、")
+_OPENING_TERM_EXPLANATION_RE = re.compile(
+    r"（[^）]{0,140}(?:"
+    r"是指|指的是|即|也就是|意思是|通俗|简单说|简单来说|用于|用来|衡量|反映|代表|表示|"
+    r"英文|简称|又称|全称|定义|解释|白话|术语|交易含义"
+    r")[^）]{0,140}）"
+)
 _DECISION_LABEL_LINE_RE = re.compile(
     r"(?im)^\s*"
     r"(?:final allocation proposal|final transaction proposal|execution bias|recommendation|rating|research view"
@@ -319,6 +326,21 @@ def strip_qa_labels(report: str) -> str:
     cleaned = _QA_LABEL_RE.sub("", cleaned)
     cleaned = _TERM_BLOCK_RE.sub("", cleaned)
     return collapse_blank_lines(cleaned)
+
+
+def strip_opening_term_explanations(report: str) -> str:
+    """Remove parenthetical term explanations from the opening cap paragraph."""
+    if not report:
+        return ""
+
+    match = _OPENING_SECTION_MARKER_RE.search(report)
+    if not match:
+        return collapse_blank_lines(_OPENING_TERM_EXPLANATION_RE.sub("", report))
+
+    opening = report[: match.start()]
+    rest = report[match.start() :]
+    opening = _OPENING_TERM_EXPLANATION_RE.sub("", opening)
+    return collapse_blank_lines(opening + rest)
 
 
 def strip_decision_label_artifacts(report: str) -> str:
@@ -427,6 +449,7 @@ def pre_judge_clean(report: str) -> str:
     cleaned = strip_refine_preamble(report)
     cleaned = strip_report_title(cleaned)
     cleaned = strip_qa_labels(cleaned)
+    cleaned = strip_opening_term_explanations(cleaned)
     cleaned = strip_decision_label_artifacts(cleaned)
     cleaned = strip_meta_openers(cleaned)
     cleaned = strip_self_referential_meta_leads(cleaned)
