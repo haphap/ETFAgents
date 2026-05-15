@@ -266,7 +266,7 @@ _LEADING_LABEL_PREFIX_RE = re.compile(
     r"|(?:"
     + "|".join(re.escape(label) for label in _LABEL_CUES)
     + r"))"
-    r"(?:\*{0,2}\s*[：:？?]\s*|\*{0,2}\s+)"
+    r"(?:\*{0,2}[ \t]*[：:？?][ \t]*|\*{0,2}[ \t]+)"
 )
 
 _QA_LABEL_RE = re.compile(
@@ -294,7 +294,12 @@ def strip_qa_labels(report: str) -> str:
     """Remove Q&A-style label lines like '对交易应该怎么做：...' from report text."""
     if not report:
         return ""
-    cleaned = _LEADING_LABEL_PREFIX_RE.sub(r"\1", report)
+
+    def _strip_label_prefix(match: re.Match) -> str:
+        prefix = match.group(1)
+        return re.sub(r"^\s*#{1,6}\s*", "", prefix)
+
+    cleaned = _LEADING_LABEL_PREFIX_RE.sub(_strip_label_prefix, report)
     cleaned = _QA_LABEL_RE.sub("", cleaned)
     cleaned = _TERM_BLOCK_RE.sub("", cleaned)
     return collapse_blank_lines(cleaned)

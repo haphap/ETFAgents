@@ -2112,6 +2112,9 @@ def build_history_turn(raw_content: str, role: str) -> str:
 _VISIBLE_DEBATE_LIST_RE = re.compile(
     r"^\s*(?:[-*•]\s+|\d+\s*[.)、．]\s+|[（(]\d+[)）]\s+|[一二三四五六七八九十]+\s*[、.．]\s+)"
 )
+_INLINE_MARKDOWN_CHINESE_HEADING_RE = re.compile(
+    r"\s*#{1,6}\s*(?=(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）))"
+)
 
 
 _NUMERIC_BOLD_RE = re.compile(
@@ -2140,19 +2143,23 @@ def normalize_visible_debate_body(text: str) -> str:
         lines = []
         list_line_count = 0
         for raw_line in raw_block.splitlines():
-            line = raw_line.strip()
-            if not line:
-                continue
-            line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line)
-            line = re.sub(r"(?<!\*)\*\*(.+?)\*\*(?!\*)", _strip_bold_if_not_numeric, line)
-            line = re.sub(r"(?<!_)__(.+?)__(?!_)", r"\1", line)
-            line = re.sub(r"^\s*>+\s*", "", line)
-            line = line.strip()
-            if not line:
-                continue
-            lines.append(line)
-            if _VISIBLE_DEBATE_LIST_RE.match(line):
-                list_line_count += 1
+            normalized_line = _INLINE_MARKDOWN_CHINESE_HEADING_RE.sub("\n", raw_line)
+            normalized_line = _ensure_chinese_section_breaks(normalized_line)
+            for candidate_line in normalized_line.splitlines():
+                line = candidate_line.strip()
+                if not line:
+                    continue
+                line = re.sub(r"^\s{0,3}#{1,6}\s*", "", line)
+                line = re.sub(r"\s{0,3}#{1,6}\s*$", "", line)
+                line = re.sub(r"(?<!\*)\*\*(.+?)\*\*(?!\*)", _strip_bold_if_not_numeric, line)
+                line = re.sub(r"(?<!_)__(.+?)__(?!_)", r"\1", line)
+                line = re.sub(r"^\s*>+\s*", "", line)
+                line = line.strip()
+                if not line:
+                    continue
+                lines.append(line)
+                if _VISIBLE_DEBATE_LIST_RE.match(line):
+                    list_line_count += 1
 
         if not lines:
             continue

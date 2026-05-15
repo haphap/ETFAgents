@@ -24,6 +24,7 @@ from etfagents.agents.utils.agent_utils import (
     get_localized_final_proposal_instruction,
     normalize_chinese_manager_terms,
     normalize_chinese_role_terms,
+    normalize_visible_debate_body,
 )
 from etfagents.dataflows.config import get_config, set_config
 from etfagents.default_config import DEFAULT_CONFIG
@@ -387,6 +388,15 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("\n\n", body)
         self.assertNotIn("1. 价格重新站上20日均线后", visible_before_summary)
         self.assertIn("  1. 量价继续共振。", formatted)
+
+    def test_risk_visible_body_splits_inline_chinese_headings(self):
+        body = normalize_visible_debate_body(
+            "## 一、宏观定价与产业周期的激进共振 ## （一）实际利率高企非压制而是洗盘"
+        )
+
+        self.assertIn("一、宏观定价与产业周期的激进共振\n（一）实际利率高企非压制而是洗盘", body)
+        self.assertNotIn("共振 （一）", body)
+        self.assertNotIn("##", body)
 
     def test_portfolio_manager_prompt_respects_output_language(self):
         llm = _CapturingLLM()

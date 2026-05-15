@@ -26,6 +26,7 @@ from etfagents.agents.utils.agent_utils import build_report_title
 from etfagents.agents.utils.report_leads import (
     clean_generated_report,
     ensure_h1_title,
+    post_judge_clean,
     strip_report_title,
     strip_refine_preamble,
 )
@@ -372,10 +373,22 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         self.assertNotIn("### 信号总结", cleaned)
         self.assertNotIn("### 这意味着什么", cleaned)
         self.assertNotIn("### 交易该怎么做", cleaned)
+        self.assertNotIn("### ", cleaned)
         self.assertIn("盈利修复正在从龙头向产业链扩散。", cleaned)
         self.assertIn("订单与现金流同步改善。", cleaned)
         self.assertIn("行业景气度仍在上行。", cleaned)
         self.assertIn("优先等待回踩确认，再分批布局。", cleaned)
+
+    def test_post_judge_clean_removes_section_lead_heading_without_merging_lines(self):
+        report = (
+            "一、行业主线与分歧焦点\n"
+            "### 章节导语\n"
+            "盈利修复正在从龙头向产业链扩散。\n"
+        )
+        cleaned = post_judge_clean(report)
+        self.assertNotIn("章节导语", cleaned)
+        self.assertNotIn("###", cleaned)
+        self.assertIn("一、行业主线与分歧焦点\n盈利修复正在从龙头向产业链扩散。", cleaned)
 
 
 
