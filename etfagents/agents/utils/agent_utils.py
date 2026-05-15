@@ -813,7 +813,12 @@ _CHINESE_SECTION_BREAK_PATTERN = re.compile(
 
 def _ensure_chinese_section_breaks(text: str) -> str:
     """Insert newlines before Chinese section numbering that appears inline."""
-    return _CHINESE_SECTION_BREAK_PATTERN.sub("\n", text)
+    normalized = _CHINESE_SECTION_BREAK_PATTERN.sub("\n", text)
+    return re.sub(
+        r"(?m)^(#{1,6})\s*\n(?=((?:[一二三四五六七八九十]+、)|(?:（[一二三四五六七八九十\d]+）)))",
+        r"\1 ",
+        normalized,
+    )
 
 
 def normalize_chinese_role_terms(text: str) -> str:
@@ -2275,6 +2280,9 @@ _MANAGER_INSTRUCTION_INLINE_PATTERNS = (
     re.compile(r"这一部分必须写成(?:连贯分析|详细推理|详细执行)段落[^。]*。?"),
     re.compile(r"必须引用报告中的具体数据来支撑判断[^。]*。?"),
     re.compile(r"(?:必须|需要)引用[^。]{0,30}(?:具体数据|数据支撑)[^。]*。?"),
+    re.compile(r"Populate the structured fields [^\n]*", re.IGNORECASE),
+    re.compile(r"In addition to the prose sections, populate the structured fields [^\n]*", re.IGNORECASE),
+    re.compile(r"For structured triggers, prefer supported metrics [^\n]*", re.IGNORECASE),
     re.compile(r"Give a clear, actionable ETF(?: portfolio)? recommendation[^.\n]*\.?", re.IGNORECASE),
     re.compile(r"Include concrete execution guidance[^\n]*", re.IGNORECASE),
     re.compile(r"When writing in Chinese, avoid mixed English labels[^\n]*", re.IGNORECASE),
@@ -2285,6 +2293,11 @@ _MANAGER_INSTRUCTION_INLINE_PATTERNS = (
     re.compile(r"do not repeat a section heading once it has already appeared[^\n]*", re.IGNORECASE),
 )
 
+_MANAGER_SCHEMA_FIELD_LINE_RE = re.compile(
+    r"\b(?:target_weight_pct|target_weight_band|execution_timing|add_triggers|reduce_triggers|exit_triggers|rebalance_triggers|risk_controls)\b"
+)
+_MANAGER_SCHEMA_PUNCT_ONLY_RE = re.compile(r'^[\s\[\]\{\}",:：]+$')
+
 
 def strip_manager_instruction_leakage(text: str) -> str:
     """Remove prompt-instruction fragments that occasionally leak into manager output."""
@@ -2294,6 +2307,15 @@ def strip_manager_instruction_leakage(text: str) -> str:
 
     for pattern in _MANAGER_INSTRUCTION_INLINE_PATTERNS:
         cleaned = pattern.sub("", cleaned)
+    filtered_lines = []
+    for raw_line in cleaned.splitlines():
+        stripped = raw_line.strip()
+        if stripped and _MANAGER_SCHEMA_FIELD_LINE_RE.search(stripped):
+            continue
+        if stripped and _MANAGER_SCHEMA_PUNCT_ONLY_RE.match(stripped):
+            continue
+        filtered_lines.append(raw_line)
+    cleaned = "\n".join(filtered_lines)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
@@ -2363,6 +2385,13 @@ def _normalize_manager_positioning_subsections(text: str) -> str:
     normalized_lines: list[str] = []
     has_positioning_parent = False
 
+    def _last_nonempty_line() -> str:
+        for existing in reversed(normalized_lines):
+            stripped = existing.strip()
+            if stripped:
+                return stripped
+        return ""
+
     def _ensure_positioning_parent() -> None:
         nonlocal has_positioning_parent
         if has_positioning_parent:
@@ -2371,6 +2400,18 @@ def _normalize_manager_positioning_subsections(text: str) -> str:
             normalized_lines.append("")
         normalized_lines.append("## 持仓建议")
         has_positioning_parent = True
+
+    def _append_positioning_subheading(heading: str) -> None:
+        last_nonempty = _last_nonempty_line()
+        if (
+            last_nonempty
+            and not _POSITIONING_PARENT_HEADING_RE.match(last_nonempty)
+            and not _POSITIONING_RATING_HEADING_RE.match(last_nonempty)
+            and not _POSITIONING_ADVICE_HEADING_RE.match(last_nonempty)
+            and not _RATING_ONLY_LINE_PATTERN.match(last_nonempty)
+        ):
+            normalized_lines.append("")
+        normalized_lines.append(heading)
 
     for line in lines:
         stripped = line.strip()
@@ -2382,15 +2423,11 @@ def _normalize_manager_positioning_subsections(text: str) -> str:
             continue
         if _POSITIONING_RATING_HEADING_RE.match(stripped):
             _ensure_positioning_parent()
-            if normalized_lines and normalized_lines[-1].strip():
-                normalized_lines.append("")
-            normalized_lines.append("### （一）评级")
+            _append_positioning_subheading("### （一）评级")
             continue
         if _POSITIONING_ADVICE_HEADING_RE.match(stripped):
             _ensure_positioning_parent()
-            if normalized_lines and normalized_lines[-1].strip():
-                normalized_lines.append("")
-            normalized_lines.append("### （二）建议")
+            _append_positioning_subheading("### （二）建议")
             continue
         normalized_lines.append(line)
 
@@ -2430,13 +2467,48 @@ def _normalize_manager_rating_line(line: str, fallback_rating: str) -> str:
     return f"研究结论: **{rating_text}**"
 
 
+def _compact_manager_positioning_spacing(lines: list[str]) -> list[str]:
+    compacted: list[str] = []
+    total = len(lines)
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped:
+            compacted.append(line)
+            continue
+
+        previous_nonempty = next((entry.strip() for entry in reversed(compacted) if entry.strip()), "")
+        next_nonempty = ""
+        for future in lines[index + 1 : total]:
+            candidate = future.strip()
+            if candidate:
+                next_nonempty = candidate
+                break
+
+        if (
+            previous_nonempty
+            and next_nonempty
+            and (
+                (
+                    _POSITIONING_PARENT_HEADING_RE.match(previous_nonempty)
+                    and _POSITIONING_RATING_HEADING_RE.match(next_nonempty)
+                )
+                or (
+                    _RATING_ONLY_LINE_PATTERN.match(previous_nonempty)
+                    and _POSITIONING_ADVICE_HEADING_RE.match(next_nonempty)
+                )
+            )
+        ):
+            continue
+        compacted.append(line)
+    return _trim_section_lines(compacted)
+
+
 def _ensure_manager_positioning_subsections(lines: list[str], rating: str) -> list[str]:
     trimmed = _trim_section_lines(lines)
     if not trimmed:
         return [
             "### （一）评级",
             _normalize_manager_rating_line("", rating),
-            "",
             "### （二）建议",
             _default_manager_positioning_content(rating),
         ]
@@ -2446,7 +2518,7 @@ def _ensure_manager_positioning_subsections(lines: list[str], rating: str) -> li
         or _POSITIONING_ADVICE_HEADING_RE.match(line.strip())
         for line in trimmed
     ):
-        return trimmed
+        return _compact_manager_positioning_spacing(trimmed)
 
     rating_lines = [line.strip() for line in trimmed if _RATING_ONLY_LINE_PATTERN.match(line.strip())]
     advice_lines = [line for line in trimmed if line.strip() and not _RATING_ONLY_LINE_PATTERN.match(line.strip())]
@@ -2455,7 +2527,7 @@ def _ensure_manager_positioning_subsections(lines: list[str], rating: str) -> li
     if not advice_block:
         advice_block = [_default_manager_positioning_content(rating)]
 
-    rebuilt = ["### （一）评级", rating_line, "", "### （二）建议", *advice_block]
+    rebuilt = ["### （一）评级", rating_line, "### （二）建议", *advice_block]
     return _trim_section_lines(rebuilt)
 
 

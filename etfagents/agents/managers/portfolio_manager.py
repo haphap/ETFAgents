@@ -134,6 +134,7 @@ For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese sec
 Output only the finished report. Never copy, quote, or paraphrase the writing rules or bullet instructions from this prompt into the answer, and do not repeat a section heading once it has already appeared.
 Populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values.
 For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct.
+Never expose machine-readable field names such as target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, or risk_controls in the visible prose.
 
 Use this exact output order with Markdown headings:
 ## {localize_label("Debate Conclusion", "辩论结论")}

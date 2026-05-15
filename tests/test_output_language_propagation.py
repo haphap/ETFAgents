@@ -453,6 +453,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("### （二）建议", rendered)
         self.assertIn("研究结论: **买入**", rendered)
         self.assertIn("### （一）评级\n研究结论: **买入**", rendered)
+        self.assertIn("研究结论: **买入**\n### （二）建议", rendered)
         self.assertIn("### （二）建议\n等待催化确认后再分批布局。", rendered)
         self.assertNotIn("建议评级: 减持", rendered)
         self.assertEqual(rendered.count("研究结论: **买入**"), 1)
@@ -875,6 +876,37 @@ class OutputLanguagePropagationTests(unittest.TestCase):
 
         self.assertNotIn("（一）##", normalized)
         self.assertNotIn("（二）##", normalized)
+
+    def test_manager_normalization_compacts_positioning_subsection_spacing(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n\n"
+            "### （一）评级\n"
+            "研究结论: **持有**\n\n"
+            "### （二）建议\n"
+            "维持当前仓位。"
+        )
+
+        self.assertNotIn("## 持仓建议\n\n### （一）评级", normalized)
+        self.assertNotIn("研究结论: **持有**\n\n### （二）建议", normalized)
+        self.assertIn("## 持仓建议\n### （一）评级", normalized)
+        self.assertIn("研究结论: **持有**\n### （二）建议", normalized)
+
+    def test_manager_normalization_strips_machine_field_name_leakage(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **持有**\n"
+            "### （二）建议\n"
+            "target_weight_pct: 20\n"
+            "execution_timing: next_open\n"
+            "rebalance_triggers: close > 2.08\n"
+            "目标仓位先维持在15%至20%，只有在成交量回到20日均量上方后才继续加仓。"
+        )
+
+        self.assertNotIn("target_weight_pct", normalized)
+        self.assertNotIn("execution_timing", normalized)
+        self.assertNotIn("rebalance_triggers", normalized)
+        self.assertIn("目标仓位先维持在15%至20%", normalized)
 
     def test_collaboration_stop_instruction_prefers_chinese_display(self):
         instruction = get_localized_final_proposal_instruction()

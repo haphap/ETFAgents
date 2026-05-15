@@ -1003,7 +1003,7 @@ def render_research_plan(plan: ResearchPlan) -> str:
             f"{action_logic}\n\n"
             "## 持仓建议\n"
             "### （一）评级\n"
-            f"研究结论: **{recommendation}**\n\n"
+            f"研究结论: **{recommendation}**\n"
             "### （二）建议\n"
             f"{positioning_recommendation}"
         )
@@ -1148,7 +1148,7 @@ def render_portfolio_decision(plan: PortfolioDecision, context_text: str = "") -
             f"{action_logic}\n\n"
             "## 持仓建议\n"
             "### （一）评级\n"
-            f"{final_line}\n\n"
+            f"{final_line}\n"
             "### （二）建议\n"
             f"{positioning_recommendation}"
         )
