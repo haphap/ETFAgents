@@ -2539,7 +2539,41 @@ def _ensure_manager_positioning_subsections(lines: list[str], rating: str) -> li
         or _POSITIONING_ADVICE_HEADING_RE.match(line.strip())
         for line in trimmed
     ):
-        return _compact_manager_positioning_spacing(trimmed)
+        rating_candidates: list[str] = []
+        advice_lines: list[str] = []
+        current_subsection = "advice"
+        for line in trimmed:
+            stripped = line.strip()
+            if not stripped:
+                if advice_lines and advice_lines[-1].strip():
+                    advice_lines.append(line)
+                continue
+            if _POSITIONING_PARENT_HEADING_RE.match(stripped):
+                continue
+            if _POSITIONING_RATING_HEADING_RE.match(stripped):
+                current_subsection = "rating"
+                continue
+            if _POSITIONING_ADVICE_HEADING_RE.match(stripped):
+                current_subsection = "advice"
+                continue
+            if _RATING_ONLY_LINE_PATTERN.match(stripped):
+                rating_candidates.append(stripped)
+                continue
+            if current_subsection == "rating":
+                advice_lines.append(line)
+                continue
+            advice_lines.append(line)
+
+        rating_line = _normalize_manager_rating_line(
+            rating_candidates[-1] if rating_candidates else "",
+            rating,
+        )
+        advice_block = _trim_section_lines(advice_lines)
+        if not advice_block:
+            advice_block = [_default_manager_positioning_content(rating)]
+        return _compact_manager_positioning_spacing(
+            ["### （一）评级", rating_line, "### （二）建议", *advice_block]
+        )
 
     rating_lines = [line.strip() for line in trimmed if _RATING_ONLY_LINE_PATTERN.match(line.strip())]
     advice_lines = [line for line in trimmed if line.strip() and not _RATING_ONLY_LINE_PATTERN.match(line.strip())]
@@ -2561,7 +2595,7 @@ def _dedupe_manager_rating_only_lines(lines: list[str]) -> list[str]:
     if len(rating_lines) <= 1:
         return lines
 
-    preferred_index = rating_lines[0][0]
+    preferred_index = rating_lines[-1][0]
     for index, stripped in reversed(rating_lines):
         if stripped.startswith(("最终配置建议", "最终交易建议")):
             preferred_index = index

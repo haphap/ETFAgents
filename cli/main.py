@@ -44,6 +44,7 @@ from etfagents.agents.utils.agent_utils import (
     make_display_snapshot,
     normalize_chinese_manager_terms,
     normalize_chinese_role_terms,
+    normalize_visible_debate_body,
     strip_analyst_decision_summary,
     strip_all_feedback_snapshots,
     strip_feedback_snapshot,
@@ -661,6 +662,7 @@ def _format_grouped_rounds(
                         speaker,
                     )
                 )
+                argument_body = normalize_visible_debate_body(argument_body)
                 decision_summary = normalize_chinese_role_terms(
                     extract_analyst_decision_summary(turn)
                 )
