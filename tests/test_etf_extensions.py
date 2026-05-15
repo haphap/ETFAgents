@@ -280,6 +280,8 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertIn("share_change_pct", payload)
         self.assertIn("aum_bucket", payload)
         self.assertIn("exposure_bucket", payload)
+        self.assertIn("latest_trade_date", payload)
+        self.assertIn("latest available daily close, not an intraday real-time quote", payload)
         self.assertIn("ok", payload)
 
     def test_candidate_pool_replay_builds_metrics_and_windows(self):

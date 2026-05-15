@@ -1,6 +1,6 @@
 import re
 
-from etfagents.agents.utils.agent_utils import collapse_blank_lines
+from etfagents.agents.utils.agent_utils import collapse_blank_lines, normalize_chinese_role_terms
 
 _H1_TITLE_PATTERN = re.compile(r"^#\s+\S")
 _TITLE_PREFIX_PATTERN = re.compile(r"^(?:#{1,6}\s+)?(?:[一二三四五六七八九十]+、\s*|（[一二三四五六七八九十\d]+）\s*)?")
@@ -282,6 +282,22 @@ _TERM_BLOCK_RE = re.compile(
     r"（(?:附首次出现关键术语|关键术语交易含义速览|关键术语解释|术语速览|术语说明|关键技术[^）]*|技术术语[^）]*|技术指标[^）]*|指标速览[^）]*|指标说明[^）]*)）",
     re.DOTALL,
 )
+_DECISION_LABEL_LINE_RE = re.compile(
+    r"(?im)^\s*"
+    r"(?:final allocation proposal|final transaction proposal|execution bias|recommendation|rating|research view"
+    r"|最终配置建议|最终交易建议|执行倾向|建议评级|配置评级|研究结论|评级)"
+    r"\s*[:：]?\s*\**"
+    r"(?:buy|overweight|hold|underweight|sell|买入|增持|持有|减持|卖出)"
+    r"\**[。！!？?\s]*$"
+)
+_DECISION_LABEL_PREFIX_RE = re.compile(
+    r"(?im)^\s*"
+    r"(?:final allocation proposal|final transaction proposal|execution bias|recommendation|rating|research view"
+    r"|最终配置建议|最终交易建议|执行倾向|建议评级|配置评级|研究结论|评级)"
+    r"\s*[:：]?\s*\**"
+    r"(?:buy|overweight|hold|underweight|sell|买入|增持|持有|减持|卖出)"
+    r"\**[。！!？?\s]+"
+)
 
 _ARTIFACT_ONLY_LINE_RE = re.compile(r"^[\s│|╭╮╰╯┌┐└┘├┤┬┴┼─━—-]+$")
 _INTERROGATIVE_CUE_RE = re.compile(
@@ -302,6 +318,15 @@ def strip_qa_labels(report: str) -> str:
     cleaned = _LEADING_LABEL_PREFIX_RE.sub(_strip_label_prefix, report)
     cleaned = _QA_LABEL_RE.sub("", cleaned)
     cleaned = _TERM_BLOCK_RE.sub("", cleaned)
+    return collapse_blank_lines(cleaned)
+
+
+def strip_decision_label_artifacts(report: str) -> str:
+    """Remove leaked recommendation labels such as FINAL TRANSACTION PROPOSAL / 最终配置建议."""
+    if not report:
+        return ""
+    cleaned = _DECISION_LABEL_LINE_RE.sub("", report)
+    cleaned = _DECISION_LABEL_PREFIX_RE.sub("", cleaned)
     return collapse_blank_lines(cleaned)
 
 
@@ -402,6 +427,7 @@ def pre_judge_clean(report: str) -> str:
     cleaned = strip_refine_preamble(report)
     cleaned = strip_report_title(cleaned)
     cleaned = strip_qa_labels(cleaned)
+    cleaned = strip_decision_label_artifacts(cleaned)
     cleaned = strip_meta_openers(cleaned)
     cleaned = strip_self_referential_meta_leads(cleaned)
     return collapse_blank_lines(cleaned)
@@ -418,6 +444,7 @@ def post_judge_clean(report: str) -> str:
     if not report:
         return ""
     cleaned = pre_judge_clean(report)
+    cleaned = normalize_chinese_role_terms(cleaned)
     cleaned = strip_declarative_question_marks(cleaned)
     return collapse_blank_lines(cleaned)
 

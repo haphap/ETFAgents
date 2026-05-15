@@ -95,6 +95,32 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("风险收益比。\n\n# 二、深度分析", formatted)
         self.assertIn("后续正文。", formatted)
 
+    def test_prepare_report_markdown_splits_inline_markdown_subheading(self):
+        formatted = _prepare_report_markdown(
+            "一、核心持仓共识与分歧\n"
+            "短期扰动更多来自交易层噪声而非基本面失速 ## （一）共识主线\n"
+            "多数券商仍将盈利兑现视为主线。"
+        )
+
+        self.assertIn(
+            "短期扰动更多来自交易层噪声而非基本面失速\n\n## （一）共识主线",
+            formatted,
+        )
+        self.assertNotIn("失速 ## （一）", formatted)
+
+    def test_prepare_report_markdown_splits_inline_top_and_second_level_headings(self):
+        formatted = _prepare_report_markdown(
+            "一、核心持仓共识与分歧 （一）共识主线\n"
+            "多数券商仍将盈利兑现视为主线。\n\n"
+            "二、盈利、估值与机构态度 （一）关键数据对比\n"
+            "盈利修复宽度决定ETF归因质量。"
+        )
+
+        self.assertIn("# 一、核心持仓共识与分歧\n\n## （一）共识主线", formatted)
+        self.assertIn("# 二、盈利、估值与机构态度\n\n## （一）关键数据对比", formatted)
+        self.assertNotIn("共识与分歧 （一）", formatted)
+        self.assertNotIn("机构态度 （一）", formatted)
+
     def test_prepare_report_markdown_strips_exchange_only_pseudo_title_line(self):
         formatted = _prepare_report_markdown(
             "# 舆情与事件影响分析\n\n"
