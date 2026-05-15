@@ -188,8 +188,6 @@ def create_social_media_analyst(llm):
                     "system",
                     (
                         "You are a helpful AI assistant, collaborating with other assistants."
-                        " If you or any other assistant has the FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** or deliverable,"
-                        " prefix your response with FINAL TRANSACTION PROPOSAL: **BUY/HOLD/SELL** so the team knows to stop."
                         + get_collaboration_stop_instruction()
                         + "\n{system_message}\n"
                         + "For your reference, the current date is {current_date}. {instrument_context}"

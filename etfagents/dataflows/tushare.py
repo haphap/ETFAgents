@@ -817,6 +817,7 @@ def get_etf_universe(
         f"Universe size after filters: {len(output)}",
         f"Returned rows: {len(limited)}",
         "Returned rows enriched with liquidity, NAV, share-change, and exposure factor fields.",
+        "latest_close comes from Tushare fund_daily and reflects the latest available daily close, not an intraday real-time quote.",
     ]
     if market:
         summary_lines.append(f"Market filter: {market.upper()}")
@@ -844,6 +845,7 @@ def get_etf_universe(
             "management",
             "asset_scope",
             "exposure_bucket",
+            "latest_trade_date",
             "latest_close",
             "avg_amount_20d",
             "avg_volume_20d",

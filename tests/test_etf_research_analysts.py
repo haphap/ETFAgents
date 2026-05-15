@@ -390,6 +390,18 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         self.assertNotIn("###", cleaned)
         self.assertIn("一、行业主线与分歧焦点\n盈利修复正在从龙头向产业链扩散。", cleaned)
 
+    def test_post_judge_clean_splits_intro_paragraph_and_inline_subheading(self):
+        report = (
+            "一、核心持仓共识与分歧\n"
+            "短期扰动更多来自交易层噪声而非基本面失速。  ## （一）主线共识\n"
+            "多数券商仍将盈利兑现视为主线。\n"
+        )
+        cleaned = post_judge_clean(report)
+        self.assertIn("短期扰动更多来自交易层噪声而非基本面失速。\n（一）主线共识", cleaned)
+        self.assertNotIn("失速。  ## （一）", cleaned)
+        self.assertNotIn("失速。  （一）", cleaned)
+        self.assertNotIn("## （一）", cleaned)
+
 
 
 class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):

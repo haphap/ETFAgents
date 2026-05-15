@@ -297,6 +297,16 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("空头投资者", normalized)
         self.assertIn("基本面分析", normalized)
 
+    def test_normalize_chinese_role_terms_preserves_standalone_markdown_headings(self):
+        normalized = normalize_chinese_role_terms(
+            "正文上一行。\n"
+            "### （一）评级\n"
+            "研究结论: **持有**"
+        )
+
+        self.assertIn("正文上一行。\n### （一）评级", normalized)
+        self.assertIn("研究结论: **持有**", normalized)
+
     def test_risk_team_prompts_respect_output_language(self):
         for factory in (
             create_aggressive_debator,
@@ -916,6 +926,23 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("target_weight_pct", normalized)
         self.assertNotIn("execution_timing", normalized)
         self.assertNotIn("rebalance_triggers", normalized)
+        self.assertIn("目标仓位先维持在15%至20%", normalized)
+
+    def test_manager_normalization_strips_chinese_structured_mapping_leakage(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **持有**\n"
+            "### （二）建议\n"
+            "结构化参数参数映射如下：target_weight_pct 对应目标仓位，execution_timing 对应执行时机。\n"
+            "对于结构化触发器，优先使用支持的指标，如 close、volume、weight_pct。\n"
+            "不得在可见正文中暴露机器可读字段名。\n"
+            "目标仓位先维持在15%至20%，只有量价与份额变化同步改善后才继续加仓。"
+        )
+
+        self.assertNotIn("结构化参数参数映射", normalized)
+        self.assertNotIn("支持的指标", normalized)
+        self.assertNotIn("机器可读字段名", normalized)
         self.assertIn("目标仓位先维持在15%至20%", normalized)
 
     def test_collaboration_stop_instruction_prefers_chinese_display(self):

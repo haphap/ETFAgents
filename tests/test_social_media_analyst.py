@@ -57,6 +57,39 @@ class SocialMediaAnalystTests(unittest.TestCase):
     @patch("etfagents.agents.analysts.social_media_analyst.get_news")
     @patch("etfagents.agents.analysts.social_media_analyst.get_etf_holdings")
     @patch("etfagents.agents.analysts.social_media_analyst.get_etf_info")
+    def test_social_analyst_strips_leaked_transaction_proposal_prefix(
+        self, mock_info, mock_holdings, mock_news, mock_global, mock_queries
+    ):
+        mock_info.func.return_value = "ETF profile data"
+        mock_holdings.func.return_value = "name,weight\n紫金矿业,8.5%\n贵州茅台,6.2%\n"
+        mock_news.return_value = "## ticker news\n- Some news"
+        mock_global.return_value = "## global news\n- Global event"
+        mock_queries.return_value = "## holdings news\n- Holding news"
+
+        llm = RunnableLambda(
+            lambda prompt, config=None: AIMessage(content=_VALIDATION_PASSED_JSON)
+            if "报告质量审核员" in str(prompt)
+            else AIMessage(content="FINAL TRANSACTION PROPOSAL: **OVERWEIGHT**\n\n情绪主线仍偏正面。")
+        )
+        node = create_social_media_analyst(llm)
+
+        result = node(
+            {
+                "company_of_interest": "510300.SH",
+                "trade_date": "2026-04-01",
+                "messages": [HumanMessage(content="Analyze 510300.SH")],
+            }
+        )
+
+        self.assertNotIn("FINAL TRANSACTION PROPOSAL", result["catalyst_sentiment_report"])
+        self.assertNotIn("OVERWEIGHT", result["catalyst_sentiment_report"])
+        self.assertIn("情绪主线仍偏正面。", result["catalyst_sentiment_report"])
+
+    @patch("etfagents.agents.analysts.social_media_analyst.get_news_for_queries")
+    @patch("etfagents.agents.analysts.social_media_analyst.get_global_news")
+    @patch("etfagents.agents.analysts.social_media_analyst.get_news")
+    @patch("etfagents.agents.analysts.social_media_analyst.get_etf_holdings")
+    @patch("etfagents.agents.analysts.social_media_analyst.get_etf_info")
     def test_social_analyst_prompt_contains_data_blocks_and_instructions(
         self, mock_info, mock_holdings, mock_news, mock_global, mock_queries
     ):
@@ -102,6 +135,7 @@ class SocialMediaAnalystTests(unittest.TestCase):
         self.assertIn("不得使用英文标签", system_msg)
         self.assertIn("跨数据源比对", system_msg)
         self.assertIn("区分事实与观点", system_msg)
+        self.assertNotIn("FINAL TRANSACTION PROPOSAL", system_msg)
 
     @patch("etfagents.agents.analysts.social_media_analyst.get_news_for_queries")
     @patch("etfagents.agents.analysts.social_media_analyst.get_global_news")

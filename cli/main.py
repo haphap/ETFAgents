@@ -210,7 +210,18 @@ def _normalize_report_heading_numbering(content: str) -> str:
     min_level = min(unique_levels)
     min_level_count = sum(level == min_level for level in levels)
     has_deeper_levels = any(level > min_level for level in levels)
-    title_level = min_level if min_level_count == 1 and has_deeper_levels else None
+    first_min_heading = next(
+        (match.group(3).strip() for match in matches if len(match.group(1)) == min_level),
+        "",
+    )
+    first_min_is_numbered_section = bool(
+        re.match(r"^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)", first_min_heading)
+    )
+    title_level = (
+        min_level
+        if min_level_count == 1 and has_deeper_levels and not first_min_is_numbered_section
+        else None
+    )
     numbered_levels = [level for level in unique_levels if level != title_level]
     if not numbered_levels:
         return text
@@ -244,8 +255,18 @@ _REPORT_HEADING_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+\S")
 _VISIBLE_SECTION_LINE_PATTERN = re.compile(
     r"^\s*(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*\S"
 )
+_VISIBLE_SECTION_MARKER = r"(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)"
 _INLINE_VISIBLE_SECTION_PATTERN = re.compile(
-    r"([。！？；：:])\s*((?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*\S)"
+    rf"([。！？；：:])\s*({_VISIBLE_SECTION_MARKER}\s*\S)"
+)
+_INLINE_MARKDOWN_VISIBLE_SECTION_PATTERN = re.compile(
+    rf"(?<=[^#\n])[ \t]*#{{1,6}}[ \t]*(?={_VISIBLE_SECTION_MARKER}\s*\S)"
+)
+_INLINE_SPACED_SUBSECTION_PATTERN = re.compile(
+    r"(?<=[^#\s\n])[\t ]+(?=（[一二三四五六七八九十\d]+）\s*\S)"
+)
+_INLINE_TOP_TO_SUBSECTION_PATTERN = re.compile(
+    r"(?m)^(\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+、[^\n]*?)[\t ]+(?=（[一二三四五六七八九十\d]+）\s*\S)"
 )
 
 
@@ -263,7 +284,11 @@ def _split_inline_section_headings(content: str) -> str:
     text = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not text:
         return ""
-    return _INLINE_VISIBLE_SECTION_PATTERN.sub(r"\1\n\n\2", text)
+    text = _INLINE_MARKDOWN_VISIBLE_SECTION_PATTERN.sub("\n\n", text)
+    text = _INLINE_VISIBLE_SECTION_PATTERN.sub(r"\1\n\n\2", text)
+    text = _INLINE_TOP_TO_SUBSECTION_PATTERN.sub(r"\1\n\n", text)
+    text = _INLINE_SPACED_SUBSECTION_PATTERN.sub("\n\n", text)
+    return text
 
 
 def _ensure_report_heading_spacing(content: str) -> str:
@@ -274,6 +299,8 @@ def _ensure_report_heading_spacing(content: str) -> str:
     lines = text.split("\n")
     spaced: list[str] = []
     for index, line in enumerate(lines):
+        if _is_report_heading_line(line) and spaced and spaced[-1].strip():
+            spaced.append("")
         spaced.append(line)
         if index == len(lines) - 1:
             continue
@@ -1471,7 +1498,14 @@ def display_complete_report(final_state):
             )
         )
         for title, content in analysts:
-            console.print(Panel(Markdown(content), title=title, border_style="blue", padding=(1, 2)))
+            console.print(
+                Panel(
+                    Markdown(_prepare_report_markdown(content)),
+                    title=title,
+                    border_style="blue",
+                    padding=(1, 2),
+                )
+            )
 
     # II. Research Team Reports
     if final_state.get("investment_debate_state"):
@@ -1503,7 +1537,11 @@ def display_complete_report(final_state):
         )
         console.print(
             Panel(
-                Markdown(get_state_value(final_state, "trader_allocation_plan", "")),
+                Markdown(
+                    _prepare_report_markdown(
+                        get_state_value(final_state, "trader_allocation_plan", "")
+                    )
+                ),
                 title=_localize_cli_role_title("Trader"),
                 border_style="blue",
                 padding=(1, 2),

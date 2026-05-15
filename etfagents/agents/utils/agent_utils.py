@@ -809,11 +809,15 @@ _CHINESE_SECTION_BREAK_PATTERN = re.compile(
     r"(?<=[^\n])(?=[一二三四五六七八九十]+、)"
     r"|(?<=[^\n])(?=（[一二三四五六七八九十\d]+）)"
 )
+_INLINE_MARKDOWN_CHINESE_SECTION_PATTERN = re.compile(
+    r"(?<=[^#\n])[ \t]*#{1,6}[ \t]*(?=(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）))"
+)
 
 
 def _ensure_chinese_section_breaks(text: str) -> str:
     """Insert newlines before Chinese section numbering that appears inline."""
-    normalized = _CHINESE_SECTION_BREAK_PATTERN.sub("\n", text)
+    normalized = _INLINE_MARKDOWN_CHINESE_SECTION_PATTERN.sub("\n", text)
+    normalized = _CHINESE_SECTION_BREAK_PATTERN.sub("\n", normalized)
     return re.sub(
         r"(?m)^(#{1,6})\s*\n(?=((?:[一二三四五六七八九十]+、)|(?:（[一二三四五六七八九十\d]+）)))",
         r"\1 ",
@@ -2290,6 +2294,10 @@ _MANAGER_INSTRUCTION_INLINE_PATTERNS = (
     re.compile(r"Populate the structured fields [^\n]*", re.IGNORECASE),
     re.compile(r"In addition to the prose sections, populate the structured fields [^\n]*", re.IGNORECASE),
     re.compile(r"For structured triggers, prefer supported metrics [^\n]*", re.IGNORECASE),
+    re.compile(r"(?:除(?:了)?正文部分(?:之外|外)|在正文之外)[^\n。]*(?:填充|补充|提供)[^\n。]*结构化(?:字段|参数)[^\n。]*[。.]?"),
+    re.compile(r"结构化(?:字段|参数)(?:参数)?(?:映射)?[^\n。]*(?:如下|为|包括|使用|填写|填充)[^\n。]*[。.]?"),
+    re.compile(r"对于结构化(?:触发器|触发条件|规则)[^\n。]*(?:优先|推荐|请使用)[^\n。]*(?:指标|度量)[^\n。]*[。.]?"),
+    re.compile(r"(?:不要|不得|切勿)在(?:可见)?(?:正文|文本|内容|输出)中(?:暴露|输出|出现|包含)[^\n。]*(?:字段名|参数名|机器可读)[^\n。]*[。.]?"),
     re.compile(r"Give a clear, actionable ETF(?: portfolio)? recommendation[^.\n]*\.?", re.IGNORECASE),
     re.compile(r"Include concrete execution guidance[^\n]*", re.IGNORECASE),
     re.compile(r"When writing in Chinese, avoid mixed English labels[^\n]*", re.IGNORECASE),
@@ -2318,6 +2326,12 @@ def strip_manager_instruction_leakage(text: str) -> str:
     for raw_line in cleaned.splitlines():
         stripped = raw_line.strip()
         if stripped and _MANAGER_SCHEMA_FIELD_LINE_RE.search(stripped):
+            continue
+        if stripped and (
+            ("结构化" in stripped and "参数" in stripped and ("映射" in stripped or "字段" in stripped or "填写" in stripped or "填充" in stripped))
+            or ("结构化" in stripped and ("触发器" in stripped or "触发条件" in stripped) and ("指标" in stripped or "度量" in stripped))
+            or (("机器可读" in stripped or "字段名" in stripped or "参数名" in stripped) and ("不要" in stripped or "不得" in stripped or "切勿" in stripped))
+        ):
             continue
         if stripped and _MANAGER_SCHEMA_PUNCT_ONLY_RE.match(stripped):
             continue
