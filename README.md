@@ -12,9 +12,13 @@ The project coordinates specialist analyst agents, a bull/bear research debate, 
 - **Interactive CLI** with Rich-based live output
 - **Multiple LLM providers** including OpenAI, Google, Anthropic, xAI, MiniMax, OpenRouter, and Ollama/OpenAI-compatible backends
 - **Vendor-routed market data** with fallback across Tushare, yfinance, qlib, Brave Search, and OpenCLI news aggregation
+- **Backtrader-powered backtests** of candidate-pool decisions with structured triggers, configurable execution timing, and benchmark comparison
+- **Layered analyst report validation** with static structural checks first, then an optional structured-output LLM judge / refine pass
 - **Checkpoint/resume support** for long-running runs
 - **Layered agent memory** with latest-analysis continuity, resolved lessons, and reusable method reminders
 - **English and Chinese output** for reports and final decisions
+
+See also: [`docs/recent-backtesting-and-memory-notes.md`](docs/recent-backtesting-and-memory-notes.md) for a concise delivery summary of the recent backtesting and memory-system work.
 
 ## Analyst Stack
 
@@ -75,6 +79,8 @@ Notes:
 - Enabling `--memory-in-backtest` makes cache keys depend on retrievable memory state, so cache hit rate drops and backtests can take noticeably longer.
 - Memory briefs are generated with rule-based summarization plus configurable `role_brief_specs`, so different analyst/manager roles receive different continuity fields without an extra LLM summarizer call.
 - Use `--memory-mode` on `etfagents analyze` / `etfagents backtest` to compare `disabled`, `continuity-only`, `lesson`, and `full`; promoted method rules can be activated with `etfagents memory promote-playbook --id <entry-id>`.
+- Set `validation_mode` (or wire it through analyst calls) to one of `disabled`, `static_only`, `static_plus_llm` (default), or `llm_only`. `static_only` keeps the deterministic structural / token / format-artifact checks but skips the LLM judge, useful for cost-sensitive or backtest runs.
+- `etfagents backtest --force-refresh` bypasses the agent-output signal cache when the underlying LLM model, prompts, or vendor routing change.
 
 ## CLI Usage
 
@@ -169,7 +175,10 @@ main.py               Minimal programmatic example
 - `etfagents/graph/etf_graph.py` defines the ETF-specific graph on top of the shared trading graph base.
 - `etfagents/graph/setup.py` assembles the LangGraph workflow.
 - `etfagents/agents/utils/analysis_memory.py` stores structured analysis snapshots, resolved outcome lessons, and reusable method rules, then builds role-aware continuity / lesson / method briefs for later runs.
-- `etfagents/dataflows/interface.py` routes tool calls to the configured data vendors with fallback behavior.
+- `etfagents/agents/utils/validate_refine.py` runs the layered report validator (static structural checks first, optional structured-output LLM judge / refine), driven by per-analyst `AnalystReportSpec` definitions.
+- `etfagents/agents/utils/report_leads.py` provides the `pre_judge_clean` / `post_judge_clean` regex pipeline that strips refine preambles, H1 titles, QA labels, meta openers, and self-referential leads.
+- `etfagents/backtest/` contains the Backtrader engine, candidate-pool runner, signal cache, and the structured `BacktestSignal` / `Trigger` / `RiskRule` data models that drive dynamic mid-cycle rebalances.
+- `etfagents/dataflows/interface.py` routes tool calls to the configured data vendors with fallback behavior, and applies the `as_of_date` clamp that prevents future-data leakage during backtests.
 - `etfagents/llm_clients/factory.py` normalizes LLM provider setup behind a single client factory.
 
 ## Development
