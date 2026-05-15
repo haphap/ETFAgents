@@ -13,12 +13,13 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
-    clean_generated_report,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    post_judge_clean,
+    pre_judge_clean,
 )
-from etfagents.agents.utils.validate_refine import validate_and_refine
+from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
 from langchain_core.messages import AIMessage
 from etfagents.tool_report_utils import run_tool_report_chain
 from etfagents.dataflows.config import get_config
@@ -29,12 +30,15 @@ from etfagents.agents.utils.analysis_memory import (
 )
 
 
-_VALIDATION_RULES = (
-    "### 内容覆盖\n"
-    "- 是否建立了逻辑链：ETF暴露 → 宏观与政策制度 → 异常信号 → 情景敏感性 → 配置含义？\n"
-    "- 是否整合了利率、信用、地缘政治和中国经济日历数据？\n"
-    "- 是否说明了基准情景失效点和替代触发条件？\n"
-    "- 末尾是否附Markdown摘要表格？"
+_REPORT_SPEC = AnalystReportSpec(
+    analyst_name="macro_regime",
+    custom_rules_markdown=(
+        "### 内容覆盖\n"
+        "- 是否建立了逻辑链：ETF暴露 → 宏观与政策制度 → 异常信号 → 情景敏感性 → 配置含义？\n"
+        "- 是否整合了利率、信用、地缘政治和中国经济日历数据？\n"
+        "- 是否说明了基准情景失效点和替代触发条件？\n"
+        "- 末尾是否附Markdown摘要表格？"
+    ),
 )
 
 
@@ -118,8 +122,9 @@ def create_macro_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
-        report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
-        report = clean_generated_report(report) if report else report
+        report = pre_judge_clean(report) if report else report
+        report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
+        report = post_judge_clean(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

@@ -19,27 +19,33 @@ from etfagents.agents.utils.analysis_memory import (
     inject_memory_prompt_section,
 )
 from etfagents.agents.utils.report_leads import (
-    clean_generated_report,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    post_judge_clean,
+    pre_judge_clean,
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
-from etfagents.agents.utils.validate_refine import validate_and_refine
+from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
 from etfagents.tool_report_utils import run_tool_report_chain
 
 logger = logging.getLogger(__name__)
 
 
-_VALIDATION_RULES = (
-    "### 内容覆盖\n"
-    "- 是否包含三个一级章节：一、市场结构与量价诊断；二、交易确认与执行计划；三、关键价位与条件情景推演？\n"
-    "- 每个一级章节（一、二、三）是否以2-3句导语开头总结该节核心结论？\n"
-    "- 是否覆盖趋势指标（SMA/EMA）、动量（MACD）、超买超卖（RSI）、波动率（Bollinger）和量能确认（VWMA）？\n"
-    "- 是否结合份额变化、NAV溢价/折价和换手率分析资金积累/分配/拥挤状态？\n"
-    "- 第三部分是否使用连贯段落而非标签式清单？\n"
-    "- 末尾是否附指标总览表（含指标、数值、位置、交易含义、关键阈值列）？\n"
-    "- 末尾是否附综合结论段落（含配置方向、关键价位、资金状态）？"
+_REPORT_SPEC = AnalystReportSpec(
+    analyst_name="market_flow",
+    required_top_sections=("一", "二", "三"),
+    required_indicator_tokens=("MACD", "RSI"),
+    custom_rules_markdown=(
+        "### 内容覆盖\n"
+        "- 是否包含三个一级章节：一、市场结构与量价诊断；二、交易确认与执行计划；三、关键价位与条件情景推演？\n"
+        "- 每个一级章节（一、二、三）是否以2-3句导语开头总结该节核心结论？\n"
+        "- 是否覆盖趋势指标（SMA/EMA）、动量（MACD）、超买超卖（RSI）、波动率（Bollinger）和量能确认（VWMA）？\n"
+        "- 是否结合份额变化、NAV溢价/折价和换手率分析资金积累/分配/拥挤状态？\n"
+        "- 第三部分是否使用连贯段落而非标签式清单？\n"
+        "- 末尾是否附指标总览表（含指标、数值、位置、交易含义、关键阈值列）？\n"
+        "- 末尾是否附综合结论段落（含配置方向、关键价位、资金状态）？"
+    ),
 )
 
 _ETF_MARKET_INDICATORS = {
@@ -178,8 +184,9 @@ def create_etf_market_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
-        report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
-        report = clean_generated_report(report) if report else report
+        report = pre_judge_clean(report) if report else report
+        report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
+        report = post_judge_clean(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

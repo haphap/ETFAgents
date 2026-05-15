@@ -16,12 +16,13 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
-    clean_generated_report,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    post_judge_clean,
+    pre_judge_clean,
 )
-from etfagents.agents.utils.validate_refine import validate_and_refine
+from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
 from etfagents.dataflows.opencli_news import get_global_news, get_news, get_news_for_queries
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.agents.utils.analysis_memory import (
@@ -31,13 +32,16 @@ from etfagents.agents.utils.analysis_memory import (
 
 logger = logging.getLogger(__name__)
 
-_VALIDATION_RULES = (
-    "### 内容覆盖\n"
-    "- 是否将分析扩展到ETF重行业和权重股，而非仅停留在ETF代码层面？\n"
-    "- 是否对每个事件说明传导路径：新闻/情绪/宏观事件 → 持仓/行业影响 → ETF价格含义？\n"
-    "- 是否区分了真实支撑、真实拖累与短期噪声？\n"
-    "- 是否对跨数据源的分歧或一致性进行了分析？\n"
-    "- 末尾是否附Markdown摘要表格？"
+_REPORT_SPEC = AnalystReportSpec(
+    analyst_name="catalyst_sentiment",
+    custom_rules_markdown=(
+        "### 内容覆盖\n"
+        "- 是否将分析扩展到ETF重行业和权重股，而非仅停留在ETF代码层面？\n"
+        "- 是否对每个事件说明传导路径：新闻/情绪/宏观事件 → 持仓/行业影响 → ETF价格含义？\n"
+        "- 是否区分了真实支撑、真实拖累与短期噪声？\n"
+        "- 是否对跨数据源的分歧或一致性进行了分析？\n"
+        "- 末尾是否附Markdown摘要表格？"
+    ),
 )
 
 _HOLDING_NAME_COLUMNS = ("name", "stk_name", "sec_name")
@@ -205,8 +209,9 @@ def create_social_media_analyst(llm):
 
         # Phase 6: Post-process
         report = normalize_chinese_role_terms(result.content) if result.content else ""
-        report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
-        report = clean_generated_report(report) if report else report
+        report = pre_judge_clean(report) if report else report
+        report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
+        report = post_judge_clean(report) if report else report
         if report:
             result = AIMessage(content=report)
 

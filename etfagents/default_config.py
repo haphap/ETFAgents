@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
         "trading_memory.md",
     ),
     "memory_log_max_entries": None,
+    "validation_mode": "static_plus_llm",
     "memory_mode": "full",
     "memory_in_backtest": False,
     "continuity_max_age_days": 30,

@@ -9,12 +9,13 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
-    clean_generated_report,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    post_judge_clean,
+    pre_judge_clean,
 )
-from etfagents.agents.utils.validate_refine import validate_and_refine
+from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.agents.utils.analysis_memory import (
     build_memory_prompt_section,
@@ -23,14 +24,17 @@ from etfagents.agents.utils.analysis_memory import (
 from etfagents.tool_report_utils import run_tool_report_chain
 
 
-_VALIDATION_RULES = (
-    "### 内容覆盖\n"
-    "- 是否将报告锁定在一个可证伪的命题上？\n"
-    "- 是否按交易矛盾（而非商品品类）组织分析？\n"
-    "- 是否对每个矛盾给出方向倾向和确信度（低/中/高）？\n"
-    "- 是否验证了上下游成本转嫁是否完整？\n"
-    "- 是否设置了情景推演（基准/替代/尾部）并给出概率估计？\n"
-    "- 末尾是否附近期合约表现总览表？"
+_REPORT_SPEC = AnalystReportSpec(
+    analyst_name="meso_commodity",
+    custom_rules_markdown=(
+        "### 内容覆盖\n"
+        "- 是否将报告锁定在一个可证伪的命题上？\n"
+        "- 是否按交易矛盾（而非商品品类）组织分析？\n"
+        "- 是否对每个矛盾给出方向倾向和确信度（低/中/高）？\n"
+        "- 是否验证了上下游成本转嫁是否完整？\n"
+        "- 是否设置了情景推演（基准/替代/尾部）并给出概率估计？\n"
+        "- 末尾是否附近期合约表现总览表？"
+    ),
 )
 
 
@@ -161,8 +165,9 @@ def create_etf_structure_analyst(llm):
             instrument_context=instrument_context,
         )
         report = normalize_chinese_role_terms(report) if report else report
-        report = validate_and_refine(report, llm, _VALIDATION_RULES) if report else report
-        report = clean_generated_report(report) if report else report
+        report = pre_judge_clean(report) if report else report
+        report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
+        report = post_judge_clean(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

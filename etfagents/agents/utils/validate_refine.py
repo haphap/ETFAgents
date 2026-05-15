@@ -1,160 +1,426 @@
 """Self-critique + refine pipeline for analyst reports.
 
-Two-step process:
-1. Judge: LLM evaluates the report against structured rules, outputs JSON verdict
-2. Refine: If issues found, LLM fixes the report using specific defects from verdict
+Pipeline (per analyst):
+
+  1. Static validation: cheap regex / substring checks driven by ``AnalystReportSpec``.
+     Catches missing top sections, missing required tokens, markdown ``#``/``##``
+     headings and label-style artifacts deterministically.
+  2. LLM judge: when the chosen mode allows it, the judge runs as a structured
+     output call (Pydantic ``JudgeVerdict``) so we no longer rely on a fragile
+     ``\\{[\\s\\S]*\\}`` regex over a free-text response.
+  3. Refine: only invoked when the merged verdict reports issues.
+
+The ``validation_mode`` config flag (``static_only`` / ``static_plus_llm`` /
+``llm_only`` / ``disabled``) selects which steps run, defaulting to
+``static_plus_llm`` to preserve current behaviour.
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass, field
 import json
 import logging
 import re
+from typing import Any, Optional
+
+from pydantic import BaseModel, Field
 
 from etfagents.content_utils import extract_text_content
+from etfagents.agents.utils.report_leads import (
+    contains_meta_openers,
+    contains_qa_label_artifacts,
+    contains_self_referential_meta_leads,
+)
+from etfagents.agents.utils.structured import (
+    bind_structured,
+    invoke_structured_or_freetext_with_result,
+)
 
 logger = logging.getLogger(__name__)
 
-_JUDGE_PROMPT_TEMPLATE = (
-    "你是一名报告质量审核员。请严格按以下标准评审报告，并以JSON格式输出评审结果。\n\n"
-    "## 通用评审标准\n\n"
-    "### 结构完整性\n"
-    "- 报告是否以2-4句概述段落开头（不得以标题或列表开头）？\n"
-    "- 一级标题是否使用\"一、\"\"二、\"\"三、\"格式，且标题中不得包含英文翻译或括号注释？\n"
-    "- 不得出现连续重复的一级标题\n"
-    "- 每个一级章节是否以2-3句概括性导语开头，且导语高于子章节层面（不重复子章节内容）？\n"
-    "- 第二部分（如有）是否直接写正文、未插入独立导语或帽段？\n"
-    "- 不得出现\"##\"或其他markdown标题格式（应使用\"一、\"中文编号）\n\n"
-    "### 术语解释\n"
-    "- 所有中文技术术语（如\"多头排列\"\"金叉\"\"背离\"\"发散\"\"放量突破\"）首次出现时是否用通俗语言解释并说明交易含义？\n"
-    "- 不得出现未解释的行话（如\"标准多头发散形态\"）\n\n"
-    "### 可操作性\n"
-    "- 是否在每个主要信号后回答了\"这意味着什么\"和\"对交易应该怎么做\"？\n"
-    "- 开篇第一句是否直接陈述核心结论或判断（偏多/偏空/中性及原因），而非\"本报告将…\"等场景设置？\n\n"
-    "### 禁止内容\n"
-    "- 章节导语和段落开头不得使用任何自指式元叙述，包括但不限于：\"本部分结论表明\"\"该部分说明\"\"这一节意味着\"\"本节核心结论指出\"\"本节锁定\"\"本节聚焦\"\"本节讨论\"\"本节围绕\"\"本段核心观点是\"。正确做法是直接陈述结论，不提及\"本节\"\"本部分\"\"本段\"。\n"
-    "- 不得使用\"判断：\"\"证据：\"\"关键价位：\"\"条件情景：\"等标签式结构\n"
-    "- 不得出现\"结论依据\"scaffold标签\n"
-    "- 不得讨论数据源分类噪声、券商标签噪声、搜索错配或检索伪影\n\n"
-    "### 段落质量\n"
-    "- 连续出现三个以上裸数据片段后是否有解释性语句？\n"
-    "- 是否避免了\"值得注意的是\"\"深度挂钩\"\"全面覆盖\"等填充语？\n\n"
-    "{analyst_specific_rules}\n\n"
-    "## 评审报告\n\n"
-    "{report}\n\n"
-    "## 输出格式（严格JSON，不要输出其他内容）\n\n"
-    "{{\n"
-    '  "score": 0-10,\n'
-    '  "pass": true/false,\n'
-    '  "critical_issues": [\n'
-    '    "具体问题描述（结构错误、缺少关键部分、多处无解释术语等）"\n'
-    "  ],\n"
-    '  "minor_issues": [\n'
-    '    "次要问题（措辞不够精炼、个别数据缺解释等）"\n'
-    "  ],\n"
-    '  "missing_elements": ["缺失的具体元素"],\n'
-    '  "general_comment": "总体评审意见，若合格则肯定优点"\n'
-    "}}\n\n"
-    "评分标准：\n"
-    "- 9-10分：完全满足所有标准，pass=true\n"
-    "- 7-8分：有minor_issues但无critical_issues，pass=true\n"
-    "- 6分以下：存在critical_issues，pass=false\n"
-    "- 任何结构错误、缺少关键章节、多处无解释术语 → critical_issue → pass=false"
-)
 
-_REFINE_PROMPT_TEMPLATE = (
-    "你的报告存在以下问题，请重新生成完整报告以修正所有缺陷。保留原有正确部分，但必须完全满足评审标准。\n\n"
-    "## 评审结果\n\n"
-    "{judge_json}\n\n"
-    "## 原始报告\n\n"
-    "{report}\n\n"
-    "## 要求\n"
-    "- 重新生成完整报告，不是补丁\n"
-    "- 逐一修正critical_issues中列出的所有问题\n"
-    "- 补充missing_elements中列出的缺失内容\n"
-    "- 保留原报告中正确的分析和数据\n"
-    "- 严格遵守所有结构、术语、可操作性和风格要求\n\n"
-    "直接输出修正后的完整报告。"
-)
-
-_JSON_BLOCK_RE = re.compile(r"\{[\s\S]*\}")
+# ---------------------------------------------------------------------------
+# Spec / verdict models
+# ---------------------------------------------------------------------------
 
 
-def _parse_judge_json(text: str) -> dict | None:
-    """Extract JSON verdict from judge response, tolerant of markdown fences."""
-    match = _JSON_BLOCK_RE.search(text)
-    if not match:
-        return None
-    try:
-        return json.loads(match.group())
-    except json.JSONDecodeError:
-        return None
+@dataclass(frozen=True)
+class AnalystReportSpec:
+    """Structured validation spec consumed by both static and LLM checks."""
+
+    analyst_name: str
+    required_top_sections: tuple[str, ...] = ()
+    """Top-level section markers that must appear, e.g. ``("一", "二", "三")``."""
+
+    required_indicator_tokens: tuple[str, ...] = ()
+    """Case-insensitive substrings that must appear somewhere in the report."""
+
+    required_tail_tokens: tuple[str, ...] = ()
+    """Substrings expected near the end of the report (table headers, etc.)."""
+
+    custom_rules_markdown: str = ""
+    """Free-form rules forwarded verbatim to the LLM judge prompt."""
+
+
+@dataclass
+class StaticVerdict:
+    """Result of the regex / substring static validator."""
+
+    critical_issues: list[str] = field(default_factory=list)
+    missing_elements: list[str] = field(default_factory=list)
+
+    @property
+    def has_issues(self) -> bool:
+        return bool(self.critical_issues) or bool(self.missing_elements)
+
+
+class JudgeVerdict(BaseModel):
+    """Schema for the LLM judge response."""
+
+    score: int = Field(0, ge=0, le=10)
+    passed: bool = False
+    critical_issues: list[str] = Field(default_factory=list)
+    minor_issues: list[str] = Field(default_factory=list)
+    missing_elements: list[str] = Field(default_factory=list)
+    general_comment: str = ""
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+
+_VALID_MODES = {"disabled", "static_only", "static_plus_llm", "llm_only"}
+
+
+def _resolve_validation_mode(value: Optional[str]) -> str:
+    if value is None:
+        try:
+            from etfagents.dataflows.config import get_config
+
+            value = get_config().get("validation_mode")
+        except Exception:  # pragma: no cover - config layer may be unavailable in tests
+            value = None
+    mode = (value or "static_plus_llm").strip().lower()
+    if mode not in _VALID_MODES:
+        logger.warning("Unknown validation_mode %r; defaulting to static_plus_llm", mode)
+        return "static_plus_llm"
+    return mode
+
+
+def _coerce_spec(spec: AnalystReportSpec | str | None) -> AnalystReportSpec:
+    if isinstance(spec, AnalystReportSpec):
+        return spec
+    if isinstance(spec, str):
+        return AnalystReportSpec(
+            analyst_name="legacy",
+            custom_rules_markdown=spec,
+        )
+    return AnalystReportSpec(analyst_name="unknown")
 
 
 def validate_and_refine(
     report: str,
     llm,
-    analyst_specific_rules: str,
+    spec: AnalystReportSpec | str,
     *,
     score_threshold: int = 7,
+    validation_mode: Optional[str] = None,
 ) -> str:
     """Judge report quality and refine if needed.
 
     Args:
         report: The analyst report to validate.
         llm: The LLM instance (quick-thinking, no tools bound).
-        analyst_specific_rules: Analyst-specific validation rules as markdown text.
+        spec: ``AnalystReportSpec`` describing the analyst-specific contract.
+            For backward compatibility a raw markdown rules string is also
+            accepted and wrapped in a spec carrying it as ``custom_rules_markdown``.
         score_threshold: Minimum score to pass (default 7).
+        validation_mode: Override the configured mode. When omitted, reads
+            ``validation_mode`` from the global config, defaulting to
+            ``static_plus_llm``.
 
     Returns:
-        Corrected report if score < threshold, original report otherwise.
-        Returns original on any error.
+        Corrected report when issues are found, original report otherwise.
+        Falls back to the original report on any unexpected error.
     """
     if not report or not report.strip():
         return report
 
-    # Step 1: Judge
-    judge_prompt = _JUDGE_PROMPT_TEMPLATE.format(
-        analyst_specific_rules=analyst_specific_rules,
-        report=report,
+    mode = _resolve_validation_mode(validation_mode)
+    if mode == "disabled":
+        return report
+
+    resolved_spec = _coerce_spec(spec)
+
+    static_verdict = (
+        static_validate(report, resolved_spec)
+        if mode != "llm_only"
+        else StaticVerdict()
     )
-    try:
-        judge_response = llm.invoke(judge_prompt)
-        judge_text = extract_text_content(getattr(judge_response, "content", None))
-    except Exception as exc:
-        logger.warning("Validation judge failed: %s", exc)
+
+    llm_verdict: JudgeVerdict | None = None
+    if mode != "static_only":
+        llm_verdict = _run_llm_judge(llm, report, resolved_spec)
+
+    final_verdict = _merge_verdicts(
+        mode=mode,
+        static=static_verdict,
+        llm=llm_verdict,
+        score_threshold=score_threshold,
+    )
+
+    if final_verdict is None:
+        # LLM judge failed and we have no static issues to act on.
         return report
 
-    if not judge_text:
+    if final_verdict.passed and final_verdict.score >= score_threshold:
         return report
-
-    verdict = _parse_judge_json(judge_text)
-    if not verdict:
-        logger.warning("Could not parse judge JSON from: %s", judge_text[:200])
-        return report
-
-    score = verdict.get("score", 0)
-    passed = verdict.get("pass", False)
-    critical = verdict.get("critical_issues", [])
-    missing = verdict.get("missing_elements", [])
 
     logger.info(
-        "Report validation: score=%s, pass=%s, critical=%d, missing=%d",
-        score, passed, len(critical), len(missing),
+        "Report validation triggered refine (mode=%s, score=%s, critical=%d, missing=%d)",
+        mode,
+        final_verdict.score,
+        len(final_verdict.critical_issues),
+        len(final_verdict.missing_elements),
     )
 
-    if passed and score >= score_threshold:
-        return report
+    refined = _run_llm_refine(llm, report, final_verdict)
+    return refined or report
 
-    # Step 2: Refine
-    logger.info("Report needs refinement: %s", "; ".join(critical[:3]))
-    refine_prompt = _REFINE_PROMPT_TEMPLATE.format(
-        judge_json=json.dumps(verdict, ensure_ascii=False, indent=2),
+
+# ---------------------------------------------------------------------------
+# Static validation
+# ---------------------------------------------------------------------------
+
+
+_TOP_SECTION_RE = re.compile(r"(?m)^\s*([一二三四五六七八九十])、")
+_MARKDOWN_H2_RE = re.compile(r"(?m)^\s*##\s+\S")
+_MARKDOWN_H1_RE = re.compile(r"(?m)^\s*#\s+\S")
+
+
+def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
+    """Run cheap structural / token checks. Never calls an LLM."""
+    if not report:
+        return StaticVerdict()
+
+    issues: list[str] = []
+    missing: list[str] = []
+
+    section_marks = set(_TOP_SECTION_RE.findall(report))
+    for need in spec.required_top_sections:
+        if need not in section_marks:
+            missing.append(f"缺少一级章节『{need}、…』")
+
+    if _MARKDOWN_H1_RE.search(report):
+        issues.append("出现 markdown # H1 标题（应改为正文或中文一级编号）")
+    if _MARKDOWN_H2_RE.search(report):
+        issues.append("出现 markdown ## 二级标题（应使用 中文『（一）』格式）")
+
+    lowered = report.lower()
+    for token in spec.required_indicator_tokens:
+        if token.lower() not in lowered:
+            missing.append(f"未覆盖关键指标 / 数据『{token}』")
+
+    if spec.required_tail_tokens:
+        tail_window = report[-1500:] if len(report) > 1500 else report
+        for tail in spec.required_tail_tokens:
+            if tail not in tail_window:
+                missing.append(f"末尾缺少元素『{tail}』")
+
+    if contains_qa_label_artifacts(report):
+        issues.append("出现『判断：』『证据：』『结论：』等标签式结构")
+    if contains_self_referential_meta_leads(report):
+        issues.append("出现自指式元叙述（如『本节锁定…』『本部分聚焦…』）")
+    if contains_meta_openers(report):
+        issues.append("段落以『本报告将…』『This report provides…』等元描述开头")
+
+    return StaticVerdict(critical_issues=issues, missing_elements=missing)
+
+
+# ---------------------------------------------------------------------------
+# LLM judge (structured output) + free-text fallback
+# ---------------------------------------------------------------------------
+
+
+_JUDGE_BASE_RULES = (
+    "你是一名报告质量审核员。请严格按以下标准评审报告，并以结构化方式返回评审结果。\n\n"
+    "## 通用评审标准\n\n"
+    "### 结构完整性\n"
+    "- 报告是否以2-4句概述段落开头（不得以标题或列表开头）？\n"
+    "- 一级标题是否使用「一、」「二、」「三、」格式，且标题中不得包含英文翻译或括号注释？\n"
+    "- 不得出现连续重复的一级标题。\n"
+    "- 每个一级章节是否以2-3句概括性导语开头，且导语高于子章节层面（不重复子章节内容）？\n"
+    "- 不得出现 ## 或其他 markdown 标题格式（应使用中文编号）。\n\n"
+    "### 术语解释\n"
+    "- 所有中文技术术语首次出现时是否用通俗语言解释并说明交易含义？\n"
+    "- 不得出现未解释的行话。\n\n"
+    "### 可操作性\n"
+    "- 是否在每个主要信号后回答了「这意味着什么」和「对交易应该怎么做」？\n"
+    "- 开篇第一句是否直接陈述核心结论或判断（偏多/偏空/中性及原因），而非「本报告将…」等场景设置？\n\n"
+    "### 禁止内容\n"
+    "- 章节导语和段落开头不得使用任何自指式元叙述（「本节锁定…」「本部分聚焦…」等）。\n"
+    "- 不得使用「判断：」「证据：」「关键价位：」「条件情景：」等标签式结构。\n"
+    "- 不得讨论数据源分类噪声、券商标签噪声、搜索错配或检索伪影。\n\n"
+    "### 段落质量\n"
+    "- 连续三个以上裸数据片段后是否有解释性语句？\n"
+    "- 是否避免了「值得注意的是」「深度挂钩」「全面覆盖」等填充语？\n\n"
+)
+
+_JUDGE_OUTPUT_GUIDE = (
+    "## 评分标准\n"
+    "- 9-10：完全满足所有标准，passed=true\n"
+    "- 7-8：仅有 minor_issues 而无 critical_issues，passed=true\n"
+    "- 6 及以下：存在 critical_issues，passed=false\n"
+    "- 任何结构错误、缺少关键章节、多处无解释术语 → critical_issue → passed=false。\n"
+)
+
+_REFINE_PROMPT_TEMPLATE = (
+    "你的报告存在以下问题，请重新生成完整报告以修正所有缺陷。保留原有正确部分，但必须完全满足评审标准。\n\n"
+    "## 评审结果\n\n"
+    "{verdict_json}\n\n"
+    "## 原始报告\n\n"
+    "{report}\n\n"
+    "## 要求\n"
+    "- 重新生成完整报告，不是补丁。\n"
+    "- 逐一修正 critical_issues 中列出的所有问题。\n"
+    "- 补充 missing_elements 中列出的缺失内容。\n"
+    "- 保留原报告中正确的分析和数据。\n"
+    "- 严格遵守所有结构、术语、可操作性和风格要求。\n\n"
+    "直接输出修正后的完整报告，不要附带任何前言或元描述。"
+)
+
+
+def _build_judge_prompt(report: str, spec: AnalystReportSpec) -> str:
+    custom = spec.custom_rules_markdown.strip()
+    custom_block = f"## 分析师专属标准\n\n{custom}\n\n" if custom else ""
+    return (
+        _JUDGE_BASE_RULES
+        + custom_block
+        + _JUDGE_OUTPUT_GUIDE
+        + "\n## 评审报告\n\n"
+        + report
+    )
+
+
+_JSON_OBJECT_RE = re.compile(r"\{")
+
+
+def _parse_judge_json(text: Any) -> JudgeVerdict | None:
+    """Robustly parse the first balanced JSON object containing a ``score`` field."""
+    if not isinstance(text, str) or not text:
+        return None
+    decoder = json.JSONDecoder()
+    for match in _JSON_OBJECT_RE.finditer(text):
+        try:
+            payload, _ = decoder.raw_decode(text, match.start())
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(payload, dict) or "score" not in payload:
+            continue
+        # Backward-compat: legacy callers / tests emit ``"pass"`` instead of ``"passed"``.
+        if "pass" in payload and "passed" not in payload:
+            payload = dict(payload)
+            payload["passed"] = payload.pop("pass")
+        try:
+            return JudgeVerdict(**payload)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _run_llm_judge(llm, report: str, spec: AnalystReportSpec) -> JudgeVerdict | None:
+    structured_llm = bind_structured(llm, JudgeVerdict, "Report Judge")
+    prompt = _build_judge_prompt(report, spec)
+    try:
+        rendered, structured_result = invoke_structured_or_freetext_with_result(
+            structured_llm,
+            llm,
+            prompt,
+            lambda v: v.model_dump_json(),
+            "Report Judge",
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Judge invocation failed: %s", exc)
+        return None
+
+    if isinstance(structured_result, JudgeVerdict):
+        return structured_result
+    return _parse_judge_json(rendered)
+
+
+def _run_llm_refine(llm, report: str, verdict: JudgeVerdict) -> str:
+    refine_payload = {
+        "score": verdict.score,
+        "passed": verdict.passed,
+        "critical_issues": verdict.critical_issues,
+        "missing_elements": verdict.missing_elements,
+        "general_comment": verdict.general_comment,
+    }
+    prompt = _REFINE_PROMPT_TEMPLATE.format(
+        verdict_json=json.dumps(refine_payload, ensure_ascii=False, indent=2),
         report=report,
     )
     try:
-        refined_response = llm.invoke(refine_prompt)
-        refined_text = extract_text_content(getattr(refined_response, "content", None))
-    except Exception as exc:
-        logger.warning("Validation refine failed: %s", exc)
-        return report
+        response = llm.invoke(prompt)
+        return extract_text_content(getattr(response, "content", response)) or ""
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Refine invocation failed: %s", exc)
+        return ""
 
-    return refined_text if refined_text else report
+
+# ---------------------------------------------------------------------------
+# Verdict merging
+# ---------------------------------------------------------------------------
+
+
+def _merge_verdicts(
+    *,
+    mode: str,
+    static: StaticVerdict,
+    llm: JudgeVerdict | None,
+    score_threshold: int,
+) -> JudgeVerdict | None:
+    """Combine static and LLM verdicts according to the active mode."""
+    if mode == "static_only":
+        if not static.has_issues:
+            return JudgeVerdict(
+                score=10,
+                passed=True,
+                critical_issues=[],
+                missing_elements=[],
+                general_comment="static_only: no structural issues detected",
+            )
+        return JudgeVerdict(
+            score=4,
+            passed=False,
+            critical_issues=list(static.critical_issues),
+            missing_elements=list(static.missing_elements),
+            general_comment="static_only: failures detected by structural checks",
+        )
+
+    if llm is None:
+        if static.has_issues:
+            return JudgeVerdict(
+                score=4,
+                passed=False,
+                critical_issues=list(static.critical_issues),
+                missing_elements=list(static.missing_elements),
+                general_comment="llm judge unavailable; relying on static checks",
+            )
+        return None
+
+    if mode == "llm_only":
+        return llm
+
+    merged_critical = list(dict.fromkeys([*llm.critical_issues, *static.critical_issues]))
+    merged_missing = list(dict.fromkeys([*llm.missing_elements, *static.missing_elements]))
+    passed = llm.passed and not static.has_issues and llm.score >= score_threshold
+    return JudgeVerdict(
+        score=llm.score if not static.has_issues else min(llm.score, score_threshold - 1),
+        passed=passed,
+        critical_issues=merged_critical,
+        minor_issues=list(llm.minor_issues),
+        missing_elements=merged_missing,
+        general_comment=llm.general_comment,
+    )
