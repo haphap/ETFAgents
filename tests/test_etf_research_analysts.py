@@ -162,10 +162,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         report = output["holdings_industry_report"]
         self.assertIn("券商行业研究显示", report)
         self.assertNotIn("我将调用 get_etf_industry_research", report)
-        self.assertEqual(
-            [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
-            fake_holdings.calls,
-        )
+        self.assertEqual([], fake_holdings.calls)
         self.assertEqual(
             [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
             fake_industry.calls,
@@ -257,10 +254,7 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         report = output["top_holdings_report"]
         self.assertIn("券商个股研究显示", report)
         self.assertNotIn("我将调用 get_etf_top_holdings_research", report)
-        self.assertEqual(
-            [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
-            fake_holdings.calls,
-        )
+        self.assertEqual([], fake_holdings.calls)
         self.assertEqual(
             [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
             fake_stock.calls,

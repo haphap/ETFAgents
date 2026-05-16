@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -28,7 +27,7 @@ from etfagents.agents.utils.report_leads import (
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
-from etfagents.tool_report_utils import run_tool_report_chain
+from etfagents.tool_report_utils import date_days_before, run_tool_report_chain
 
 logger = logging.getLogger(__name__)
 
@@ -64,15 +63,6 @@ _ETF_MARKET_INDICATORS = {
     "atr": "volatility and stop-distance calibration",
     "vwma": "price-volume confirmation",
 }
-
-
-def _date_days_before(curr_date: str, days: int) -> str:
-    try:
-        return (
-            datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=days)
-        ).strftime("%Y-%m-%d")
-    except (TypeError, ValueError):
-        return curr_date
 
 
 def _etf_indicator_catalog() -> str:
@@ -199,7 +189,7 @@ def create_etf_market_analyst(llm):
                         "tool": get_etf_price_data,
                         "payload": {
                             "symbol": asset_symbol,
-                            "start_date": _date_days_before(current_date, 180),
+                            "start_date": date_days_before(current_date, 180),
                             "end_date": current_date,
                         },
                     },

@@ -1,5 +1,3 @@
-from datetime import datetime, timedelta
-
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
@@ -27,7 +25,7 @@ from etfagents.agents.utils.report_leads import (
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
-from etfagents.tool_report_utils import run_tool_report_chain
+from etfagents.tool_report_utils import date_days_before, run_tool_report_chain
 
 
 _REPORT_SPEC = AnalystReportSpec(
@@ -40,15 +38,6 @@ _REPORT_SPEC = AnalystReportSpec(
         "- 末尾是否附Markdown摘要表格？"
     ),
 )
-
-
-def _date_days_before(curr_date: str, days: int) -> str:
-    try:
-        return (
-            datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=days)
-        ).strftime("%Y-%m-%d")
-    except (TypeError, ValueError):
-        return curr_date
 
 
 def create_macro_analyst(llm):
@@ -156,7 +145,7 @@ def create_macro_analyst(llm):
                         "tool": get_news,
                         "payload": {
                             "ticker": asset_symbol,
-                            "start_date": _date_days_before(current_date, 30),
+                            "start_date": date_days_before(current_date, 30),
                             "end_date": current_date,
                         },
                     },

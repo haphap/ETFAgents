@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 from langchain_core.messages import AIMessage
 
+from etfagents.tool_report_utils import TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX
 from etfagents.agents.utils.report_leads import (
     clean_generated_report,
     contains_meta_openers,
@@ -160,6 +161,20 @@ class ValidationModeTests(unittest.TestCase):
             validation_mode="disabled",
         )
         self.assertEqual("整体偏多。", out)
+        llm.with_structured_output.assert_not_called()
+        llm.invoke.assert_not_called()
+
+    def test_tool_recovery_data_unavailable_report_skips_llm_entirely(self):
+        llm = MagicMock()
+        report = (
+            f"{TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX}\n"
+            "Required data tools were unavailable.\n\n"
+            "### get_news result\nget_news failed: vendor down"
+        )
+
+        out = validate_and_refine(report, llm, _MARKET_SPEC)
+
+        self.assertEqual(report, out)
         llm.with_structured_output.assert_not_called()
         llm.invoke.assert_not_called()
 
