@@ -104,6 +104,9 @@ _COMMODITY_SPECS = [
     ("工业品 · 纯碱", "SA", "CZCE", "纯碱主力", "Glass production demand, photovoltaic expansion, capacity cycle"),
 ]
 
+_AGRICULTURE_RESEARCH_KEYWORDS = ("农牧饲渔", "养殖业")
+_AGRICULTURE_RESEARCH_TRIGGERS = ("农牧饲渔", "养殖", "饲料", "生猪", "动物保健", "农产品加工")
+
 
 def _normalize_indicator_token(indicator: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "_", indicator.strip().lower()).strip("_")
@@ -1108,6 +1111,18 @@ def _enrich_constituents_with_broker_industry(
     return enriched
 
 
+def _related_broker_industry_keywords(row: pd.Series | dict[str, object]) -> list[str]:
+    """Return adjacent tushare industry keywords for broad agriculture sleeves."""
+    text = " ".join(
+        str(row.get(key, "") or "")
+        for key in ("industry", "research_industry", "base_industry", "name")
+    )
+    if not any(trigger in text for trigger in _AGRICULTURE_RESEARCH_TRIGGERS):
+        return []
+
+    return [keyword for keyword in _AGRICULTURE_RESEARCH_KEYWORDS if keyword]
+
+
 def _format_holdings_summary(rows: pd.DataFrame, label: str) -> str:
     if rows is None or rows.empty:
         return f"No eligible A-share {label.lower()} could be derived from the latest ETF holdings disclosure."
@@ -1287,13 +1302,21 @@ def get_etf_industry_research(
             sections.append(f"Keyword source: {industry_source}")
         if base_industry and base_industry != str(row.get("industry", "")).strip():
             sections.append(f"Stock basic industry fallback / comparison: {base_industry}")
+        extra_ind_names = _related_broker_industry_keywords(row)
+        if extra_ind_names:
+            sections.append(
+                "Related industry keywords searched: " + ", ".join(extra_ind_names)
+            )
         try:
+            broker_report_kwargs = {"max_reports": max_reports_per_industry}
+            if extra_ind_names:
+                broker_report_kwargs["extra_ind_names"] = extra_ind_names
             sections.append(
                 get_broker_reports(
                     row["ts_code"],
                     start_date,
                     end_date,
-                    max_reports=max_reports_per_industry,
+                    **broker_report_kwargs,
                 )
             )
         except DataVendorUnavailable as exc:

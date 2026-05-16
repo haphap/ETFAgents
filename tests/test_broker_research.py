@@ -275,6 +275,75 @@ class BrokerResearchTushareTests(unittest.TestCase):
         ]
         self.assertEqual(industry_calls[0]["ind_name"], "工业金属")
 
+    @patch("etfagents.dataflows.tushare._get_pro_client")
+    def test_merges_extra_industry_keywords_for_related_research(self, mock_client):
+        from etfagents.dataflows.tushare import get_broker_reports
+
+        import pandas as pd
+
+        mock_pro = MagicMock()
+        mock_pro.stock_basic.return_value = pd.DataFrame(
+            {"ts_code": ["002311.SZ"], "industry": ["农牧饲渔"]}
+        )
+
+        def _research_report_side_effect(**kwargs):
+            if kwargs.get("report_type") == "个股研报":
+                return pd.DataFrame(
+                    {
+                        "trade_date": ["20260508"],
+                        "ind_name": ["养殖业"],
+                    }
+                )
+            if kwargs.get("report_type") != "行业研报":
+                return pd.DataFrame()
+            ind_name = kwargs.get("ind_name")
+            if ind_name == "养殖业":
+                return pd.DataFrame(
+                    {
+                        "trade_date": ["20260507"],
+                        "inst_csname": ["华创证券"],
+                        "title": ["生猪产能去化加速"],
+                        "abstr": ["养殖利润承压，产能去化预期升温。"],
+                        "author": ["张三"],
+                        "ts_code": ["002311.SZ"],
+                        "url": ["http://example.com/hog"],
+                        "ind_name": ["养殖业"],
+                    }
+                )
+            if ind_name == "农牧饲渔":
+                return pd.DataFrame(
+                    {
+                        "trade_date": ["20260508"],
+                        "inst_csname": ["中邮证券"],
+                        "title": ["养殖成本下降，饲料业务盈利高增"],
+                        "abstr": ["饲料销量恢复，成本下降带动盈利改善。"],
+                        "author": ["李四"],
+                        "ts_code": ["002311.SZ"],
+                        "url": ["http://example.com/feed"],
+                        "ind_name": ["农牧饲渔"],
+                    }
+                )
+            return pd.DataFrame()
+
+        mock_pro.research_report.side_effect = _research_report_side_effect
+        mock_client.return_value = mock_pro
+
+        result = get_broker_reports(
+            "002311.SZ",
+            "2026-01-15",
+            "2026-05-15",
+            extra_ind_names=["农牧饲渔"],
+        )
+
+        self.assertIn("生猪产能去化加速", result)
+        self.assertIn("养殖成本下降，饲料业务盈利高增", result)
+        industry_calls = [
+            call.kwargs["ind_name"]
+            for call in mock_pro.research_report.call_args_list
+            if call.kwargs.get("report_type") == "行业研报"
+        ]
+        self.assertEqual(industry_calls[:2], ["养殖业", "农牧饲渔"])
+
 
 class StockReportsTushareTests(unittest.TestCase):
     """Tests for the tushare stock reports data function."""
