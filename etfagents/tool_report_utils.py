@@ -21,6 +21,13 @@ TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX = "[tool-recovery:data-unavailable]"
 _XML_TOOL_CALL_RE = re.compile(
     r"<tool_call>|<function[=\s]|</?function_call>", re.IGNORECASE
 )
+_PROCESS_ONLY_REPORT_RE = re.compile(
+    r"(?:现在|好的|接下来|下一步|我)?[\s\S]{0,80}?"
+    r"(?:已|已经).{0,40}?(?:获取|收集|拿到|完成).{0,40}?(?:数据|资料|信息)"
+    r"[\s\S]{0,120}?"
+    r"(?:开始|将|马上|准备).{0,40}?(?:撰写|生成|输出|写).{0,40}?报告",
+    re.IGNORECASE,
+)
 _UNEXECUTED_TOOL_INTENT_TEMPLATE = (
     r"(?:好的[，,]\s*)?(?:接下来|下一步|现在|我将|将会|准备|需要)"
     r"[\s\S]{{0,180}}?"
@@ -38,9 +45,19 @@ def _is_tool_call_text(text: str) -> bool:
     return bool(_XML_TOOL_CALL_RE.search(stripped))
 
 
+def _is_process_only_report_text(text: str) -> bool:
+    """Return True for short process notes like 'I have the data and will write now'."""
+    stripped = (text or "").strip()
+    if not stripped or len(stripped) > 700:
+        return False
+    if re.search(r"(?m)^\s*[一二三四五六七八九十]+、", stripped):
+        return False
+    return bool(_PROCESS_ONLY_REPORT_RE.search(stripped))
+
+
 def _extract_report_text(result) -> str:
     report = extract_text_content(getattr(result, "content", None))
-    if not report or _is_tool_call_text(report):
+    if not report or _is_tool_call_text(report) or _is_process_only_report_text(report):
         return ""
     return report
 

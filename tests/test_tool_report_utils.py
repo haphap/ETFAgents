@@ -4,6 +4,7 @@ from etfagents.tool_report_utils import (
     TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX,
     date_days_before,
     run_tool_report_chain,
+    _is_process_only_report_text,
     _is_tool_call_text,
 )
 
@@ -140,6 +141,36 @@ class ToolReportUtilsTests(unittest.TestCase):
         self.assertTrue(_is_tool_call_text('<function_call>something</function_call>'))
         self.assertFalse(_is_tool_call_text('Normal report text'))
         self.assertFalse(_is_tool_call_text(''))
+
+    def test_process_only_report_text_triggers_fallback(self):
+        prompt = _FakePrompt()
+        llm = _FakeLLM(
+            [_FakeResponse(content="现在我已获取全部所需数据，开始撰写综合诊断报告。")],
+            [_FakeResponse(content="Real final report")],
+        )
+
+        result, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+        )
+
+        self.assertEqual("Real final report", report)
+        self.assertEqual("Real final report", result.content)
+
+    def test_process_only_detector_ignores_real_sectioned_reports(self):
+        self.assertTrue(
+            _is_process_only_report_text(
+                "现在我已获取全部所需数据，开始撰写综合诊断报告。"
+            )
+        )
+        self.assertFalse(
+            _is_process_only_report_text(
+                "一、市场结构与量价诊断\n已获取的数据说明趋势偏强，报告正文继续展开。"
+            )
+        )
 
     def test_recovers_unexecuted_intent_for_any_configured_trigger_tool(self):
         prompt = _FakePrompt()
