@@ -149,6 +149,30 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("\n\n近一年涨幅已翻倍。该报道属于事实性新闻", formatted)
         self.assertNotIn("# 三、近一年涨幅已翻倍", formatted)
 
+    def test_prepare_report_markdown_keeps_heading_with_colon_between_list_items(self):
+        formatted = _prepare_report_markdown(
+            "1. 第一项内容\n"
+            "一、市场结构：核心矛盾\n"
+            "2. 第二项内容"
+        )
+
+        self.assertIn("1. 第一项内容", formatted)
+        self.assertIn("# 一、市场结构：核心矛盾", formatted)
+        self.assertIn("2. 第二项内容", formatted)
+        self.assertNotIn("\n市场结构：核心矛盾\n", formatted)
+
+    def test_prepare_report_markdown_does_not_rewrite_spaced_date_prefix_as_list_item(self):
+        formatted = _prepare_report_markdown(
+            "1. 主线判断\n\n"
+            "5 月15日发布的社零数据显示同比上升5.2%。\n\n"
+            "2. 风险点"
+        )
+
+        self.assertIn("1. 主线判断", formatted)
+        self.assertIn("5 月15日发布的社零数据显示同比上升5.2%。", formatted)
+        self.assertIn("2. 风险点", formatted)
+        self.assertNotIn("5. 月15日发布的社零数据显示同比上升5.2%。", formatted)
+
     def test_risk_management_history_supports_english_prefixes(self):
         risk_state = {
             "aggressive_history": (

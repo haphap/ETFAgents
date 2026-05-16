@@ -187,9 +187,9 @@ _PLAIN_TOP_LEVEL_HEADING_PATTERN = re.compile(
 _PLAIN_SECOND_LEVEL_HEADING_PATTERN = re.compile(
     r"^([ \t]*)(（[一二三四五六七八九十\d]+）)\s*(\S.*)$"
 )
-_SENTENCE_STYLE_SECTION_PUNCTUATION_RE = re.compile(r"[。！？!?；;：:]")
+_SENTENCE_STYLE_SECTION_PUNCTUATION_RE = re.compile(r"[。！？!?；;]")
 _LOOSE_ARABIC_LIST_ITEM_PATTERN = re.compile(
-    r"^([ \t]{0,6})(\d{1,2})(?![\d.)、．])\s+(\S.*)$",
+    r"^([ \t]{0,6})(\d{1,2})(?![\d.)、．])\s+(?!月|日|年|时|分|秒|%|％|亿|万|千|个)(\S.*)$",
     re.MULTILINE,
 )
 _ARABIC_LIST_ITEM_LINE_PATTERN = re.compile(r"^\s*\d+(?:[.)、．]|\s)\s+\S")
