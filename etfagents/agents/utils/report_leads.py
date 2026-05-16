@@ -282,6 +282,13 @@ _TERM_BLOCK_RE = re.compile(
     r"（(?:附首次出现关键术语|关键术语交易含义速览|关键术语解释|术语速览|术语说明|关键技术[^）]*|技术术语[^）]*|技术指标[^）]*|指标速览[^）]*|指标说明[^）]*)）",
     re.DOTALL,
 )
+_TERM_DEFINITION_PREAMBLE_RE = re.compile(
+    r"为降低.{0,120}(?:技术术语|高频技术术语|术语).{0,80}(?:解释|说明|含义)",
+)
+_TERM_DEFINITION_LINE_RE = re.compile(
+    r"(?:[•·]\s*)?[^：:\n]{1,30}[：:].{0,180}(?:是指|指|交易含义|市场含义|配置含义)"
+    r"|(?:是指|指的是|交易含义|市场含义|配置含义)"
+)
 _OPENING_SECTION_MARKER_RE = re.compile(r"(?m)^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+、")
 _OPENING_TERM_EXPLANATION_RE = re.compile(
     r"（[^）]{0,140}(?:"
@@ -325,7 +332,49 @@ def strip_qa_labels(report: str) -> str:
     cleaned = _LEADING_LABEL_PREFIX_RE.sub(_strip_label_prefix, report)
     cleaned = _QA_LABEL_RE.sub("", cleaned)
     cleaned = _TERM_BLOCK_RE.sub("", cleaned)
+    cleaned = strip_standalone_term_definition_blocks(cleaned)
     return collapse_blank_lines(cleaned)
+
+
+def _strip_table_artifact_edges(line: str) -> str:
+    return (line or "").strip().strip("│|").strip()
+
+
+def strip_standalone_term_definition_blocks(report: str) -> str:
+    """Remove standalone glossary-style blocks while preserving inline explanations."""
+    if not report:
+        return ""
+
+    lines = report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    kept: list[str] = []
+    skipping = False
+    saw_blank_after_block = False
+
+    for line in lines:
+        content = _strip_table_artifact_edges(line)
+
+        if not skipping and _TERM_DEFINITION_PREAMBLE_RE.search(content):
+            skipping = True
+            saw_blank_after_block = False
+            continue
+
+        if skipping:
+            if _looks_like_section_heading(content):
+                skipping = False
+                kept.append(line)
+                continue
+            if not content or _ARTIFACT_ONLY_LINE_RE.fullmatch(line.strip()):
+                saw_blank_after_block = True
+                continue
+            if not saw_blank_after_block or _TERM_DEFINITION_LINE_RE.search(content):
+                continue
+            skipping = False
+            kept.append(line)
+            continue
+
+        kept.append(line)
+
+    return collapse_blank_lines("\n".join(kept))
 
 
 def strip_opening_term_explanations(report: str) -> str:
@@ -419,7 +468,12 @@ def contains_qa_label_artifacts(report: str) -> bool:
         return True
     if _QA_LABEL_RE.search(report):
         return True
-    return bool(_TERM_BLOCK_RE.search(report))
+    if _TERM_BLOCK_RE.search(report):
+        return True
+    return any(
+        _TERM_DEFINITION_PREAMBLE_RE.search(_strip_table_artifact_edges(line))
+        for line in report.splitlines()
+    )
 
 
 def contains_self_referential_meta_leads(report: str) -> bool:

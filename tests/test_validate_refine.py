@@ -14,6 +14,7 @@ from etfagents.agents.utils.report_leads import (
     contains_self_referential_meta_leads,
     post_judge_clean,
     pre_judge_clean,
+    strip_standalone_term_definition_blocks,
 )
 from etfagents.agents.utils.validate_refine import (
     AnalystReportSpec,
@@ -300,6 +301,26 @@ class CleaningOrderingTests(unittest.TestCase):
         baseline = post_judge_clean(pre_judge_clean(raw))
         legacy = clean_generated_report(raw)
         self.assertEqual(baseline, legacy)
+
+    def test_standalone_term_definition_block_is_removed(self):
+        raw = (
+            "开篇结论仍然保留。\n\n"
+            "│  为降低跨市场阅读门槛并强化交易执行指引，本文对文中高频技术术语作如下通俗解释与含义说明： •\n"
+            "│  仓单去化：指交易所标准仓单数量持续减少。交易含义：代表下游企业正在实质性提货。 •\n"
+            "│  右侧多头：指在价格已突破关键压力位后顺势建仓的策略。交易含义：需严格设定止损线。\n"
+            "│\n"
+            "一、市场结构与量价诊断\n"
+            "MACD 金叉首次出现时仍可在句内解释。"
+        )
+
+        cleaned = strip_standalone_term_definition_blocks(raw)
+
+        self.assertIn("开篇结论仍然保留", cleaned)
+        self.assertIn("一、市场结构与量价诊断", cleaned)
+        self.assertIn("MACD 金叉", cleaned)
+        self.assertNotIn("为降低跨市场阅读门槛", cleaned)
+        self.assertNotIn("仓单去化：", cleaned)
+        self.assertFalse(contains_qa_label_artifacts(cleaned))
 
 
 if __name__ == "__main__":
