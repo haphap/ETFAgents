@@ -696,6 +696,22 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("分批减持当前持仓", rendered)
         self.assertIn("维持现有基准仓位", rendered)
 
+    def test_portfolio_decision_catches_direct_conflict_after_conditional_clause(self):
+        rendered = render_portfolio_decision(
+            PortfolioDecision(
+                debate_conclusion="中性观点更稳妥。",
+                action_logic="当前仍以持有为主。",
+                positioning_recommendation="若市场企稳则加仓，反之则立即卖出至零仓位。",
+                rating=PortfolioRating.HOLD,
+                snapshot_stance="持有",
+                snapshot_new_and_rebuttal="新增了对触发条件的约束。",
+                snapshot_to_verify="继续跟踪量价变化。",
+            )
+        )
+
+        self.assertNotIn("立即卖出至零仓位", rendered)
+        self.assertIn("维持现有基准仓位", rendered)
+
     def test_portfolio_decision_rendering_expands_overly_brief_sections(self):
         rendered = render_portfolio_decision(
             PortfolioDecision(
@@ -787,6 +803,54 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("Time Horizon", rendered)
         self.assertEqual(rendered.count("研究结论: **持有**"), 1)
         self.assertNotIn("\n\n\n", rendered)
+
+    def test_portfolio_positioning_recommendation_is_split_into_numbered_blocks(self):
+        long_advice = (
+            "当前维持不超过12%的轻仓头寸，严格遵循“底仓静待+阈值触发”原则，核心目标是在保留参与反弹权利的同时将尾部风险锁定在可控范围。"
+            "初始仓位带控制在总ETF配置仓位的12%-15%之间，若5月18日社零数据高于5.0%且猪价周度企稳在9.7元/公斤以上，可在次一交易日将仓位提升至25%。"
+            "加仓条件需同时满足三个技术标准：价格放量站上0.830元，日成交量需达到近20日均量的1.3倍以上；RSI回升至40以上；份额结束净流出转为周度净增长。"
+            "关键支撑位：0.800元为心理关口，0.784元为2倍ATR止损位；关键阻力位：0.830元和0.852元。"
+            "减仓条件为价格跌破0.800元整数关口且成交量未萎缩，若同时伴随份额加速流出，需将仓位减至5%以下或清仓止损。"
+            "退出触发（极端情景）：若美国10年实际利率突破2.20%，且豆粕价格跌破2900元/吨、玉米跌破2300元/吨，同时份额单日减少超1000万份，需立即全仓清仓。"
+            "再平衡触发：当ETF溢价率扩大至超过0.3%以上且换手率超过5%，可分批减仓10%-15%以锁定浮盈。"
+            "下一步重点监控的验证指标包括：豆粕仓单是否连续2周环比下降、5月18日社零数据是否高于5.0%、美国10年实际利率是否突破2.20%、份额是否连续3日净增长。"
+        )
+
+        rendered = render_portfolio_decision(
+            PortfolioDecision(
+                debate_conclusion="中性观点更稳妥，但反弹权利仍值得保留。",
+                action_logic="当前以轻仓持有为主，把加仓和止损都绑定在价格、量能和份额验证上。",
+                positioning_recommendation=long_advice,
+                rating=PortfolioRating.HOLD,
+                snapshot_stance="持有",
+                snapshot_new_and_rebuttal="新增了对仓位上限与触发条件的约束。",
+                snapshot_to_verify="继续跟踪量价、份额和宏观利率。",
+            )
+        )
+
+        self.assertIn("1. 初始仓位设置。当前维持不超过12%的轻仓头寸", rendered)
+        self.assertIn("2. 加仓条件与关键位。加仓条件需同时满足三个技术标准", rendered)
+        self.assertIn("3. 减仓与止损条件。减仓条件为价格跌破0.800元整数关口", rendered)
+        self.assertIn("4. 极端退出触发（极端情景）：若美国10年实际利率突破2.20%", rendered)
+        self.assertIn("5. 再平衡触发：当ETF溢价率扩大", rendered)
+        self.assertIn("6. 后续验证指标。下一步重点监控的验证指标包括", rendered)
+
+    def test_manager_normalization_splits_long_freetext_positioning_advice(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "研究结论: **持有**\n"
+            "当前维持不超过12%的轻仓头寸，等待验证。"
+            "加仓条件需同时满足价格放量站上0.830元且份额转为净增长。"
+            "减仓条件为价格跌破0.800元且成交量未萎缩。"
+            "退出触发：若份额单日减少超1000万份则清仓。"
+            "再平衡触发：当ETF溢价率超过0.3%且换手率超过5%时减仓。"
+            "下一步重点监控的验证指标包括社零、猪价和份额变化。"
+        )
+
+        self.assertIn("1. 初始仓位设置。当前维持不超过12%的轻仓头寸", normalized)
+        self.assertIn("2. 加仓条件与关键位。加仓条件需同时满足", normalized)
+        self.assertIn("### （一）评级", normalized)
+        self.assertIn("### （二）建议", normalized)
 
     def test_research_manager_normalization_strips_inline_duplicate_research_view(self):
         normalized = normalize_chinese_manager_terms(

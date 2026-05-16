@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 from etfagents.agents.utils.agent_utils import (
     collapse_blank_lines,
+    format_chinese_positioning_recommendation,
     get_output_language,
     localize_label,
     localize_rating_term,
@@ -303,8 +304,16 @@ def _has_conflicting_primary_action(text: str, rating: PortfolioRating) -> bool:
         )
 
     for match in conflicting_pattern.finditer(content):
-        prefix = content[max(0, match.start() - 24):match.start()]
-        if _has_conditional_prefix(prefix):
+        sentence_prefix = re.split(r"[。！？!?；;\n]", content[:match.start()])[-1]
+        clause_prefix = re.split(r"[，,、]", sentence_prefix)[-1]
+        suffix = content[match.end():match.end() + 8]
+        if (
+            _has_conditional_prefix(clause_prefix)
+            or re.search(r"(若|如果|如|待|当|一旦|条件|触发)", clause_prefix)
+            or re.search(r"(?:可|才|再|允许|考虑|暂缓)[^，,、。！？!?；;\n]{0,16}$", clause_prefix)
+            or re.search(r"(条件|触发)", sentence_prefix)
+            or re.match(r"(?:条件|触发)", suffix)
+        ):
             continue
         return True
     return False
@@ -995,6 +1004,9 @@ def render_research_plan(plan: ResearchPlan) -> str:
         positioning_recommendation = _merge_sparse_section_with_default(
             positioning_recommendation, detailed_positioning
         )
+    positioning_recommendation = format_chinese_positioning_recommendation(
+        positioning_recommendation
+    )
     if _is_chinese_output():
         body = (
             "## 辩论结论\n"
@@ -1134,6 +1146,9 @@ def render_portfolio_decision(plan: PortfolioDecision, context_text: str = "") -
     positioning_recommendation = _inline_contextual_market_levels(
         positioning_recommendation,
         context_text,
+    )
+    positioning_recommendation = format_chinese_positioning_recommendation(
+        positioning_recommendation
     )
     if _is_chinese_output():
         final_line = f"研究结论: **{recommendation}**"
