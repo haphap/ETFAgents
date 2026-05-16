@@ -404,7 +404,10 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             "## 一、宏观定价与产业周期的激进共振 ## （一）实际利率高企非压制而是洗盘"
         )
 
-        self.assertIn("一、宏观定价与产业周期的激进共振\n（一）实际利率高企非压制而是洗盘", body)
+        self.assertIn(
+            "一、宏观定价与产业周期的激进共振\n\n（一）实际利率高企非压制而是洗盘",
+            body,
+        )
         self.assertNotIn("共振 （一）", body)
         self.assertNotIn("##", body)
 
@@ -851,6 +854,52 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("2. 加仓条件与关键位。加仓条件需同时满足", normalized)
         self.assertIn("### （一）评级", normalized)
         self.assertIn("### （二）建议", normalized)
+
+    def test_manager_normalization_splits_pre_numbered_advice_inlined_on_one_line(self):
+        # The portfolio manager LLM sometimes emits all numbered items on a single
+        # line, with the rating verdict glued onto the first item's title. Without
+        # the inline-marker pre-split + leaked-rating strip, Rich Markdown rendered
+        # only "1." as a list marker and the rest of the body as plain prose.
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "1. 初始仓位设置。 研究结论: 买入/增持。"
+            "初始配置带设定为组合总仓位的15%至20%，首笔建仓严格限制在10%以内，"
+            "仅在ETF净值回踩至2.78元支撑带时分批介入。"
+            "加仓触发条件要求10日EMA突破2.81元，"
+            "若出现逆风信号必须立即减仓至5%以下并增配30%短债ETF。 "
+            "2. 再平衡触发。再平衡触发机制设定为硬性止损线2.77元与溢价率警戒线1.5%，"
+            "一旦净值跌破2.77元即刻启动网格止盈或止损程序。 "
+            "3. 后续验证指标。下一步重点监控指标聚焦实物需求报告、议息会议、持仓量。\n\n"
+            "最终配置建议: **买入**"
+        )
+
+        # All three numbered items must be line-anchored so Rich/CommonMark renders
+        # them as separate list items rather than inlining 2./3. into item 1's body.
+        for marker in ("\n1. 初始仓位设置。", "\n2. 再平衡触发。", "\n3. 后续验证指标。"):
+            self.assertIn(marker, normalized)
+
+        # The leaked "研究结论: 买入/增持" prefix must be stripped from item 1's body
+        # and not surface anywhere else in the advice section.
+        self.assertNotIn("研究结论: 买入/增持", normalized)
+        self.assertNotIn("买入/增持。初始配置带", normalized)
+        # The rating subsection still carries the canonical (non-compound) verdict.
+        self.assertIn("研究结论: **买入**", normalized)
+
+    def test_rating_only_line_pattern_recognises_compound_ratings(self):
+        from etfagents.agents.utils.agent_utils import _RATING_ONLY_LINE_PATTERN
+
+        for line in (
+            "研究结论: 买入",
+            "研究结论: 买入/增持",
+            "研究结论: 买入／增持",
+            "研究结论: 买入或增持",
+            "评级: 买入/增持",
+            "最终配置建议: 持有/增持",
+        ):
+            self.assertTrue(
+                _RATING_ONLY_LINE_PATTERN.match(line),
+                f"expected compound rating to match: {line!r}",
+            )
 
     def test_research_manager_normalization_strips_inline_duplicate_research_view(self):
         normalized = normalize_chinese_manager_terms(

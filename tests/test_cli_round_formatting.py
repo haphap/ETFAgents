@@ -483,10 +483,40 @@ class CliRoundFormattingTests(unittest.TestCase):
 
         formatted = format_risk_management_history(risk_state, include_manager=False)
 
-        self.assertIn("一、宏观定价与产业周期的激进共振\n（一）实际利率高企非压制而是洗盘", formatted)
+        self.assertIn(
+            "一、宏观定价与产业周期的激进共振\n\n（一）实际利率高企非压制而是洗盘",
+            formatted,
+        )
         self.assertNotIn("## 一、", formatted)
         self.assertNotIn("## （一）", formatted)
         self.assertNotIn("共振 ##", formatted)
+
+    def test_risk_management_history_splits_section_headings_separated_by_whitespace(self):
+        risk_state = {
+            "aggressive_history": (
+                "激进风险分析师: 我们坚持反制保守派。\n"
+                "一、对保守观点的激进反制 （一）实际利率与美元约束并非天花板\n"
+                "美元 DXY 已回落 1.2%，估值修复有空间。"
+            ),
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": "",
+        }
+
+        formatted = format_risk_management_history(risk_state, include_manager=False)
+
+        # The two headings must each become their own paragraph so Markdown
+        # renderers don't soft-break them onto the same visual line.
+        self.assertIn(
+            "一、对保守观点的激进反制\n\n（一）实际利率与美元约束并非天花板",
+            formatted,
+        )
+        self.assertNotIn(
+            "一、对保守观点的激进反制 （一）实际利率与美元约束并非天花板",
+            formatted,
+        )
+        # Body content following the sub-section heading is still preserved.
+        self.assertIn("美元 DXY 已回落 1.2%", formatted)
 
     def test_portfolio_manager_normalizes_mixed_english_headings_and_terms(self):
         risk_state = {
