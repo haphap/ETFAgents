@@ -37,7 +37,7 @@ from .qlib_local import (
     get_stock as get_qlib_stock,
     get_indicator as get_qlib_indicator,
 )
-from .exceptions import DataVendorUnavailable
+from .exceptions import DataVendorUnavailable, MissingEtfHoldings
 
 # Configuration and routing logic
 from .config import get_backtest_context, get_config, increment_backtest_health
@@ -386,6 +386,8 @@ def route_to_vendor(method: str, *args, **kwargs):
             last_error = exc
             continue  # Try next vendor in fallback chain
 
+    if isinstance(last_error, MissingEtfHoldings):
+        raise last_error
     if last_error is not None:
         raise RuntimeError(str(last_error)) from last_error
 

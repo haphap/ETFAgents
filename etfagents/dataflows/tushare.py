@@ -10,7 +10,7 @@ from typing import Callable, Iterable
 import pandas as pd
 from stockstats import wrap
 
-from .exceptions import DataVendorUnavailable
+from .exceptions import DataVendorUnavailable, MissingEtfHoldings
 
 logger = logging.getLogger(__name__)
 
@@ -749,7 +749,7 @@ def get_etf_holdings(ticker: str, curr_date: str) -> str:
         df = df[df["end_date"].astype(str) <= _to_api_date(curr_date)]
     df = _sort_descending(df, "end_date", "ann_date", "stk_mkv_ratio")
     if df.empty:
-        return f"No ETF holdings data found for '{ts_code}' up to {curr_date}."
+        raise MissingEtfHoldings(f"No ETF holdings data found for '{ts_code}' up to {curr_date}.")
 
     summary_lines: list[str] = []
     latest = df.iloc[0]

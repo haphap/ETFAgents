@@ -1,4 +1,5 @@
 import copy
+import re
 import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -7,10 +8,14 @@ import pandas as pd
 from langgraph.prebuilt import ToolNode
 
 from etfagents.agents.utils.etf_data_tools import (
+    _match_commodity_proxy_basket,
     _related_broker_industry_keywords,
+    get_etf_holdings,
     get_etf_indicators,
     get_etf_industry_research,
+    get_etf_top_holdings_research,
 )
+from etfagents.dataflows.exceptions import DataVendorUnavailable, MissingEtfHoldings
 from etfagents.dataflows.config import get_config, set_config
 from etfagents.dataflows.config import backtest_context
 from etfagents.dataflows.interface import TOOLS_CATEGORIES, VENDOR_METHODS, get_category_for_method
@@ -218,6 +223,170 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertEqual(call_args.kwargs["max_reports"], 5)
         self.assertNotIn("extra_ind_names", call_args.kwargs)
 
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    @patch("etfagents.agents.utils.etf_data_tools.route_to_vendor")
+    def test_get_etf_holdings_uses_commodity_producer_proxy_when_disclosure_missing(
+        self,
+        mock_route_to_vendor,
+        mock_query_pro,
+    ):
+        mock_route_to_vendor.side_effect = MissingEtfHoldings(
+            "No ETF holdings data found for '518880.SH' up to 2026-05-15."
+        )
+        mock_query_pro.return_value = pd.DataFrame(
+            [
+                {
+                    "ts_code": "518880.SH",
+                    "name": "黄金ETF",
+                    "benchmark": "上海金基准价",
+                    "fund_type": "ETF",
+                    "invest_type": "商品型",
+                    "market": "SH",
+                }
+            ]
+        )
+
+        result = get_etf_holdings.invoke(
+            {"ticker": "518880.SH", "curr_date": "2026-05-15"}
+        )
+
+        self.assertIn("A-share 黄金 producers", result)
+        self.assertIn("山东黄金", result)
+        self.assertIn("中金黄金", result)
+        self.assertIn("紫金矿业", result)
+        self.assertIn("Proxy basket", result)
+        self.assertIn("proxy_weight_illustrative_pct", result)
+        self.assertIn("Proxy weights are illustrative", result)
+        self.assertNotIn("No ETF holdings data found", result)
+
+    @patch("etfagents.agents.utils.etf_data_tools._load_latest_etf_holdings_frame")
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_etf_industry_research_propagates_missing_holdings_for_non_commodity_etf(
+        self,
+        mock_query_pro,
+        mock_holdings_frame,
+    ):
+        message = "No ETF holdings data found for '562500.SH' up to 2026-05-15."
+        mock_holdings_frame.side_effect = MissingEtfHoldings(message)
+        mock_query_pro.return_value = pd.DataFrame(
+            [
+                {
+                    "ts_code": "562500.SH",
+                    "name": "新能源电池ETF",
+                    "benchmark": "中证新能源电池主题指数",
+                    "fund_type": "ETF",
+                    "invest_type": "被动指数型",
+                    "market": "SH",
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(MissingEtfHoldings, re.escape(message)):
+            get_etf_industry_research.invoke(
+                {"ticker": "562500.SH", "curr_date": "2026-05-15"}
+            )
+
+    @patch("etfagents.agents.utils.etf_data_tools._load_latest_etf_holdings_frame")
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_etf_industry_research_propagates_missing_holdings_when_profile_is_empty(
+        self,
+        mock_query_pro,
+        mock_holdings_frame,
+    ):
+        message = "No ETF holdings data found for '518880.SH' up to 2026-05-15."
+        mock_holdings_frame.side_effect = MissingEtfHoldings(message)
+        mock_query_pro.return_value = pd.DataFrame()
+
+        with self.assertRaisesRegex(MissingEtfHoldings, re.escape(message)):
+            get_etf_industry_research.invoke(
+                {"ticker": "518880.SH", "curr_date": "2026-05-15"}
+            )
+
+    @patch("etfagents.agents.utils.etf_data_tools.get_broker_reports")
+    @patch("etfagents.agents.utils.etf_data_tools._resolve_broker_industry_keyword")
+    @patch("etfagents.agents.utils.etf_data_tools._get_pro_client")
+    @patch("etfagents.agents.utils.etf_data_tools._load_latest_etf_holdings_frame")
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_etf_industry_research_falls_back_to_commodity_producer_proxy_when_holdings_missing(
+        self,
+        mock_query_pro,
+        mock_holdings_frame,
+        mock_get_pro_client,
+        mock_resolve_broker_industry_keyword,
+        mock_get_broker_reports,
+    ):
+        mock_holdings_frame.side_effect = MissingEtfHoldings(
+            "No ETF holdings data found for '518880.SH' up to 2026-05-15."
+        )
+        mock_query_pro.return_value = pd.DataFrame(
+            [
+                {
+                    "ts_code": "518880.SH",
+                    "name": "黄金ETF",
+                    "benchmark": "上海金基准价",
+                    "fund_type": "ETF",
+                    "invest_type": "商品型",
+                    "market": "SH",
+                }
+            ]
+        )
+        mock_get_pro_client.return_value = object()
+        mock_resolve_broker_industry_keyword.side_effect = [
+            ("贵金属", "stock-report ind_name", "有色金属"),
+            ("贵金属", "stock-report ind_name", "有色金属"),
+            ("贵金属", "stock-report ind_name", "有色金属"),
+        ]
+        mock_get_broker_reports.return_value = "# Industry Research Reports for 贵金属"
+
+        result = get_etf_industry_research.invoke(
+            {"ticker": "518880.SH", "curr_date": "2026-05-15"}
+        )
+
+        self.assertIn("representative A-share 黄金 producers", result)
+        self.assertIn("Proxy weight (illustrative)", result)
+        self.assertIn("supplementary rather than ETF top-holding analysis", result)
+        self.assertIn("山东黄金", result)
+        self.assertIn("贵金属", result)
+        self.assertEqual(mock_get_broker_reports.call_count, 1)
+
+    @patch("etfagents.agents.utils.etf_data_tools.get_stock_reports")
+    @patch("etfagents.agents.utils.etf_data_tools._load_latest_etf_holdings_frame")
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_etf_top_holdings_research_falls_back_to_commodity_producer_proxy_when_holdings_missing(
+        self,
+        mock_query_pro,
+        mock_holdings_frame,
+        mock_get_stock_reports,
+    ):
+        mock_holdings_frame.side_effect = MissingEtfHoldings(
+            "No ETF holdings data found for '518880.SH' up to 2026-05-15."
+        )
+        mock_query_pro.return_value = pd.DataFrame(
+            [
+                {
+                    "ts_code": "518880.SH",
+                    "name": "黄金ETF",
+                    "benchmark": "上海金基准价",
+                    "fund_type": "ETF",
+                    "invest_type": "商品型",
+                    "market": "SH",
+                }
+            ]
+        )
+        mock_get_stock_reports.return_value = "# Stock Research Reports for 黄金 producer"
+
+        result = get_etf_top_holdings_research.invoke(
+            {"ticker": "518880.SH", "curr_date": "2026-05-15"}
+        )
+
+        self.assertIn("representative A-share 黄金 producers", result)
+        self.assertIn("## Proxy A-share producer basket", result)
+        self.assertIn("Proxy weight (illustrative)", result)
+        self.assertIn("proxy weight (illustrative)", result)
+        self.assertIn("山东黄金", result)
+        self.assertIn("# Stock Research Reports for 黄金 producer", result)
+        self.assertEqual(mock_get_stock_reports.call_count, 3)
+
     @patch("etfagents.agents.utils.etf_data_tools.get_broker_reports")
     @patch("etfagents.agents.utils.etf_data_tools._resolve_broker_industry_keyword")
     @patch("etfagents.agents.utils.etf_data_tools._get_pro_client")
@@ -280,6 +449,39 @@ class ETFExtensionTests(unittest.TestCase):
         }
 
         self.assertEqual([], _related_broker_industry_keywords(row))
+
+    def test_match_commodity_proxy_basket_prefers_lithium_for_new_energy_lithium_text(self):
+        profile = pd.Series(
+            {
+                "ts_code": "562500.SH",
+                "name": "有色金属新能源锂矿ETF",
+                "benchmark": "中证新能源锂矿主题指数",
+                "asset_scope": "commodity",
+                "exposure_bucket": "commodity_real_asset",
+            }
+        )
+
+        basket = _match_commodity_proxy_basket(profile)
+
+        self.assertIsNotNone(basket)
+        self.assertEqual(basket["label"], "锂")
+
+    def test_match_commodity_proxy_basket_discloses_copper_heavy_industrial_metals_proxy(self):
+        profile = pd.Series(
+            {
+                "ts_code": "159980.SZ",
+                "name": "工业金属ETF",
+                "benchmark": "中证工业金属主题指数",
+                "asset_scope": "commodity",
+                "exposure_bucket": "commodity_real_asset",
+            }
+        )
+
+        basket = _match_commodity_proxy_basket(profile)
+
+        self.assertIsNotNone(basket)
+        self.assertEqual(basket["label"], "工业金属")
+        self.assertEqual(basket["display_label"], "工业金属（铜偏重代理）")
 
     @patch("etfagents.dataflows.tushare._query_pro")
     def test_etf_universe_includes_enriched_factor_columns(self, mock_query):
