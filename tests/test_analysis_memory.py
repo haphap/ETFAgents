@@ -362,6 +362,28 @@ class AnalysisMemoryFlowTests(unittest.TestCase):
 
             self.assertIn("Latest same-ticker thesis", system_message)
             self.assertIn("Avoid vague confirmation language.", system_message)
+            self.assertIn("Memory never replaces fresh data retrieval", system_message)
+            self.assertIn("emit structured tool calls", system_message)
+
+    def test_chinese_memory_instruction_does_not_allow_visible_tool_promises(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = self._make_config(tmpdir)
+            cfg["output_language"] = "Chinese"
+            set_config(cfg)
+            llm = MagicMock()
+            state = _base_state()
+            state["method_context"] = {
+                "market_flow": "[通用/510300.SH] 先调用 get_etf_price_data，再判断资金流。"
+            }
+
+            with patch("etfagents.agents.analysts.etf_market_analyst.run_tool_report_chain") as mocked:
+                mocked.return_value = (AIMessage(content="report"), "report")
+                create_etf_market_analyst(llm)(state)
+                system_message = mocked.call_args.kwargs["system_message"]
+
+            self.assertIn("记忆不能替代本轮数据获取", system_message)
+            self.assertIn("必须发出结构化工具调用", system_message)
+            self.assertIn("不得在可见答案中写", system_message)
 
 
 if __name__ == "__main__":
