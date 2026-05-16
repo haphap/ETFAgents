@@ -2119,6 +2119,12 @@ _VISIBLE_DEBATE_LIST_RE = re.compile(
 _INLINE_MARKDOWN_CHINESE_HEADING_RE = re.compile(
     r"\s*#{1,6}\s*(?=(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）))"
 )
+# Lines that start with a Chinese-style section marker (一、… or （一）/（1）…) should
+# render as their own paragraph so that downstream Markdown renderers don't soft-break
+# adjacent headings into the same visual line.
+_VISIBLE_SECTION_HEADING_LINE_RE = re.compile(
+    r"^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*\S"
+)
 
 
 _NUMERIC_BOLD_RE = re.compile(
@@ -2178,7 +2184,19 @@ def normalize_visible_debate_body(text: str) -> str:
             normalized_blocks.extend(cleaned_items)
             continue
 
-        normalized_blocks.append("\n".join(lines))
+        # Promote section-heading lines (一、… / （一）…) to their own paragraphs so
+        # they don't get collapsed into a soft-break neighbour by Markdown renderers.
+        segment: list[str] = []
+        for line in lines:
+            if _VISIBLE_SECTION_HEADING_LINE_RE.match(line):
+                if segment:
+                    normalized_blocks.append("\n".join(segment))
+                    segment = []
+                normalized_blocks.append(line)
+                continue
+            segment.append(line)
+        if segment:
+            normalized_blocks.append("\n".join(segment))
 
     return collapse_blank_lines("\n\n".join(normalized_blocks).strip())
 
@@ -2368,7 +2386,17 @@ def _collapse_duplicate_markdown_headings(text: str) -> str:
 
 _MANAGER_SECTION_KEYS = {"辩论结论", "行为逻辑", "持仓建议", "研究结论"}
 _RATING_ONLY_LINE_PATTERN = re.compile(
-    r"^(?:建议评级|评级|配置评级|研究结论|执行倾向|最终配置建议|最终交易建议)\s*[:：]\s*\**(?:买入|增持|持有|减持|卖出)\**[。！!？?\s]*$"
+    r"^(?:建议评级|评级|配置评级|研究结论|执行倾向|最终配置建议|最终交易建议)"
+    r"\s*[:：]\s*\**(?:买入|增持|持有|减持|卖出)"
+    r"(?:\s*[/／或]\s*(?:买入|增持|持有|减持|卖出))?"
+    r"\**[。！!？?\s]*$"
+)
+_LEAKED_RATING_PREFIX_RE = re.compile(
+    r"(?m)^(\s*\d+[.．、]\s+[^\n。！？!?]+[。！？!?]\s*)"
+    r"(?:研究结论|最终配置建议|最终交易建议|建议评级|配置评级|评级|执行倾向)\s*[:：]\s*"
+    r"\**(?:买入|增持|持有|减持|卖出)"
+    r"(?:\s*[/／或]\s*(?:买入|增持|持有|减持|卖出))?"
+    r"\**\s*[。！？!?]?\s*"
 )
 _POSITIONING_PARENT_HEADING_RE = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、\s*)?持仓建议\s*$"
@@ -2413,8 +2441,34 @@ def format_chinese_positioning_recommendation(text: str) -> str:
     content = (text or "").strip()
     if not content or not _is_chinese_output():
         return content
-    if re.search(r"(?m)^\s*(?:\d+[.．、]|[-*•])\s+", content):
+
+    # Some LLMs emit all numbered items on a single line (e.g. "1. X 2. Y 3. Z").
+    # Split inline numbered markers onto their own lines so Rich/CommonMark renders
+    # each as a real list item and the early-return below sees the true layout.
+    content = re.sub(
+        r"(?<=\S)[ \t\u3000]+(?=\d{1,2}[.．、]\s+\S)",
+        "\n",
+        content,
+    )
+
+    # When a manager LLM glues a rating verdict to the first numbered item's title
+    # (e.g. "1. 初始仓位设置。 研究结论: 买入/增持。<body>"), the rating is supposed
+    # to live in the rating subsection and not bleed into the advice. Strip the
+    # leaked "研究结论:/最终配置建议:/评级:" prefix immediately following an item title
+    # so it doesn't surface in the rendered list item body.
+    content = _LEAKED_RATING_PREFIX_RE.sub(r"\1", content)
+
+    # Don't reformat content that already has at least two cleanly line-anchored
+    # numbered items and no remaining inline markers (i.e. the LLM already produced
+    # a usable numbered list).
+    line_anchored_count = sum(
+        1
+        for line in content.splitlines()
+        if re.match(r"^\s*(?:\d+[.．、]|[-*•])\s+\S", line)
+    )
+    if line_anchored_count >= 2:
         return content
+
     if len(re.sub(r"\s+", "", content)) < 120:
         return content
 
