@@ -2379,6 +2379,15 @@ _POSITIONING_RATING_HEADING_RE = re.compile(
 _POSITIONING_ADVICE_HEADING_RE = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、\s*)?(?:（[一二三四五六七八九十\d]+）\s*)?建议(?:正文)?\s*$"
 )
+_POSITIONING_EXECUTION_CUES = (
+    ("加仓条件", "加仓条件与关键位"),
+    ("减仓条件", "减仓与止损条件"),
+    ("退出触发", "极端退出触发"),
+    ("再平衡触发", "再平衡触发"),
+    ("下一步重点监控", "后续验证指标"),
+    ("后续重点监控", "后续验证指标"),
+    ("重点监控", "后续验证指标"),
+)
 
 
 def _normalize_manager_section_key(title: str) -> str:
@@ -2396,6 +2405,59 @@ def _trim_section_lines(lines: list[str]) -> list[str]:
     while trimmed and not trimmed[-1].strip():
         trimmed.pop()
     return trimmed
+
+
+def format_chinese_positioning_recommendation(text: str) -> str:
+    """Split long Chinese execution advice into numbered, readable blocks."""
+    content = (text or "").strip()
+    if not content or not _is_chinese_output():
+        return content
+    if re.search(r"(?m)^\s*(?:\d+[.．、]|[-*•])\s+", content):
+        return content
+    if len(re.sub(r"\s+", "", content)) < 120:
+        return content
+
+    positions: list[tuple[int, str, str]] = []
+    seen_positions: set[int] = set()
+    for cue, title in _POSITIONING_EXECUTION_CUES:
+        match = re.search(re.escape(cue), content)
+        if not match or match.start() in seen_positions:
+            continue
+        positions.append((match.start(), cue, title))
+        seen_positions.add(match.start())
+    positions.sort(key=lambda item: item[0])
+    if not positions:
+        return content
+
+    chunks: list[tuple[str, str]] = []
+    first_start = positions[0][0]
+    initial = content[:first_start].strip()
+    if initial:
+        initial_title = "初始仓位设置" if re.search(r"(仓位|头寸|底仓|配置)", initial) else "执行原则"
+        chunks.append((initial_title, initial))
+
+    for index, (start, _cue, title) in enumerate(positions):
+        end = positions[index + 1][0] if index + 1 < len(positions) else len(content)
+        chunk = content[start:end].strip()
+        if chunk:
+            chunks.append((title, chunk))
+
+    deduped: list[tuple[str, str]] = []
+    for title, chunk in chunks:
+        if deduped and deduped[-1][0] == title:
+            previous_title, previous_chunk = deduped[-1]
+            deduped[-1] = (previous_title, f"{previous_chunk}{chunk}")
+            continue
+        deduped.append((title, chunk))
+
+    if len(deduped) < 2:
+        return content
+
+    lines = []
+    for index, (title, chunk) in enumerate(deduped, 1):
+        separator = "" if chunk.startswith(("。", "，", "；", "：", ":", ";", ",")) else ""
+        lines.append(f"{index}. {title}。{separator}{chunk}")
+    return "\n".join(lines)
 
 
 def _normalize_manager_positioning_subsections(text: str) -> str:
@@ -2571,6 +2633,8 @@ def _ensure_manager_positioning_subsections(lines: list[str], rating: str) -> li
         advice_block = _trim_section_lines(advice_lines)
         if not advice_block:
             advice_block = [_default_manager_positioning_content(rating)]
+        advice_text = format_chinese_positioning_recommendation("\n".join(advice_block))
+        advice_block = advice_text.splitlines() if advice_text else advice_block
         return _compact_manager_positioning_spacing(
             ["### （一）评级", rating_line, "### （二）建议", *advice_block]
         )
@@ -2581,6 +2645,8 @@ def _ensure_manager_positioning_subsections(lines: list[str], rating: str) -> li
     advice_block = _trim_section_lines(advice_lines)
     if not advice_block:
         advice_block = [_default_manager_positioning_content(rating)]
+    advice_text = format_chinese_positioning_recommendation("\n".join(advice_block))
+    advice_block = advice_text.splitlines() if advice_text else advice_block
 
     rebuilt = ["### （一）评级", rating_line, "### （二）建议", *advice_block]
     return _trim_section_lines(rebuilt)
