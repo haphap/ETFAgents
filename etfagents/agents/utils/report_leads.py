@@ -418,6 +418,11 @@ _REFINE_PREAMBLE_RE = re.compile(
     r"(?:修正|修订|修改|改进|完善|优化|调整|评审|审核)"
     r"[^\n]*\n?"
 )
+_REPORT_PROCESS_PREAMBLE_RE = re.compile(
+    r"(?m)^\s*"
+    r"(?:数据|资料|信息).{0,12}?(?:已|已经)?(?:获取|收集|拿到|完成)[。！!；;，,]?\s*"
+    r"(?:以下|下面).{0,80}?(?:撰写|生成|输出|写).{0,60}?报告[。！!；;，,]?\s*"
+)
 
 _META_OPENER_RE = re.compile(
     r"(?m)^\s*"
@@ -439,11 +444,25 @@ def _strip_leading_artifact_lines(report: str) -> str:
     return collapse_blank_lines("\n".join(lines[first_content:]))
 
 
+def strip_artifact_only_lines(report: str) -> str:
+    """Remove standalone separator / box-art lines anywhere in generated reports."""
+    if not report:
+        return ""
+    kept = [
+        line
+        for line in report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+        if not _ARTIFACT_ONLY_LINE_RE.fullmatch(line.strip())
+    ]
+    return collapse_blank_lines("\n".join(kept))
+
+
 def strip_refine_preamble(report: str) -> str:
     """Remove meta-commentary from the refine step, e.g. '以下是根据评审标准修正后的完整报告...'."""
     if not report:
         return ""
     cleaned = _REFINE_PREAMBLE_RE.sub("", report)
+    cleaned = _REPORT_PROCESS_PREAMBLE_RE.sub("", cleaned)
+    cleaned = strip_artifact_only_lines(cleaned)
     return _strip_leading_artifact_lines(cleaned)
 
 

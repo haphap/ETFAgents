@@ -15,6 +15,7 @@ from etfagents.agents.utils.report_leads import (
     contains_self_referential_meta_leads,
     post_judge_clean,
     pre_judge_clean,
+    strip_artifact_only_lines,
     strip_standalone_term_definition_blocks,
 )
 from etfagents.agents.utils.validate_refine import (
@@ -300,6 +301,33 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertNotIn("以下是根据评审标准", cleaned)
         self.assertNotIn("# 技术面诊断", cleaned)
         self.assertIn("MACD 金叉", cleaned)
+
+    def test_pre_judge_clean_strips_data_ready_report_preamble(self):
+        raw = (
+            "数据已获取。以下基于2026年5月15日商品集群快照，针对农业ETF华夏（516810.SH）撰写中观商品分析报告。\n\n"
+            "一、核心矛盾与主线判断\n"
+            "农产品链条仍以成本传导不顺为主线。"
+        )
+
+        cleaned = pre_judge_clean(raw)
+
+        self.assertNotIn("数据已获取", cleaned)
+        self.assertNotIn("以下基于2026年5月15日", cleaned)
+        self.assertTrue(cleaned.startswith("一、核心矛盾与主线判断"))
+
+    def test_artifact_only_separator_lines_are_removed_anywhere(self):
+        raw = (
+            "宏观结论偏中性。\n"
+            "-------------\n"
+            "一、暴露与宏观主线\n"
+            "信用利差仍是关键变量。\n"
+        )
+
+        cleaned = strip_artifact_only_lines(raw)
+
+        self.assertNotIn("-------------", cleaned)
+        self.assertIn("宏观结论偏中性。", cleaned)
+        self.assertIn("一、暴露与宏观主线", cleaned)
 
     def test_post_judge_clean_runs_punctuation_pass(self):
         raw = "走势已确认上行?\n\n"
