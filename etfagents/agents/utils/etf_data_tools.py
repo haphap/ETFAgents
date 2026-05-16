@@ -17,7 +17,7 @@ from etfagents.agents.utils.daily_snapshot_cache import (
     DailySnapshotCacheError,
     get_or_build_shared_snapshot,
 )
-from etfagents.dataflows.exceptions import DataVendorUnavailable
+from etfagents.dataflows.exceptions import DataVendorUnavailable, MissingEtfHoldings
 from etfagents.dataflows.interface import route_to_vendor
 from etfagents.dataflows.tushare import (
     _get_pro_client,
@@ -109,7 +109,10 @@ _COMMODITY_SPECS = [
 
 _AGRICULTURE_RESEARCH_KEYWORDS = ("农牧饲渔", "养殖业")
 _AGRICULTURE_RESEARCH_TRIGGERS = ("农牧饲渔", "养殖", "饲料", "生猪", "动物保健", "农产品加工")
-_COMMODITY_NO_HOLDINGS_PREFIX = "No ETF holdings data found for '"
+# Representative A-share producer baskets used only when a commodity ETF has no disclosed
+# equity holdings. Constituents are liquid, broker-covered producers chosen as a correlated
+# research reference; the proxy weights are illustrative rather than ETF replication weights.
+# TODO: refresh the constituents and illustrative weights at least annually.
 _COMMODITY_PRODUCER_PROXY_BASKETS = (
     {
         "label": "黄金",
@@ -150,6 +153,7 @@ _COMMODITY_PRODUCER_PROXY_BASKETS = (
     {
         "label": "工业金属",
         "keywords": ("有色", "工业金属", "铜", "铝", "metal"),
+        "display_label": "工业金属（铜偏重代理）",
         "members": (
             {"ts_code": "601899.SH", "name": "紫金矿业", "industry": "有色金属", "weight": 40.0},
             {"ts_code": "603993.SH", "name": "洛阳钼业", "industry": "有色金属", "weight": 35.0},
@@ -190,10 +194,6 @@ def _format_number(value: float | None, digits: int = 2, suffix: str = "") -> st
     if value is None:
         return "N/A"
     return f"{value:.{digits}f}{suffix}"
-
-
-def _is_missing_etf_holdings_error(exc: Exception | str) -> bool:
-    return _COMMODITY_NO_HOLDINGS_PREFIX in str(exc or "")
 
 
 def _load_etf_profile_row(ticker: str) -> tuple[str, pd.Series]:
@@ -239,9 +239,15 @@ def _build_commodity_producer_proxy_frame(
         return ts_code, "", pd.DataFrame()
     frame.attrs["source"] = "commodity_producer_proxy"
     frame.attrs["proxy_label"] = basket["label"]
+    frame.attrs["display_label"] = basket.get("display_label", basket["label"])
     frame.attrs["source_note"] = (
-        f"No ETF stock holdings were disclosed for {ts_code} up to {curr_date}; "
-        f"using representative A-share {basket['label']} producers as a proxy research basket."
+        f"No equity holdings are disclosed for {ts_code}; this commodity ETF primarily tracks the underlying "
+        f"{basket['label']} price reference. The basket below lists representative A-share "
+        f"{basket.get('display_label', basket['label'])} producers as a correlated research reference only. "
+        "Proxy weights are illustrative and do not reflect the ETF's actual exposure structure; "
+        "commodity ETFs typically track a price reference rather than equity holdings. "
+        f"Producer-stock returns can decouple from spot {basket['label']} due to operating leverage, hedging, "
+        "and idiosyncratic risk, so treat these producer theses as supplementary rather than ETF top-holding analysis."
     )
     return ts_code, f"proxy basket as of {curr_date}", frame
 
@@ -253,9 +259,9 @@ def _render_commodity_producer_proxy_holdings(
 ) -> str:
     if proxy_frame is None or proxy_frame.empty:
         return f"No ETF holdings data found for '{ts_code}' up to {curr_date}."
-    proxy_label = str(proxy_frame.attrs.get("proxy_label", "商品"))
+    proxy_label = str(proxy_frame.attrs.get("display_label", proxy_frame.attrs.get("proxy_label", "商品")))
     source_note = str(proxy_frame.attrs.get("source_note", "")).strip()
-    output = proxy_frame.rename(columns={"weight": "proxy_weight_pct"}).reset_index(drop=True)
+    output = proxy_frame.rename(columns={"weight": "proxy_weight_illustrative_pct"}).reset_index(drop=True)
     summary_lines = [
         f"Ticker: {ts_code}",
         f"Proxy basket: A-share {proxy_label} producers",
@@ -1146,7 +1152,7 @@ def _load_latest_etf_holdings_frame(ticker: str, curr_date: str) -> tuple[str, p
     if "end_date" in df.columns:
         df = df[df["end_date"].astype(str) <= _parse_trade_date(curr_date).strftime("%Y%m%d")]
     if df.empty:
-        raise DataVendorUnavailable(f"No ETF holdings data found for '{ts_code}' up to {curr_date}.")
+        raise MissingEtfHoldings(f"No ETF holdings data found for '{ts_code}' up to {curr_date}.")
     sort_columns = [col for col in ("end_date", "ann_date", "stk_mkv_ratio") if col in df.columns]
     ordered = (
         df.sort_values(by=sort_columns, ascending=[False] * len(sort_columns))
@@ -1193,9 +1199,7 @@ def _build_constituent_frame(ticker: str, curr_date: str, limit: int) -> tuple[s
     ts_code = _normalize_ts_code(ticker)
     try:
         ts_code, holdings = _load_latest_etf_holdings_frame(ticker, curr_date)
-    except DataVendorUnavailable as exc:
-        if not _is_missing_etf_holdings_error(exc):
-            raise
+    except MissingEtfHoldings:
         proxy_ts_code, latest_end_date, proxy_frame = _build_commodity_producer_proxy_frame(
             ticker,
             curr_date,
@@ -1272,7 +1276,11 @@ def _related_broker_industry_keywords(row: pd.Series | dict[str, object]) -> lis
     return [keyword for keyword in _AGRICULTURE_RESEARCH_KEYWORDS if keyword]
 
 
-def _format_holdings_summary(rows: pd.DataFrame, label: str) -> str:
+def _format_holdings_summary(
+    rows: pd.DataFrame,
+    label: str,
+    weight_header: str = "Weight",
+) -> str:
     if rows is None or rows.empty:
         return f"No eligible A-share {label.lower()} could be derived from the latest ETF holdings disclosure."
     table_rows = [
@@ -1286,7 +1294,7 @@ def _format_holdings_summary(rows: pd.DataFrame, label: str) -> str:
         for idx, (_, row) in enumerate(rows.iterrows())
     ]
     return _markdown_table(
-        ["Rank", label, "Representative", "Ticker", "Weight"],
+        ["Rank", label, "Representative", "Ticker", weight_header],
         table_rows,
     )
 
@@ -1358,14 +1366,16 @@ def get_etf_holdings(
     curr_date: Annotated[str, "Current analysis date in yyyy-mm-dd format"],
 ) -> str:
     """Retrieve disclosed ETF holdings and benchmark exposure clues."""
-    result = route_to_vendor("get_etf_holdings", ticker, curr_date)
-    if isinstance(result, str) and _is_missing_etf_holdings_error(result):
+    try:
+        result = route_to_vendor("get_etf_holdings", ticker, curr_date)
+    except MissingEtfHoldings as exc:
         try:
             ts_code, _, proxy_frame = _build_commodity_producer_proxy_frame(ticker, curr_date, limit=5)
         except DataVendorUnavailable:
-            return result
+            return str(exc)
         if not proxy_frame.empty:
             return _render_commodity_producer_proxy_holdings(ts_code, curr_date, proxy_frame)
+        return str(exc)
     return result
 
 
@@ -1443,20 +1453,22 @@ def get_etf_industry_research(
         representative["weight"] = _safe_float(industry_row["industry_weight"]) or 0.0
         representatives.append(representative)
     reps_df = pd.DataFrame(representatives)
+    source_note = str(constituents.attrs.get("source_note", "")).strip()
+    weight_header = "Proxy weight (illustrative)" if source_note else "Weight"
+    aggregated_weight_label = "aggregated proxy weight (illustrative)" if source_note else "aggregated weight"
     sections = [
         f"# ETF industry research for {ts_code}",
         f"Latest holdings disclosure date: {latest_end_date or 'N/A'}",
         "## Dominant industries derived from top holdings and broker-report industry keywords",
-        _format_holdings_summary(reps_df, "Industry"),
+        _format_holdings_summary(reps_df, "Industry", weight_header=weight_header),
     ]
-    source_note = str(constituents.attrs.get("source_note", "")).strip()
     if source_note:
         sections.insert(2, source_note)
     for idx, (_, row) in enumerate(reps_df.iterrows(), 1):
         base_industry = str(row.get("base_industry", "")).strip()
         industry_source = str(row.get("research_industry_source", "")).strip()
         sections.append(
-            f"## Industry {idx}: {row['industry']} | aggregated weight {_format_number(_safe_float(row.get('weight')), suffix='%')} | representative {row['name']} ({row['ts_code']})"
+            f"## Industry {idx}: {row['industry']} | {aggregated_weight_label} {_format_number(_safe_float(row.get('weight')), suffix='%')} | representative {row['name']} ({row['ts_code']})"
         )
         if industry_source:
             sections.append(f"Keyword source: {industry_source}")
@@ -1502,6 +1514,8 @@ def get_etf_top_holdings_research(
     top_holdings = constituents.sort_values("weight", ascending=False).head(max(1, int(top_n))).reset_index(drop=True)
     start_date, end_date = _date_window(curr_date, look_back_days)
     source_note = str(constituents.attrs.get("source_note", "")).strip()
+    weight_header = "Proxy weight (illustrative)" if source_note else "Weight"
+    per_holding_weight_label = "proxy weight (illustrative)" if source_note else "portfolio weight"
     holdings_heading = (
         "## Proxy A-share producer basket"
         if source_note
@@ -1511,13 +1525,13 @@ def get_etf_top_holdings_research(
         f"# ETF top-holdings stock research for {ts_code}",
         f"Latest holdings disclosure date: {latest_end_date or 'N/A'}",
         holdings_heading,
-        _format_holdings_summary(top_holdings, "Holding"),
+        _format_holdings_summary(top_holdings, "Holding", weight_header=weight_header),
     ]
     if source_note:
         sections.insert(2, source_note)
     for idx, (_, row) in enumerate(top_holdings.iterrows(), 1):
         sections.append(
-            f"## Holding {idx}: {row['name']} ({row['ts_code']}) | portfolio weight {_format_number(_safe_float(row.get('weight')), suffix='%')} | industry {row['industry']}"
+            f"## Holding {idx}: {row['name']} ({row['ts_code']}) | {per_holding_weight_label} {_format_number(_safe_float(row.get('weight')), suffix='%')} | industry {row['industry']}"
         )
         try:
             sections.append(
