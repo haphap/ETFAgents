@@ -34,6 +34,9 @@ _EXCHANGE_ONLY_PSEUDO_TITLE_PATTERN = re.compile(
     + "|".join(re.escape(subject) for subject in _PSEUDO_TITLE_SUBJECTS)
     + r")\s*$"
 )
+_CJK_TEXT_EDGE_RE = re.compile(r"[\u3400-\u9fffA-Za-z0-9%）】》。，；：、.!?！？]$")
+_CJK_TEXT_START_RE = re.compile(r"^[\u3400-\u9fffA-Za-z0-9（【《。！？；，、,.!?;:]")
+_LEADING_PUNCT_RE = re.compile(r"^[。！？；，、,.!?;:]")
 
 def get_no_title_instruction() -> str:
     return (
@@ -214,6 +217,65 @@ def _looks_like_section_heading(line: str) -> bool:
     return stripped.startswith("#") or bool(
         re.match(r"^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)", stripped)
     )
+
+
+def _looks_like_markdown_table_line(line: str) -> bool:
+    stripped = (line or "").strip()
+    return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+
+
+def _looks_like_structural_line(line: str) -> bool:
+    stripped = (line or "").strip()
+    if not stripped:
+        return True
+    if _looks_like_section_heading(stripped) or _looks_like_markdown_table_line(stripped):
+        return True
+    if _LEADING_LABEL_PREFIX_RE.search(stripped) or _QA_LABEL_RE.search(stripped):
+        return True
+    if _SELF_REFERENTIAL_META_LEAD_RE.search(stripped) or _META_OPENER_RE.search(stripped):
+        return True
+    return bool(re.match(r"^(?:[-*+]\s+|\d+[.)、]\s+|>{1,}\s*)", stripped))
+
+
+def _strip_box_edge_line(line: str) -> str:
+    stripped = (line or "").strip()
+    if _looks_like_markdown_table_line(stripped):
+        return line.rstrip()
+    return stripped.strip("│").strip()
+
+
+def normalize_boxed_text_wrapping(report: str) -> str:
+    """Remove leaked TUI box edges and merge accidental hard-wraps in prose."""
+    if not report:
+        return ""
+
+    raw_lines = report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    lines = [_strip_box_edge_line(line) for line in raw_lines]
+    merged: list[str] = []
+    for line in lines:
+        if not merged:
+            merged.append(line)
+            continue
+
+        prev = merged[-1]
+        if (
+            prev
+            and line
+            and not _looks_like_structural_line(prev)
+            and not _looks_like_structural_line(line)
+            and _CJK_TEXT_EDGE_RE.search(prev)
+            and _CJK_TEXT_START_RE.match(line)
+        ):
+            separator = (
+                ""
+                if _LEADING_PUNCT_RE.match(line.lstrip()) or re.search(r"[。！？；，、]$", prev.rstrip())
+                else " "
+            )
+            merged[-1] = f"{prev.rstrip()}{separator}{line.lstrip()}"
+        else:
+            merged.append(line)
+
+    return collapse_blank_lines("\n".join(merged))
 
 
 _SELF_REFERENTIAL_META_LEAD_RE = re.compile(
@@ -529,7 +591,8 @@ def pre_judge_clean(report: str) -> str:
     """
     if not report:
         return ""
-    cleaned = strip_refine_preamble(report)
+    cleaned = normalize_boxed_text_wrapping(report)
+    cleaned = strip_refine_preamble(cleaned)
     cleaned = strip_report_title(cleaned)
     cleaned = strip_qa_labels(cleaned)
     cleaned = strip_opening_term_explanations(cleaned)
