@@ -131,7 +131,7 @@ _COMMODITY_PRODUCER_PROXY_BASKETS = (
     },
     {
         "label": "原油",
-        "keywords": ("原油", "oil", "能源"),
+        "keywords": ("原油", "oil", "crude"),
         "members": (
             {"ts_code": "600938.SH", "name": "中国海油", "industry": "石油石化", "weight": 40.0},
             {"ts_code": "601857.SH", "name": "中国石油", "industry": "石油石化", "weight": 35.0},
@@ -1203,7 +1203,7 @@ def _build_constituent_frame(ticker: str, curr_date: str, limit: int) -> tuple[s
         )
         if not proxy_frame.empty:
             return proxy_ts_code, latest_end_date, proxy_frame
-        return proxy_ts_code, "", pd.DataFrame()
+        raise
     latest_end_date = str(holdings.iloc[0].get("end_date", "")) if not holdings.empty else ""
     enriched_rows: list[dict[str, object]] = []
     for _, row in holdings.head(max(limit, 1) * 3).iterrows():

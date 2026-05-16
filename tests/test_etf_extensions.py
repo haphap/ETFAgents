@@ -1,4 +1,5 @@
 import copy
+import re
 import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -7,6 +8,7 @@ import pandas as pd
 from langgraph.prebuilt import ToolNode
 
 from etfagents.agents.utils.etf_data_tools import (
+    _match_commodity_proxy_basket,
     _related_broker_industry_keywords,
     get_etf_holdings,
     get_etf_indicators,
@@ -255,6 +257,49 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertIn("Proxy basket", result)
         self.assertNotIn("No ETF holdings data found", result)
 
+    @patch("etfagents.agents.utils.etf_data_tools._load_latest_etf_holdings_frame")
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_etf_industry_research_propagates_missing_holdings_for_non_commodity_etf(
+        self,
+        mock_query_pro,
+        mock_holdings_frame,
+    ):
+        message = "No ETF holdings data found for '562500.SH' up to 2026-05-15."
+        mock_holdings_frame.side_effect = DataVendorUnavailable(message)
+        mock_query_pro.return_value = pd.DataFrame(
+            [
+                {
+                    "ts_code": "562500.SH",
+                    "name": "新能源电池ETF",
+                    "benchmark": "中证新能源电池主题指数",
+                    "fund_type": "ETF",
+                    "invest_type": "被动指数型",
+                    "market": "SH",
+                }
+            ]
+        )
+
+        with self.assertRaisesRegex(DataVendorUnavailable, re.escape(message)):
+            get_etf_industry_research.invoke(
+                {"ticker": "562500.SH", "curr_date": "2026-05-15"}
+            )
+
+    @patch("etfagents.agents.utils.etf_data_tools._load_latest_etf_holdings_frame")
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_etf_industry_research_propagates_missing_holdings_when_profile_is_empty(
+        self,
+        mock_query_pro,
+        mock_holdings_frame,
+    ):
+        message = "No ETF holdings data found for '518880.SH' up to 2026-05-15."
+        mock_holdings_frame.side_effect = DataVendorUnavailable(message)
+        mock_query_pro.return_value = pd.DataFrame()
+
+        with self.assertRaisesRegex(DataVendorUnavailable, re.escape(message)):
+            get_etf_industry_research.invoke(
+                {"ticker": "518880.SH", "curr_date": "2026-05-15"}
+            )
+
     @patch("etfagents.agents.utils.etf_data_tools.get_broker_reports")
     @patch("etfagents.agents.utils.etf_data_tools._resolve_broker_industry_keyword")
     @patch("etfagents.agents.utils.etf_data_tools._get_pro_client")
@@ -398,6 +443,22 @@ class ETFExtensionTests(unittest.TestCase):
         }
 
         self.assertEqual([], _related_broker_industry_keywords(row))
+
+    def test_match_commodity_proxy_basket_prefers_lithium_for_new_energy_lithium_text(self):
+        profile = pd.Series(
+            {
+                "ts_code": "562500.SH",
+                "name": "有色金属新能源锂矿ETF",
+                "benchmark": "中证新能源锂矿主题指数",
+                "asset_scope": "commodity",
+                "exposure_bucket": "commodity_real_asset",
+            }
+        )
+
+        basket = _match_commodity_proxy_basket(profile)
+
+        self.assertIsNotNone(basket)
+        self.assertEqual(basket["label"], "锂")
 
     @patch("etfagents.dataflows.tushare._query_pro")
     def test_etf_universe_includes_enriched_factor_columns(self, mock_query):
