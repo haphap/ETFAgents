@@ -189,6 +189,22 @@ class CliRoundFormattingTests(unittest.TestCase):
 
         self.assertEqual(formatted, "科创芯片ETF嘉实")
 
+    def test_prepare_report_markdown_leaves_english_prose_numbering_unchanged(self):
+        cfg = DEFAULT_CONFIG.copy()
+        cfg["output_language"] = "English"
+        set_config(cfg)
+
+        formatted = _prepare_report_markdown(
+            "1. First item\n\n"
+            "5 dogs barked loudly in the yard.\n\n"
+            "2. Second item"
+        )
+
+        self.assertIn("1. First item", formatted)
+        self.assertIn("5 dogs barked loudly in the yard.", formatted)
+        self.assertIn("2. Second item", formatted)
+        self.assertNotIn("5. dogs barked loudly in the yard.", formatted)
+
     def test_risk_management_history_supports_english_prefixes(self):
         risk_state = {
             "aggressive_history": (

@@ -210,15 +210,15 @@ def _looks_like_plain_numbered_heading(line: str) -> bool:
 
 def _normalize_loose_arabic_list_markers(content: str) -> str:
     text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
-    if not text:
-        return ""
+    if not text or not _is_chinese_output():
+        return text
     return _LOOSE_ARABIC_LIST_ITEM_PATTERN.sub(r"\1\2. \3", text)
 
 
 def _strip_sentence_like_section_prefixes_in_lists(content: str) -> str:
     text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
-    if not text:
-        return ""
+    if not text or not _is_chinese_output():
+        return text
 
     lines = text.split("\n")
     nonempty_indices = [index for index, line in enumerate(lines) if line.strip()]
@@ -358,8 +358,8 @@ def _is_report_heading_line(line: str) -> bool:
 
 def _normalize_orphan_section_marker_lines(content: str) -> str:
     text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
-    if not text:
-        return ""
+    if not text or not _is_chinese_output():
+        return text
 
     lines = text.split("\n")
     normalized: list[str] = []
@@ -441,11 +441,11 @@ def _convert_plain_headings_to_markdown(content: str) -> str:
             result.append(line)
             continue
         # Convert top-level headings: 一、xxx → # 一、xxx
-        if _PLAIN_TOP_LEVEL_HEADING_PATTERN.match(stripped) and _looks_like_plain_numbered_heading(stripped):
+        if _looks_like_plain_numbered_heading(stripped) and stripped.startswith(tuple("一二三四五六七八九十")):
             result.append(f"# {stripped}")
             continue
         # Convert second-level headings: （一）xxx → ## （一）xxx
-        if _PLAIN_SECOND_LEVEL_HEADING_PATTERN.match(stripped) and _looks_like_plain_numbered_heading(stripped):
+        if _looks_like_plain_numbered_heading(stripped) and stripped.startswith("（"):
             result.append(f"## {stripped}")
             continue
         result.append(line)
