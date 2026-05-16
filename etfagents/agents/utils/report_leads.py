@@ -402,6 +402,13 @@ def _strip_table_artifact_edges(line: str) -> str:
     return (line or "").strip().strip("│|").strip()
 
 
+def _is_artifact_only_line(line: str) -> bool:
+    stripped = (line or "").strip()
+    return bool(
+        stripped and _ARTIFACT_ONLY_LINE_RE.fullmatch(stripped) and "|" not in stripped
+    )
+
+
 def _starts_with_term_definition_bullet(text: str) -> bool:
     return bool(re.match(r"^\s*[•·]", text or ""))
 
@@ -429,7 +436,7 @@ def strip_standalone_term_definition_blocks(report: str) -> str:
                 skipping = False
                 kept.append(line)
                 continue
-            if not content or _ARTIFACT_ONLY_LINE_RE.fullmatch(line.strip()):
+            if not content or _is_artifact_only_line(line):
                 saw_blank_after_block = True
                 continue
             if saw_blank_after_block:
@@ -499,7 +506,7 @@ def _strip_leading_artifact_lines(report: str) -> str:
     first_content = 0
     while first_content < len(lines):
         stripped = lines[first_content].strip()
-        if not stripped or _ARTIFACT_ONLY_LINE_RE.fullmatch(stripped):
+        if not stripped or _is_artifact_only_line(stripped):
             first_content += 1
             continue
         break
@@ -513,7 +520,7 @@ def strip_artifact_only_lines(report: str) -> str:
     kept = [
         line
         for line in report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
-        if not _ARTIFACT_ONLY_LINE_RE.fullmatch(line.strip())
+        if not _is_artifact_only_line(line)
     ]
     return collapse_blank_lines("\n".join(kept))
 

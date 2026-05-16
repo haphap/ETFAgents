@@ -1115,7 +1115,7 @@ def _related_broker_industry_keywords(row: pd.Series | dict[str, object]) -> lis
     """Return adjacent tushare industry keywords for broad agriculture sleeves."""
     text = " ".join(
         str(row.get(key, "") or "")
-        for key in ("industry", "research_industry", "base_industry", "name")
+        for key in ("industry", "research_industry", "base_industry")
     )
     if not any(trigger in text for trigger in _AGRICULTURE_RESEARCH_TRIGGERS):
         return []

@@ -22,7 +22,7 @@ _XML_TOOL_CALL_RE = re.compile(
     r"<tool_call>|<function[=\s]|</?function_call>", re.IGNORECASE
 )
 _PROCESS_ONLY_REPORT_RE = re.compile(
-    r"(?:现在|好的|接下来|下一步|我)?[\s\S]{0,80}?"
+    r"(?:现在|好的|接下来|下一步|我|数据|资料|信息|已获取|已经获取)[\s\S]{0,80}?"
     r"(?:已|已经).{0,40}?(?:获取|收集|拿到|完成).{0,40}?(?:数据|资料|信息)"
     r"[\s\S]{0,120}?"
     r"(?:开始|将|马上|准备).{0,40}?(?:撰写|生成|输出|写).{0,40}?报告",
@@ -52,7 +52,7 @@ def _is_process_only_report_text(text: str) -> bool:
         return False
     if re.search(r"(?m)^\s*[一二三四五六七八九十]+、", stripped):
         return False
-    return bool(_PROCESS_ONLY_REPORT_RE.search(stripped))
+    return bool(_PROCESS_ONLY_REPORT_RE.match(stripped[:240]))
 
 
 def _extract_report_text(result) -> str:

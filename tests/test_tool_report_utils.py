@@ -172,6 +172,13 @@ class ToolReportUtilsTests(unittest.TestCase):
             )
         )
 
+    def test_process_only_detector_does_not_match_mid_sentence_report_plan(self):
+        self.assertFalse(
+            _is_process_only_report_text(
+                "本ETF已获取充足成交数据；预计将在下次再平衡前撰写补充报告以验证假设。"
+            )
+        )
+
     def test_recovers_unexecuted_intent_for_any_configured_trigger_tool(self):
         prompt = _FakePrompt()
         news_tool = _FakeTool("get_news", "news data")

@@ -330,6 +330,21 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertIn("宏观结论偏中性。", cleaned)
         self.assertIn("一、暴露与宏观主线", cleaned)
 
+    def test_pre_judge_clean_preserves_markdown_table_separator(self):
+        raw = (
+            "本ETF整体偏多。\n\n"
+            "四、研报总览表\n"
+            "| 券商 | 立场 | 目标价 |\n"
+            "| --- | --- | --- |\n"
+            "| 中信 | 看多 | 12.5 |\n"
+            "| 国君 | 中性 | 11.0 |\n"
+        )
+
+        cleaned = pre_judge_clean(raw)
+
+        self.assertIn("| --- | --- | --- |", cleaned)
+        self.assertIn("| 中信 | 看多 | 12.5 |", cleaned)
+
     def test_boxed_opening_paragraph_wraps_are_normalized(self):
         raw = (
             "│  生猪养殖是农业ETF当前最核心的行业暴露，券商共识指向产能去化加速预期正在形成，但节奏与幅度仍存分歧；农化制品库存周期接近底部，而饲料板块真正的传统饲料研究线索缺失，仅能通过养殖业报告间接推断   │\n"

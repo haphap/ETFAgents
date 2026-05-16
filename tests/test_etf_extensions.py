@@ -6,7 +6,11 @@ from unittest.mock import patch
 import pandas as pd
 from langgraph.prebuilt import ToolNode
 
-from etfagents.agents.utils.etf_data_tools import get_etf_indicators, get_etf_industry_research
+from etfagents.agents.utils.etf_data_tools import (
+    _related_broker_industry_keywords,
+    get_etf_indicators,
+    get_etf_industry_research,
+)
 from etfagents.dataflows.config import get_config, set_config
 from etfagents.dataflows.config import backtest_context
 from etfagents.dataflows.interface import TOOLS_CATEGORIES, VENDOR_METHODS, get_category_for_method
@@ -266,6 +270,16 @@ class ETFExtensionTests(unittest.TestCase):
         call_args = mock_get_broker_reports.call_args
         self.assertEqual(call_args.args[0], "002311.SZ")
         self.assertEqual(call_args.kwargs["extra_ind_names"], ["农牧饲渔", "养殖业"])
+
+    def test_related_agriculture_keywords_ignore_constituent_name_substrings(self):
+        row = {
+            "industry": "白酒",
+            "research_industry": "饮料制造",
+            "base_industry": "食品饮料",
+            "name": "饲料新材料股份",
+        }
+
+        self.assertEqual([], _related_broker_industry_keywords(row))
 
     @patch("etfagents.dataflows.tushare._query_pro")
     def test_etf_universe_includes_enriched_factor_columns(self, mock_query):
