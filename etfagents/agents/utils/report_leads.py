@@ -286,7 +286,7 @@ _TERM_DEFINITION_PREAMBLE_RE = re.compile(
     r"为降低.{0,120}(?:技术术语|高频技术术语|术语).{0,80}(?:解释|说明|含义)",
 )
 _TERM_DEFINITION_LINE_RE = re.compile(
-    r"(?:[•·]\s*)?[^：:\n]{1,30}[：:].{0,180}(?:是指|指|交易含义|市场含义|配置含义)"
+    r"(?:[•·]\s*)?[^：:\n]{1,30}[：:].{0,180}(?:是指|指的是|交易含义|市场含义|配置含义)"
     r"|(?:是指|指的是|交易含义|市场含义|配置含义)"
 )
 _OPENING_SECTION_MARKER_RE = re.compile(r"(?m)^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+、")
@@ -340,6 +340,10 @@ def _strip_table_artifact_edges(line: str) -> str:
     return (line or "").strip().strip("│|").strip()
 
 
+def _starts_with_term_definition_bullet(text: str) -> bool:
+    return bool(re.match(r"^\s*[•·]", text or ""))
+
+
 def strip_standalone_term_definition_blocks(report: str) -> str:
     """Remove standalone glossary-style blocks while preserving inline explanations."""
     if not report:
@@ -366,7 +370,13 @@ def strip_standalone_term_definition_blocks(report: str) -> str:
             if not content or _ARTIFACT_ONLY_LINE_RE.fullmatch(line.strip()):
                 saw_blank_after_block = True
                 continue
-            if not saw_blank_after_block or _TERM_DEFINITION_LINE_RE.search(content):
+            if saw_blank_after_block:
+                if _starts_with_term_definition_bullet(content) and _TERM_DEFINITION_LINE_RE.search(content):
+                    continue
+                skipping = False
+                kept.append(line)
+                continue
+            if _TERM_DEFINITION_LINE_RE.search(content):
                 continue
             skipping = False
             kept.append(line)

@@ -50,9 +50,16 @@ class _CapturingLLM(RunnableLambda):
 class _IntentThenFinalLLM(RunnableLambda):
     """First emits a fake future tool-call note, then writes a report from recovered data."""
 
-    def __init__(self):
+    def __init__(self, tool_name="get_etf_industry_research", final_content=None):
         super().__init__(func=self._invoke)
         self._prompts = []
+        self.tool_name = tool_name
+        self.final_content = final_content or (
+            "券商行业研究显示ETF主导暴露集中在工业金属，需求验证优先级高于估值扩张。\n\n"
+            "一、行业主线与分歧焦点\n"
+            "（一）共识主线\n"
+            "报告内容。"
+        )
 
     def _invoke(self, prompt, **kwargs):
         self._prompts.append(prompt)
@@ -60,17 +67,10 @@ class _IntentThenFinalLLM(RunnableLambda):
             return AIMessage(
                 content=(
                     "好的，接下来我将获取该ETF主导行业的券商研究报告，以完成深度交叉分析。"
-                    "我将调用 get_etf_industry_research 工具。"
+                    f"我将调用 {self.tool_name} 工具。"
                 )
             )
-        return AIMessage(
-            content=(
-                "券商行业研究显示ETF主导暴露集中在工业金属，需求验证优先级高于估值扩张。\n\n"
-                "一、行业主线与分歧焦点\n"
-                "（一）共识主线\n"
-                "报告内容。"
-            )
-        )
+        return AIMessage(content=self.final_content)
 
     def bind_tools(self, tools):
         return self
@@ -215,6 +215,54 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("If the structure does not provide a heading, write one that is brief, forceful, and immediately usable", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
+
+    def test_recovers_when_model_describes_top_holdings_tool_call_without_executing_it(self):
+        llm = _IntentThenFinalLLM(
+            tool_name="get_etf_top_holdings_research",
+            final_content=(
+                "券商个股研究显示ETF头部持仓盈利修正方向分化，组合贡献集中在龙头。\n\n"
+                "一、核心持仓共识与分歧\n"
+                "（一）共识主线\n"
+                "报告内容。"
+            ),
+        )
+        node = create_etf_stock_research_analyst(llm)
+        fake_holdings = _FakeTool("get_etf_holdings", "holdings data")
+        fake_stock = _FakeTool("get_etf_top_holdings_research", "stock research data")
+
+        with (
+            patch(
+                "etfagents.agents.analysts.etf_stock_research_analyst.get_etf_holdings",
+                fake_holdings,
+            ),
+            patch(
+                "etfagents.agents.analysts.etf_stock_research_analyst.get_etf_top_holdings_research",
+                fake_stock,
+            ),
+            patch(
+                "etfagents.agents.analysts.etf_stock_research_analyst.validate_and_refine",
+                side_effect=lambda report, *_args, **_kwargs: report,
+            ),
+        ):
+            output = node(
+                {
+                    "company_of_interest": "516650.SH",
+                    "trade_date": "2026-04-30",
+                    "messages": [HumanMessage(content="Analyze 516650.SH")],
+                }
+            )
+
+        report = output["top_holdings_report"]
+        self.assertIn("券商个股研究显示", report)
+        self.assertNotIn("我将调用 get_etf_top_holdings_research", report)
+        self.assertEqual(
+            [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
+            fake_holdings.calls,
+        )
+        self.assertEqual(
+            [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
+            fake_stock.calls,
+        )
 
 
 class EtfStructureAnalystPromptTests(unittest.TestCase):

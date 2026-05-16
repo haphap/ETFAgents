@@ -322,6 +322,23 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertNotIn("仓单去化：", cleaned)
         self.assertFalse(contains_qa_label_artifacts(cleaned))
 
+    def test_term_definition_block_does_not_swallow_following_plain_paragraphs(self):
+        raw = (
+            "开篇结论保留。\n\n"
+            "为降低跨市场阅读门槛，本文对文中高频技术术语作如下解释：\n"
+            "• 仓单去化：指交易所标准仓单数量持续减少，交易含义为下游提货。\n"
+            "• 右侧多头：指价格突破后顺势建仓，交易含义为需严格止损。\n\n"
+            "板块景气度：电池正极材料指引开始转弱，需关注库存指引和定价指标。\n"
+            "下一段：成交额放大至昨日两倍，主力资金净流入指数靠前。\n"
+        )
+
+        cleaned = strip_standalone_term_definition_blocks(raw)
+
+        self.assertIn("开篇结论保留", cleaned)
+        self.assertIn("板块景气度：电池正极材料指引开始转弱", cleaned)
+        self.assertIn("下一段：成交额放大至昨日两倍", cleaned)
+        self.assertNotIn("仓单去化：", cleaned)
+
 
 if __name__ == "__main__":
     unittest.main()

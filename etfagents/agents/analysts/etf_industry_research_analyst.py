@@ -1,9 +1,6 @@
-import re
-
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
-from etfagents.content_utils import extract_text_content
 from etfagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_collaboration_stop_instruction,
@@ -27,15 +24,6 @@ from etfagents.agents.utils.analysis_memory import (
 )
 from etfagents.tool_report_utils import run_tool_report_chain
 
-_UNEXECUTED_INDUSTRY_TOOL_INTENT_RE = re.compile(
-    r"(?:好的[，,]\s*)?(?:接下来|下一步|现在|我将|将会|准备|需要)"
-    r"[\s\S]{0,180}?"
-    r"(?:调用|使用|获取)"
-    r"[\s\S]{0,120}?"
-    r"get_etf_industry_research",
-    re.IGNORECASE,
-)
-
 
 _REPORT_SPEC = AnalystReportSpec(
     analyst_name="holdings_industry",
@@ -48,74 +36,6 @@ _REPORT_SPEC = AnalystReportSpec(
         "- 末尾是否附研报总览表？"
     ),
 )
-
-
-def _looks_like_unexecuted_industry_tool_intent(report: str) -> bool:
-    """Detect process-only text where the model says it will call the tool but did not."""
-    if not report:
-        return False
-    text = report.strip()
-    if len(text) > 700:
-        return False
-    if "get_etf_industry_research" not in text:
-        return False
-    if re.search(r"(?m)^\s*[一二三四五六七八九十]+、", text):
-        return False
-    return bool(_UNEXECUTED_INDUSTRY_TOOL_INTENT_RE.search(text))
-
-
-def _invoke_tool_safely(tool, payload: dict) -> str:
-    try:
-        return str(tool.invoke(payload))
-    except Exception as exc:  # pragma: no cover - defensive runtime recovery
-        return f"{tool.name} failed: {exc}"
-
-
-def _recover_report_after_unexecuted_tool_intent(
-    *,
-    prompt_template: ChatPromptTemplate,
-    llm,
-    messages,
-    system_message: str,
-    tool_names: str,
-    current_date: str,
-    instrument_context: str,
-    asset_symbol: str,
-):
-    holdings_payload = _invoke_tool_safely(
-        get_etf_holdings,
-        {"ticker": asset_symbol, "curr_date": current_date},
-    )
-    industry_payload = _invoke_tool_safely(
-        get_etf_industry_research,
-        {"ticker": asset_symbol, "curr_date": current_date},
-    )
-    recovery_context = (
-        "The previous assistant response described a future tool call but did not execute it. "
-        "The required tools have now been executed below. Write the complete final markdown report now. "
-        "Do not mention that a recovery happened, do not explain your process, and do not call tools.\n\n"
-        "### get_etf_holdings result\n"
-        f"{holdings_payload}\n\n"
-        "### get_etf_industry_research result\n"
-        f"{industry_payload}"
-    )
-    final_prompt = prompt_template.partial(
-        system_message=(
-            f"{system_message} You have already gathered the ETF holdings and industry research data. "
-            "Do not call tools. Produce the final report from the provided tool results."
-        ),
-        tool_names=tool_names,
-        current_date=current_date,
-        instrument_context=instrument_context,
-    )
-    result = (final_prompt | llm).invoke(
-        [
-            *messages,
-            HumanMessage(content=recovery_context),
-        ]
-    )
-    report = extract_text_content(getattr(result, "content", None))
-    return result, report
 
 
 def create_etf_industry_research_analyst(llm):
@@ -230,18 +150,20 @@ def create_etf_industry_research_analyst(llm):
             tool_names=", ".join(tool.name for tool in tools),
             current_date=current_date,
             instrument_context=instrument_context,
+            unexecuted_tool_recovery={
+                "trigger_tool_name": "get_etf_industry_research",
+                "tool_payloads": [
+                    {
+                        "tool": get_etf_holdings,
+                        "payload": {"ticker": asset_symbol, "curr_date": current_date},
+                    },
+                    {
+                        "tool": get_etf_industry_research,
+                        "payload": {"ticker": asset_symbol, "curr_date": current_date},
+                    },
+                ],
+            },
         )
-        if _looks_like_unexecuted_industry_tool_intent(report):
-            result, report = _recover_report_after_unexecuted_tool_intent(
-                prompt_template=prompt_template,
-                llm=llm,
-                messages=state["messages"],
-                system_message=system_message,
-                tool_names=", ".join(tool.name for tool in tools),
-                current_date=current_date,
-                instrument_context=instrument_context,
-                asset_symbol=asset_symbol,
-            )
         report = normalize_chinese_role_terms(report) if report else report
         report = pre_judge_clean(report) if report else report
         report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
