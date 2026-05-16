@@ -1,6 +1,11 @@
 import unittest
 
-from etfagents.tool_report_utils import run_tool_report_chain, _is_tool_call_text
+from etfagents.tool_report_utils import (
+    TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX,
+    date_days_before,
+    run_tool_report_chain,
+    _is_tool_call_text,
+)
 
 
 class _FakeResponse:
@@ -35,6 +40,20 @@ class _FakePrompt:
 
     def __or__(self, runnable):
         return runnable
+
+
+class _FakeTool:
+    def __init__(self, name, return_value=None, *, raises=None):
+        self.name = name
+        self.calls = []
+        self.return_value = return_value
+        self.raises = raises
+
+    def invoke(self, payload):
+        self.calls.append(payload)
+        if self.raises:
+            raise self.raises
+        return self.return_value
 
 
 class ToolReportUtilsTests(unittest.TestCase):
@@ -121,6 +140,156 @@ class ToolReportUtilsTests(unittest.TestCase):
         self.assertTrue(_is_tool_call_text('<function_call>something</function_call>'))
         self.assertFalse(_is_tool_call_text('Normal report text'))
         self.assertFalse(_is_tool_call_text(''))
+
+    def test_recovers_unexecuted_intent_for_any_configured_trigger_tool(self):
+        prompt = _FakePrompt()
+        news_tool = _FakeTool("get_news", "news data")
+        llm = _FakeLLM(
+            [_FakeResponse(content="好的，接下来我将调用 get_news 工具获取催化剂。")],
+            [_FakeResponse(content="Recovered macro report")],
+        )
+
+        result, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=[news_tool],
+            messages=["state"],
+            system_message="sys",
+            unexecuted_tool_recovery={
+                "trigger_tool_names": ["get_etf_info", "get_news"],
+                "tool_payloads": [
+                    {
+                        "tool": news_tool,
+                        "payload": {
+                            "ticker": "516650.SH",
+                            "start_date": "2026-03-30",
+                            "end_date": "2026-04-30",
+                        },
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(report, "Recovered macro report")
+        self.assertEqual(result.content, "Recovered macro report")
+        self.assertEqual(
+            [
+                {
+                    "ticker": "516650.SH",
+                    "start_date": "2026-03-30",
+                    "end_date": "2026-04-30",
+                }
+            ],
+            news_tool.calls,
+        )
+
+    def test_recovery_only_runs_payloads_for_matched_tool_names(self):
+        prompt = _FakePrompt()
+        info_tool = _FakeTool("get_etf_info", "info data")
+        news_tool = _FakeTool("get_news", "news data")
+        llm = _FakeLLM(
+            [_FakeResponse(content="好的，接下来我将调用 get_news 工具获取催化剂。")],
+            [_FakeResponse(content="Recovered report")],
+        )
+
+        _, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=[info_tool, news_tool],
+            messages=["state"],
+            system_message="sys",
+            unexecuted_tool_recovery={
+                "trigger_tool_names": ["get_etf_info", "get_news"],
+                "tool_payloads": [
+                    {"tool": info_tool, "payload": {"ticker": "516650.SH"}},
+                    {"tool": news_tool, "payload": {"ticker": "516650.SH"}},
+                ],
+            },
+        )
+
+        self.assertEqual("Recovered report", report)
+        self.assertEqual([], info_tool.calls)
+        self.assertEqual([{"ticker": "516650.SH"}], news_tool.calls)
+
+    def test_recovery_runs_multiple_matched_payloads(self):
+        prompt = _FakePrompt()
+        info_tool = _FakeTool("get_etf_info", "info data")
+        news_tool = _FakeTool("get_news", "news data")
+        llm = _FakeLLM(
+            [
+                _FakeResponse(
+                    content=(
+                        "好的，接下来我将调用 get_etf_info 工具，并继续调用 get_news 工具。"
+                    )
+                )
+            ],
+            [_FakeResponse(content="Recovered report")],
+        )
+
+        _, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=[info_tool, news_tool],
+            messages=["state"],
+            system_message="sys",
+            unexecuted_tool_recovery={
+                "trigger_tool_names": ["get_etf_info", "get_news"],
+                "tool_payloads": [
+                    {"tool": info_tool, "payload": {"ticker": "516650.SH"}},
+                    {"tool": news_tool, "payload": {"ticker": "516650.SH"}},
+                ],
+            },
+        )
+
+        self.assertEqual("Recovered report", report)
+        self.assertEqual([{"ticker": "516650.SH"}], info_tool.calls)
+        self.assertEqual([{"ticker": "516650.SH"}], news_tool.calls)
+
+    def test_recovery_failure_count_uses_boolean_not_output_prefix(self):
+        prompt = _FakePrompt()
+        news_tool = _FakeTool("get_news", "get_news failed: vendor returned a literal status")
+        llm = _FakeLLM(
+            [_FakeResponse(content="好的，接下来我将调用 get_news 工具。")],
+            [_FakeResponse(content="Recovered report despite literal prefix")],
+        )
+
+        _, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=[news_tool],
+            messages=["state"],
+            system_message="sys",
+            unexecuted_tool_recovery={
+                "trigger_tool_names": ["get_news"],
+                "tool_payloads": [{"tool": news_tool, "payload": {"ticker": "516650.SH"}}],
+            },
+        )
+
+        self.assertEqual("Recovered report despite literal prefix", report)
+
+    def test_recovery_returns_data_unavailable_report_when_all_tools_raise(self):
+        prompt = _FakePrompt()
+        news_tool = _FakeTool("get_news", raises=RuntimeError("vendor down"))
+        llm = _FakeLLM([_FakeResponse(content="好的，接下来我将调用 get_news 工具。")])
+
+        _, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=[news_tool],
+            messages=["state"],
+            system_message="sys",
+            unexecuted_tool_recovery={
+                "trigger_tool_names": ["get_news"],
+                "tool_payloads": [{"tool": news_tool, "payload": {"ticker": "516650.SH"}}],
+            },
+        )
+
+        self.assertTrue(report.startswith(TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX))
+        self.assertIn("get_news failed: vendor down", report)
+
+    def test_date_days_before_handles_valid_and_invalid_dates(self):
+        self.assertEqual("2026-03-31", date_days_before("2026-04-30", 30))
+        self.assertEqual("not-a-date", date_days_before("not-a-date", 30))
 
 
 if __name__ == "__main__":

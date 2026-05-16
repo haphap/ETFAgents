@@ -96,6 +96,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
 
         def _mock_run(*args, **kwargs):
             captured["system_message"] = kwargs.get("system_message", "")
+            captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -161,10 +162,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         report = output["holdings_industry_report"]
         self.assertIn("券商行业研究显示", report)
         self.assertNotIn("我将调用 get_etf_industry_research", report)
-        self.assertEqual(
-            [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
-            fake_holdings.calls,
-        )
+        self.assertEqual([], fake_holdings.calls)
         self.assertEqual(
             [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
             fake_industry.calls,
@@ -180,6 +178,7 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
 
         def _mock_run(*args, **kwargs):
             captured["system_message"] = kwargs.get("system_message", "")
+            captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -255,10 +254,7 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         report = output["top_holdings_report"]
         self.assertIn("券商个股研究显示", report)
         self.assertNotIn("我将调用 get_etf_top_holdings_research", report)
-        self.assertEqual(
-            [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
-            fake_holdings.calls,
-        )
+        self.assertEqual([], fake_holdings.calls)
         self.assertEqual(
             [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
             fake_stock.calls,
@@ -274,6 +270,7 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
 
         def _mock_run(*args, **kwargs):
             captured["system_message"] = kwargs.get("system_message", "")
+            captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -319,6 +316,14 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("Do NOT output code blocks", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
+        self.assertEqual(
+            ["get_commodity_cluster_data"],
+            captured["recovery"]["trigger_tool_names"],
+        )
+        self.assertEqual(
+            ["get_commodity_cluster_data"],
+            [item["tool"].name for item in captured["recovery"]["tool_payloads"]],
+        )
 
 
 class EtfMarketAnalystPromptTests(unittest.TestCase):
@@ -330,6 +335,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
 
         def _mock_run(*args, **kwargs):
             captured["system_message"] = kwargs.get("system_message", "")
+            captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -370,6 +376,18 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
         self.assertIn("完整报告示例", system_msg)
+        expected_tool_names = [
+            "get_etf_price_data",
+            "get_etf_indicators",
+            "get_etf_share",
+            "get_etf_nav",
+            "get_etf_universe",
+        ]
+        self.assertEqual(expected_tool_names, captured["recovery"]["trigger_tool_names"])
+        self.assertEqual(
+            expected_tool_names,
+            [item["tool"].name for item in captured["recovery"]["tool_payloads"]],
+        )
 
 
 class ReportTitleNormalizationTests(unittest.TestCase):

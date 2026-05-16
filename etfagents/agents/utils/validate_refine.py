@@ -26,6 +26,7 @@ from typing import Any, Optional
 from pydantic import BaseModel, Field
 
 from etfagents.content_utils import extract_text_content
+from etfagents.tool_report_utils import TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX
 from etfagents.agents.utils.report_leads import (
     contains_meta_openers,
     contains_qa_label_artifacts,
@@ -145,6 +146,8 @@ def validate_and_refine(
         Falls back to the original report on any unexpected error.
     """
     if not report or not report.strip():
+        return report
+    if report.lstrip().startswith(TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX):
         return report
 
     mode = _resolve_validation_mode(validation_mode)

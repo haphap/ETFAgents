@@ -866,8 +866,11 @@ def get_memory_usage_instruction() -> str:
         return (
             "若提供了最近一次分析摘要、历史复盘或方法提醒，必须先独立基于当前证据完成判断，再明确说明哪些前提延续、哪些变化、哪些失效。"
             "上次结论仅作对照，不应成为本次结论的默认起点；不得机械复述旧记忆。"
+            "记忆不能替代本轮数据获取；若当前任务要求调用工具，必须发出结构化工具调用，"
+            "不得在可见答案中写“我将调用/接下来调用/准备调用某工具”等过程性承诺。"
         )
     return (
         "If prior analysis, lessons, or method reminders are provided, first reason independently from current evidence, then explain what still holds, what changed, and what is invalidated. "
-        "Treat prior conclusions as checkpoints rather than the default answer, and do not mechanically restate memory text."
+        "Treat prior conclusions as checkpoints rather than the default answer, and do not mechanically restate memory text. "
+        "Memory never replaces fresh data retrieval; when the current task requires tools, emit structured tool calls and do not write visible process promises such as 'I will call' or 'I am going to use' a tool."
     )

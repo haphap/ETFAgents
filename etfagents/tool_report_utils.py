@@ -1,4 +1,5 @@
 import re
+from datetime import datetime, timedelta
 
 from langchain_core.messages import HumanMessage
 
@@ -15,6 +16,7 @@ _FINAL_REPORT_USER_NUDGE = (
     "Do not call tools. Do not explain your process. "
     "Use only the information already present in this conversation."
 )
+TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX = "[tool-recovery:data-unavailable]"
 
 _XML_TOOL_CALL_RE = re.compile(
     r"<tool_call>|<function[=\s]|</?function_call>", re.IGNORECASE
@@ -58,11 +60,30 @@ def _looks_like_unexecuted_tool_intent(text: str, tool_name: str) -> bool:
     return bool(re.search(pattern, stripped))
 
 
-def _invoke_tool_safely(tool, payload: dict) -> str:
+def _recovery_trigger_tool_names(recovery_config: dict) -> tuple[str, ...]:
+    # Accept the legacy `trigger_tool_name: str` key so older callers keep working.
+    names = recovery_config.get("trigger_tool_names")
+    if names is None:
+        names = recovery_config.get("trigger_tool_name")
+    if isinstance(names, str):
+        return (names,)
+    return tuple(name for name in (names or ()) if name)
+
+
+def date_days_before(curr_date: str, days: int) -> str:
     try:
-        return str(tool.invoke(payload))
+        return (
+            datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return curr_date
+
+
+def _invoke_tool_safely(tool, payload: dict) -> tuple[bool, str]:
+    try:
+        return True, str(tool.invoke(payload))
     except Exception as exc:  # pragma: no cover - defensive runtime recovery
-        return f"{tool.name} failed: {exc}"
+        return False, f"{tool.name} failed: {exc}"
 
 
 def _recover_unexecuted_tool_intent(
@@ -77,24 +98,37 @@ def _recover_unexecuted_tool_intent(
     if not recovery_config:
         return None, ""
 
-    trigger_tool_name = recovery_config.get("trigger_tool_name")
-    if not _looks_like_unexecuted_tool_intent(report, trigger_tool_name):
+    trigger_tool_names = _recovery_trigger_tool_names(recovery_config)
+    matched_tool_names = {
+        tool_name
+        for tool_name in trigger_tool_names
+        if _looks_like_unexecuted_tool_intent(report, tool_name)
+    }
+    if not matched_tool_names:
         return None, ""
 
     tool_payloads = recovery_config.get("tool_payloads") or []
+    matched_payloads = [
+        item
+        for item in tool_payloads
+        if item.get("tool") is not None
+        and getattr(item["tool"], "name", None) in matched_tool_names
+    ]
+    payloads_to_run = matched_payloads or tool_payloads
     tool_sections = []
     tool_failures = 0
-    for item in tool_payloads:
+    for item in payloads_to_run:
         tool = item["tool"]
         payload = item.get("payload", {})
-        output = _invoke_tool_safely(tool, payload)
-        if output.startswith(f"{tool.name} failed:"):
+        success, output = _invoke_tool_safely(tool, payload)
+        if not success:
             tool_failures += 1
         tool_sections.append(f"### {tool.name} result\n{output}")
 
     if tool_sections and tool_failures == len(tool_sections):
         failure_text = "\n\n".join(tool_sections)
         return None, (
+            f"{TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX}\n"
             "Required data tools were unavailable, so the final report cannot be completed "
             f"without risking unsupported analysis.\n\n{failure_text}"
         )

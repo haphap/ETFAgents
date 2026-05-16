@@ -27,7 +27,7 @@ from etfagents.agents.utils.report_leads import (
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
 from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
-from etfagents.tool_report_utils import run_tool_report_chain
+from etfagents.tool_report_utils import date_days_before, run_tool_report_chain
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +182,40 @@ def create_etf_market_analyst(llm):
             tool_names=", ".join(tool.name for tool in tools),
             current_date=current_date,
             instrument_context=instrument_context,
+            unexecuted_tool_recovery={
+                "trigger_tool_names": [tool.name for tool in tools],
+                "tool_payloads": [
+                    {
+                        "tool": get_etf_price_data,
+                        "payload": {
+                            "symbol": asset_symbol,
+                            "start_date": date_days_before(current_date, 180),
+                            "end_date": current_date,
+                        },
+                    },
+                    {
+                        "tool": get_etf_indicators,
+                        "payload": {
+                            "symbol": asset_symbol,
+                            "indicator": ",".join(_ETF_MARKET_INDICATORS),
+                            "curr_date": current_date,
+                            "look_back_days": 180,
+                        },
+                    },
+                    {
+                        "tool": get_etf_share,
+                        "payload": {"ticker": asset_symbol, "curr_date": current_date},
+                    },
+                    {
+                        "tool": get_etf_nav,
+                        "payload": {"ticker": asset_symbol, "curr_date": current_date},
+                    },
+                    {
+                        "tool": get_etf_universe,
+                        "payload": {"curr_date": current_date, "limit": 20},
+                    },
+                ],
+            },
         )
         report = normalize_chinese_role_terms(report) if report else report
         report = pre_judge_clean(report) if report else report

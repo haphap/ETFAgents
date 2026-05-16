@@ -164,6 +164,15 @@ def create_etf_structure_analyst(llm):
             tool_names=", ".join(tool.name for tool in tools),
             current_date=current_date,
             instrument_context=instrument_context,
+            unexecuted_tool_recovery={
+                "trigger_tool_names": [tool.name for tool in tools],
+                "tool_payloads": [
+                    {
+                        "tool": get_commodity_cluster_data,
+                        "payload": {"curr_date": current_date, "look_back_days": 240},
+                    },
+                ],
+            },
         )
         report = normalize_chinese_role_terms(report) if report else report
         report = pre_judge_clean(report) if report else report
