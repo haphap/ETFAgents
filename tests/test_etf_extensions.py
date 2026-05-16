@@ -6,7 +6,11 @@ from unittest.mock import patch
 import pandas as pd
 from langgraph.prebuilt import ToolNode
 
-from etfagents.agents.utils.etf_data_tools import get_etf_indicators, get_etf_industry_research
+from etfagents.agents.utils.etf_data_tools import (
+    _related_broker_industry_keywords,
+    get_etf_indicators,
+    get_etf_industry_research,
+)
 from etfagents.dataflows.config import get_config, set_config
 from etfagents.dataflows.config import backtest_context
 from etfagents.dataflows.interface import TOOLS_CATEGORIES, VENDOR_METHODS, get_category_for_method
@@ -212,6 +216,70 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertEqual(call_args.args[0], "601899.SH")
         self.assertEqual(call_args.args[2], "2026-04-30")
         self.assertEqual(call_args.kwargs["max_reports"], 5)
+        self.assertNotIn("extra_ind_names", call_args.kwargs)
+
+    @patch("etfagents.agents.utils.etf_data_tools.get_broker_reports")
+    @patch("etfagents.agents.utils.etf_data_tools._resolve_broker_industry_keyword")
+    @patch("etfagents.agents.utils.etf_data_tools._get_pro_client")
+    @patch("etfagents.agents.utils.etf_data_tools._lookup_a_share_metadata")
+    @patch("etfagents.agents.utils.etf_data_tools._load_latest_etf_holdings_frame")
+    def test_etf_industry_research_searches_related_agriculture_keywords(
+        self,
+        mock_holdings_frame,
+        mock_lookup_metadata,
+        mock_get_pro_client,
+        mock_resolve_broker_industry_keyword,
+        mock_get_broker_reports,
+    ):
+        mock_holdings_frame.return_value = (
+            "516810.SH",
+            pd.DataFrame(
+                [
+                    {
+                        "symbol": "002311.SZ",
+                        "stk_code": "002311",
+                        "holding_weight": 10.2,
+                        "stk_mkv_ratio": 10.2,
+                        "end_date": "20260331",
+                    },
+                ]
+            ),
+        )
+        mock_lookup_metadata.return_value = {
+            "ts_code": "002311.SZ",
+            "name": "海大集团",
+            "industry": "农牧饲渔",
+        }
+        mock_get_pro_client.return_value = object()
+        mock_resolve_broker_industry_keyword.return_value = (
+            "养殖业",
+            "stock-report ind_name",
+            "农牧饲渔",
+        )
+        mock_get_broker_reports.return_value = (
+            "# Industry Research Reports for 养殖业, 农牧饲渔\n\n"
+            "中邮证券_养殖成本下降，饲料业务盈利高增_20260508.pdf"
+        )
+
+        result = get_etf_industry_research.invoke(
+            {"ticker": "516810.SH", "curr_date": "2026-05-15"}
+        )
+
+        self.assertIn("Related industry keywords searched: 农牧饲渔, 养殖业", result)
+        self.assertIn("养殖成本下降，饲料业务盈利高增", result)
+        call_args = mock_get_broker_reports.call_args
+        self.assertEqual(call_args.args[0], "002311.SZ")
+        self.assertEqual(call_args.kwargs["extra_ind_names"], ["农牧饲渔", "养殖业"])
+
+    def test_related_agriculture_keywords_ignore_constituent_name_substrings(self):
+        row = {
+            "industry": "白酒",
+            "research_industry": "饮料制造",
+            "base_industry": "食品饮料",
+            "name": "饲料新材料股份",
+        }
+
+        self.assertEqual([], _related_broker_industry_keywords(row))
 
     @patch("etfagents.dataflows.tushare._query_pro")
     def test_etf_universe_includes_enriched_factor_columns(self, mock_query):

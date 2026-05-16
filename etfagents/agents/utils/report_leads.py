@@ -34,6 +34,9 @@ _EXCHANGE_ONLY_PSEUDO_TITLE_PATTERN = re.compile(
     + "|".join(re.escape(subject) for subject in _PSEUDO_TITLE_SUBJECTS)
     + r")\s*$"
 )
+_CJK_TEXT_EDGE_RE = re.compile(r"[\u3400-\u9fffA-Za-z0-9%）】》。，；：、.!?！？]$")
+_CJK_TEXT_START_RE = re.compile(r"^[\u3400-\u9fffA-Za-z0-9（【《。！？；，、,.!?;:]")
+_LEADING_PUNCT_RE = re.compile(r"^[。！？；，、,.!?;:]")
 
 def get_no_title_instruction() -> str:
     return (
@@ -216,6 +219,65 @@ def _looks_like_section_heading(line: str) -> bool:
     )
 
 
+def _looks_like_markdown_table_line(line: str) -> bool:
+    stripped = (line or "").strip()
+    return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+
+
+def _looks_like_structural_line(line: str) -> bool:
+    stripped = (line or "").strip()
+    if not stripped:
+        return True
+    if _looks_like_section_heading(stripped) or _looks_like_markdown_table_line(stripped):
+        return True
+    if _LEADING_LABEL_PREFIX_RE.search(stripped) or _QA_LABEL_RE.search(stripped):
+        return True
+    if _SELF_REFERENTIAL_META_LEAD_RE.search(stripped) or _META_OPENER_RE.search(stripped):
+        return True
+    return bool(re.match(r"^(?:[-*+]\s+|\d+[.)、]\s+|>{1,}\s*)", stripped))
+
+
+def _strip_box_edge_line(line: str) -> str:
+    stripped = (line or "").strip()
+    if _looks_like_markdown_table_line(stripped):
+        return line.rstrip()
+    return stripped.strip("│").strip()
+
+
+def normalize_boxed_text_wrapping(report: str) -> str:
+    """Remove leaked TUI box edges and merge accidental hard-wraps in prose."""
+    if not report:
+        return ""
+
+    raw_lines = report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    lines = [_strip_box_edge_line(line) for line in raw_lines]
+    merged: list[str] = []
+    for line in lines:
+        if not merged:
+            merged.append(line)
+            continue
+
+        prev = merged[-1]
+        if (
+            prev
+            and line
+            and not _looks_like_structural_line(prev)
+            and not _looks_like_structural_line(line)
+            and _CJK_TEXT_EDGE_RE.search(prev)
+            and _CJK_TEXT_START_RE.match(line)
+        ):
+            separator = (
+                ""
+                if _LEADING_PUNCT_RE.match(line.lstrip()) or re.search(r"[。！？；，、]$", prev.rstrip())
+                else " "
+            )
+            merged[-1] = f"{prev.rstrip()}{separator}{line.lstrip()}"
+        else:
+            merged.append(line)
+
+    return collapse_blank_lines("\n".join(merged))
+
+
 _SELF_REFERENTIAL_META_LEAD_RE = re.compile(
     r"(?m)^\s*(?:（[^）]*）)?\s*"
     r"(?:本节|本部分|该部分|这一节|本段|本文|本章节)"
@@ -340,6 +402,13 @@ def _strip_table_artifact_edges(line: str) -> str:
     return (line or "").strip().strip("│|").strip()
 
 
+def _is_artifact_only_line(line: str) -> bool:
+    stripped = (line or "").strip()
+    return bool(
+        stripped and _ARTIFACT_ONLY_LINE_RE.fullmatch(stripped) and "|" not in stripped
+    )
+
+
 def _starts_with_term_definition_bullet(text: str) -> bool:
     return bool(re.match(r"^\s*[•·]", text or ""))
 
@@ -367,7 +436,7 @@ def strip_standalone_term_definition_blocks(report: str) -> str:
                 skipping = False
                 kept.append(line)
                 continue
-            if not content or _ARTIFACT_ONLY_LINE_RE.fullmatch(line.strip()):
+            if not content or _is_artifact_only_line(line):
                 saw_blank_after_block = True
                 continue
             if saw_blank_after_block:
@@ -418,6 +487,11 @@ _REFINE_PREAMBLE_RE = re.compile(
     r"(?:修正|修订|修改|改进|完善|优化|调整|评审|审核)"
     r"[^\n]*\n?"
 )
+_REPORT_PROCESS_PREAMBLE_RE = re.compile(
+    r"(?m)^\s*"
+    r"(?:数据|资料|信息).{0,12}?(?:已|已经)?(?:获取|收集|拿到|完成)[。！!；;，,]?\s*"
+    r"(?:以下|下面).{0,80}?(?:撰写|生成|输出|写).{0,60}?报告[。！!；;，,]?\s*"
+)
 
 _META_OPENER_RE = re.compile(
     r"(?m)^\s*"
@@ -432,11 +506,23 @@ def _strip_leading_artifact_lines(report: str) -> str:
     first_content = 0
     while first_content < len(lines):
         stripped = lines[first_content].strip()
-        if not stripped or _ARTIFACT_ONLY_LINE_RE.fullmatch(stripped):
+        if not stripped or _is_artifact_only_line(stripped):
             first_content += 1
             continue
         break
     return collapse_blank_lines("\n".join(lines[first_content:]))
+
+
+def strip_artifact_only_lines(report: str) -> str:
+    """Remove standalone separator / box-art lines anywhere in generated reports."""
+    if not report:
+        return ""
+    kept = [
+        line
+        for line in report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+        if not _is_artifact_only_line(line)
+    ]
+    return collapse_blank_lines("\n".join(kept))
 
 
 def strip_refine_preamble(report: str) -> str:
@@ -444,6 +530,8 @@ def strip_refine_preamble(report: str) -> str:
     if not report:
         return ""
     cleaned = _REFINE_PREAMBLE_RE.sub("", report)
+    cleaned = _REPORT_PROCESS_PREAMBLE_RE.sub("", cleaned)
+    cleaned = strip_artifact_only_lines(cleaned)
     return _strip_leading_artifact_lines(cleaned)
 
 
@@ -510,7 +598,8 @@ def pre_judge_clean(report: str) -> str:
     """
     if not report:
         return ""
-    cleaned = strip_refine_preamble(report)
+    cleaned = normalize_boxed_text_wrapping(report)
+    cleaned = strip_refine_preamble(cleaned)
     cleaned = strip_report_title(cleaned)
     cleaned = strip_qa_labels(cleaned)
     cleaned = strip_opening_term_explanations(cleaned)

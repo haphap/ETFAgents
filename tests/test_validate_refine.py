@@ -13,8 +13,10 @@ from etfagents.agents.utils.report_leads import (
     contains_meta_openers,
     contains_qa_label_artifacts,
     contains_self_referential_meta_leads,
+    normalize_boxed_text_wrapping,
     post_judge_clean,
     pre_judge_clean,
+    strip_artifact_only_lines,
     strip_standalone_term_definition_blocks,
 )
 from etfagents.agents.utils.validate_refine import (
@@ -300,6 +302,78 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertNotIn("以下是根据评审标准", cleaned)
         self.assertNotIn("# 技术面诊断", cleaned)
         self.assertIn("MACD 金叉", cleaned)
+
+    def test_pre_judge_clean_strips_data_ready_report_preamble(self):
+        raw = (
+            "数据已获取。以下基于2026年5月15日商品集群快照，针对农业ETF华夏（516810.SH）撰写中观商品分析报告。\n\n"
+            "一、核心矛盾与主线判断\n"
+            "农产品链条仍以成本传导不顺为主线。"
+        )
+
+        cleaned = pre_judge_clean(raw)
+
+        self.assertNotIn("数据已获取", cleaned)
+        self.assertNotIn("以下基于2026年5月15日", cleaned)
+        self.assertTrue(cleaned.startswith("一、核心矛盾与主线判断"))
+
+    def test_artifact_only_separator_lines_are_removed_anywhere(self):
+        raw = (
+            "宏观结论偏中性。\n"
+            "-------------\n"
+            "一、暴露与宏观主线\n"
+            "信用利差仍是关键变量。\n"
+        )
+
+        cleaned = strip_artifact_only_lines(raw)
+
+        self.assertNotIn("-------------", cleaned)
+        self.assertIn("宏观结论偏中性。", cleaned)
+        self.assertIn("一、暴露与宏观主线", cleaned)
+
+    def test_pre_judge_clean_preserves_markdown_table_separator(self):
+        raw = (
+            "本ETF整体偏多。\n\n"
+            "四、研报总览表\n"
+            "| 券商 | 立场 | 目标价 |\n"
+            "| --- | --- | --- |\n"
+            "| 中信 | 看多 | 12.5 |\n"
+            "| 国君 | 中性 | 11.0 |\n"
+        )
+
+        cleaned = pre_judge_clean(raw)
+
+        self.assertIn("| --- | --- | --- |", cleaned)
+        self.assertIn("| 中信 | 看多 | 12.5 |", cleaned)
+
+    def test_boxed_opening_paragraph_wraps_are_normalized(self):
+        raw = (
+            "│  生猪养殖是农业ETF当前最核心的行业暴露，券商共识指向产能去化加速预期正在形成，但节奏与幅度仍存分歧；农化制品库存周期接近底部，而饲料板块真正的传统饲料研究线索缺失，仅能通过养殖业报告间接推断   │\n"
+            "│  。                                                                                                                                                                                              │\n"
+            "│  截至2026年5月中旬，生猪价格运行在9.7元/公斤附近，行业自繁自养头均亏损超过320元。以下依次展开各维度的交叉验证。 │\n\n"
+            "一、行业主线与分歧焦点\n"
+            "正文继续。"
+        )
+
+        cleaned = normalize_boxed_text_wrapping(raw)
+
+        self.assertNotIn("│", cleaned)
+        self.assertIn("间接推断。截至2026年5月中旬", cleaned)
+        self.assertIn("一、行业主线与分歧焦点\n正文继续。", cleaned)
+
+    def test_box_wrapping_does_not_change_markdown_tables(self):
+        raw = (
+            "| 指标 | 数值 |\n"
+            "| --- | --- |\n"
+            "| RSI | 60 |\n"
+            "正文第一句很长\n"
+            "继续同一段。"
+        )
+
+        cleaned = normalize_boxed_text_wrapping(raw)
+
+        self.assertIn("| 指标 | 数值 |", cleaned)
+        self.assertIn("| RSI | 60 |", cleaned)
+        self.assertIn("正文第一句很长 继续同一段。", cleaned)
 
     def test_post_judge_clean_runs_punctuation_pass(self):
         raw = "走势已确认上行?\n\n"

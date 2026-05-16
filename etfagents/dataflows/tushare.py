@@ -5,7 +5,7 @@ import os
 import re
 from datetime import datetime, timedelta
 from functools import lru_cache
-from typing import Callable
+from typing import Callable, Iterable
 
 import pandas as pd
 from stockstats import wrap
@@ -1983,6 +1983,7 @@ def get_broker_reports(
     start_date: str,
     end_date: str,
     max_reports: int = 30,
+    extra_ind_names: Iterable[str] | None = None,
 ) -> str:
     """Retrieve broker research reports from tushare for A-share stocks.
 
@@ -1996,6 +1997,7 @@ def get_broker_reports(
         start_date: Start date in YYYY-MM-DD format
         end_date: End date in YYYY-MM-DD format
         max_reports: Maximum number of reports to return (default 30)
+        extra_ind_names: Additional tushare industry keywords to search and merge.
 
     Returns:
         Formatted Markdown string of broker research reports with full abstracts
@@ -2022,14 +2024,24 @@ def get_broker_reports(
     start_api = start_date.replace("-", "")
     end_api = end_date.replace("-", "")
     candidate_industries = []
-    for candidate in (industry, basic_industry):
+    raw_extra_ind_names = (
+        (extra_ind_names,)
+        if isinstance(extra_ind_names, str)
+        else (extra_ind_names or [])
+    )
+    normalized_extra_ind_names = [
+        str(candidate or "").strip() for candidate in raw_extra_ind_names
+    ]
+    for candidate in (industry, basic_industry, *normalized_extra_ind_names):
         normalized = str(candidate or "").strip()
         if normalized and normalized not in candidate_industries:
             candidate_industries.append(normalized)
 
     data = None
-    matched_industry = industry
+    matched_industries: list[str] = []
+    data_frames: list[pd.DataFrame] = []
     last_exc = None
+    collect_all_candidates = bool(normalized_extra_ind_names)
     for candidate in candidate_industries:
         try:
             candidate_data = pro.research_report(
@@ -2043,9 +2055,21 @@ def get_broker_reports(
             last_exc = exc
             continue
         if candidate_data is not None and not candidate_data.empty:
-            data = candidate_data
-            matched_industry = candidate
-            break
+            data_frames.append(candidate_data.copy())
+            matched_industries.append(candidate)
+            if not collect_all_candidates:
+                break
+
+    if data_frames:
+        data = pd.concat(data_frames, ignore_index=True)
+        dedupe_cols = [
+            column
+            for column in ("trade_date", "title", "inst_csname", "url", "ind_name")
+            if column in data.columns
+        ]
+        if dedupe_cols:
+            data = data.drop_duplicates(subset=dedupe_cols)
+    matched_industry = ", ".join(matched_industries) or industry
 
     if data is None or data.empty:
         if last_exc is not None and len(candidate_industries) == 1:
