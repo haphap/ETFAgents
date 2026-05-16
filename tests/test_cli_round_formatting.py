@@ -133,6 +133,22 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("## 一、总体研判", formatted)
         self.assertIn("正文内容。", formatted)
 
+    def test_prepare_report_markdown_keeps_sentence_like_numbering_inside_list_body(self):
+        formatted = _prepare_report_markdown(
+            "一、情绪主线与权重影响\n\n"
+            "二、产品情绪与讨论强弱\n\n"
+            "1 舆论情绪偏向积极：富途牛牛等财经媒体在5月6日发布报道，称“全球共振引发芯片市场反弹”，并明确提及科创芯片ETF\n\n"
+            "三、近一年涨幅已翻倍。该报道属于事实性新闻（标题可验证），传导路径清晰。\n\n"
+            "2 社交媒体热度中等偏弱：产品层面的社交情绪属于温带正面。"
+        )
+
+        self.assertIn("# 一、情绪主线与权重影响", formatted)
+        self.assertIn("# 二、产品情绪与讨论强弱", formatted)
+        self.assertIn("1. 舆论情绪偏向积极", formatted)
+        self.assertIn("2. 社交媒体热度中等偏弱", formatted)
+        self.assertIn("\n\n近一年涨幅已翻倍。该报道属于事实性新闻", formatted)
+        self.assertNotIn("# 三、近一年涨幅已翻倍", formatted)
+
     def test_risk_management_history_supports_english_prefixes(self):
         risk_state = {
             "aggressive_history": (
