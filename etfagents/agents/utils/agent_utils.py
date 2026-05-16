@@ -2391,6 +2391,13 @@ _RATING_ONLY_LINE_PATTERN = re.compile(
     r"(?:\s*[/／或]\s*(?:买入|增持|持有|减持|卖出))?"
     r"\**[。！!？?\s]*$"
 )
+_LEAKED_RATING_PREFIX_RE = re.compile(
+    r"(?m)^(\s*\d+[.．、]\s+[^\n。！？!?]+[。！？!?]\s*)"
+    r"(?:研究结论|最终配置建议|最终交易建议|建议评级|配置评级|评级|执行倾向)\s*[:：]\s*"
+    r"\**(?:买入|增持|持有|减持|卖出)"
+    r"(?:\s*[/／或]\s*(?:买入|增持|持有|减持|卖出))?"
+    r"\**\s*[。！？!?]?\s*"
+)
 _POSITIONING_PARENT_HEADING_RE = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、\s*)?持仓建议\s*$"
 )
@@ -2449,13 +2456,6 @@ def format_chinese_positioning_recommendation(text: str) -> str:
     # to live in the rating subsection and not bleed into the advice. Strip the
     # leaked "研究结论:/最终配置建议:/评级:" prefix immediately following an item title
     # so it doesn't surface in the rendered list item body.
-    _LEAKED_RATING_PREFIX_RE = re.compile(
-        r"(?m)^(\s*\d+[.．、]\s+[^\n。！？!?]+[。！？!?]\s*)"
-        r"(?:研究结论|最终配置建议|最终交易建议|建议评级|配置评级|评级|执行倾向)\s*[:：]\s*"
-        r"\**(?:买入|增持|持有|减持|卖出)"
-        r"(?:\s*[/／或]\s*(?:买入|增持|持有|减持|卖出))?"
-        r"\**\s*[。！？!?]?\s*"
-    )
     content = _LEAKED_RATING_PREFIX_RE.sub(r"\1", content)
 
     # Don't reformat content that already has at least two cleanly line-anchored
