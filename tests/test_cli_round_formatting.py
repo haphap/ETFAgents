@@ -133,6 +133,78 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("## 一、总体研判", formatted)
         self.assertIn("正文内容。", formatted)
 
+    def test_prepare_report_markdown_keeps_sentence_like_numbering_inside_list_body(self):
+        formatted = _prepare_report_markdown(
+            "一、情绪主线与权重影响\n\n"
+            "二、产品情绪与讨论强弱\n\n"
+            "1 舆论情绪偏向积极：富途牛牛等财经媒体在5月6日发布报道，称“全球共振引发芯片市场反弹”，并明确提及科创芯片ETF\n\n"
+            "三、近一年涨幅已翻倍。该报道属于事实性新闻（标题可验证），传导路径清晰。\n\n"
+            "2 社交媒体热度中等偏弱：产品层面的社交情绪属于温带正面。"
+        )
+
+        self.assertIn("# 一、情绪主线与权重影响", formatted)
+        self.assertIn("# 二、产品情绪与讨论强弱", formatted)
+        self.assertIn("1. 舆论情绪偏向积极", formatted)
+        self.assertIn("2. 社交媒体热度中等偏弱", formatted)
+        self.assertIn("\n\n近一年涨幅已翻倍。该报道属于事实性新闻", formatted)
+        self.assertNotIn("# 三、近一年涨幅已翻倍", formatted)
+
+    def test_prepare_report_markdown_keeps_heading_with_colon_between_list_items(self):
+        formatted = _prepare_report_markdown(
+            "1. 第一项内容\n"
+            "一、市场结构：核心矛盾\n"
+            "2. 第二项内容"
+        )
+
+        self.assertIn("1. 第一项内容", formatted)
+        self.assertIn("# 一、市场结构：核心矛盾", formatted)
+        self.assertIn("2. 第二项内容", formatted)
+        self.assertNotIn("\n市场结构：核心矛盾\n", formatted)
+
+    def test_prepare_report_markdown_does_not_rewrite_spaced_date_prefix_as_list_item(self):
+        formatted = _prepare_report_markdown(
+            "1. 主线判断\n\n"
+            "5 月15日发布的社零数据显示同比上升5.2%。\n\n"
+            "2. 风险点"
+        )
+
+        self.assertIn("1. 主线判断", formatted)
+        self.assertIn("5 月15日发布的社零数据显示同比上升5.2%。", formatted)
+        self.assertIn("2. 风险点", formatted)
+        self.assertNotIn("5. 月15日发布的社零数据显示同比上升5.2%。", formatted)
+
+    def test_prepare_report_markdown_merges_orphan_subsection_marker_with_following_heading(self):
+        formatted = _prepare_report_markdown(
+            "一、情绪主线与权重影响\n\n"
+            "（一）\n"
+            "产品情绪与讨论强弱"
+        )
+
+        self.assertIn("# 一、情绪主线与权重影响", formatted)
+        self.assertIn("## （一）产品情绪与讨论强弱", formatted)
+        self.assertNotIn("（一）\n产品情绪与讨论强弱", formatted)
+
+    def test_prepare_report_markdown_drops_dangling_orphan_subsection_marker(self):
+        formatted = _prepare_report_markdown("科创芯片ETF嘉实\n\n（一）")
+
+        self.assertEqual(formatted, "科创芯片ETF嘉实")
+
+    def test_prepare_report_markdown_leaves_english_prose_numbering_unchanged(self):
+        cfg = DEFAULT_CONFIG.copy()
+        cfg["output_language"] = "English"
+        set_config(cfg)
+
+        formatted = _prepare_report_markdown(
+            "1. First item\n\n"
+            "5 dogs barked loudly in the yard.\n\n"
+            "2. Second item"
+        )
+
+        self.assertIn("1. First item", formatted)
+        self.assertIn("5 dogs barked loudly in the yard.", formatted)
+        self.assertIn("2. Second item", formatted)
+        self.assertNotIn("5. dogs barked loudly in the yard.", formatted)
+
     def test_risk_management_history_supports_english_prefixes(self):
         risk_state = {
             "aggressive_history": (

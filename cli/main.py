@@ -181,6 +181,78 @@ def _strip_heading_number_prefix(text: str) -> str:
     return stripped.strip()
 
 
+_PLAIN_TOP_LEVEL_HEADING_PATTERN = re.compile(
+    r"^([ \t]*)([一二三四五六七八九十]+、)\s*(\S.*)$"
+)
+_PLAIN_SECOND_LEVEL_HEADING_PATTERN = re.compile(
+    r"^([ \t]*)(（[一二三四五六七八九十\d]+）)\s*(\S.*)$"
+)
+_SENTENCE_STYLE_SECTION_PUNCTUATION_RE = re.compile(r"[。！？!?；;]")
+_LOOSE_ARABIC_LIST_ITEM_PATTERN = re.compile(
+    r"^([ \t]{0,6})(\d{1,2})(?![\d.)、．])\s+(?!月|日|年|时|分|秒|%|％|亿|万|千|个)(\S.*)$",
+    re.MULTILINE,
+)
+_ARABIC_LIST_ITEM_LINE_PATTERN = re.compile(r"^\s*\d+(?:[.)、．]|\s)\s+\S")
+
+
+def _looks_like_plain_numbered_heading(line: str) -> bool:
+    stripped = (line or "").strip()
+    if not stripped:
+        return False
+    for pattern in (_PLAIN_TOP_LEVEL_HEADING_PATTERN, _PLAIN_SECOND_LEVEL_HEADING_PATTERN):
+        match = pattern.match(stripped)
+        if not match:
+            continue
+        body = match.group(3).strip()
+        return bool(body) and not _SENTENCE_STYLE_SECTION_PUNCTUATION_RE.search(body)
+    return False
+
+
+def _normalize_loose_arabic_list_markers(content: str) -> str:
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text or not _is_chinese_output():
+        return text
+    return _LOOSE_ARABIC_LIST_ITEM_PATTERN.sub(r"\1\2. \3", text)
+
+
+def _strip_sentence_like_section_prefixes_in_lists(content: str) -> str:
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text or not _is_chinese_output():
+        return text
+
+    lines = text.split("\n")
+    nonempty_indices = [index for index, line in enumerate(lines) if line.strip()]
+    for position, index in enumerate(nonempty_indices):
+        line = lines[index]
+        stripped = line.strip()
+        if not stripped or _looks_like_plain_numbered_heading(stripped):
+            continue
+
+        match = None
+        for pattern in (_PLAIN_TOP_LEVEL_HEADING_PATTERN, _PLAIN_SECOND_LEVEL_HEADING_PATTERN):
+            match = pattern.match(stripped)
+            if match:
+                break
+        if not match:
+            continue
+
+        previous_line = lines[nonempty_indices[position - 1]].strip() if position > 0 else ""
+        next_line = (
+            lines[nonempty_indices[position + 1]].strip()
+            if position + 1 < len(nonempty_indices)
+            else ""
+        )
+        if not (
+            _ARABIC_LIST_ITEM_LINE_PATTERN.match(previous_line)
+            or _ARABIC_LIST_ITEM_LINE_PATTERN.match(next_line)
+        ):
+            continue
+
+        leading_whitespace = re.match(r"^\s*", line).group(0)
+        lines[index] = f"{leading_whitespace}{match.group(3).strip()}"
+    return "\n".join(lines)
+
+
 def _format_heading_prefix(depth: int, index: int) -> str:
     if depth == 0 and 1 <= index <= len(_CHINESE_SECTION_NUMERALS):
         return f"{_CHINESE_SECTION_NUMERALS[index - 1]}、"
@@ -257,6 +329,9 @@ _VISIBLE_SECTION_LINE_PATTERN = re.compile(
     r"^\s*(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*\S"
 )
 _VISIBLE_SECTION_MARKER = r"(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)"
+_ORPHAN_VISIBLE_SECTION_MARKER_LINE_PATTERN = re.compile(
+    rf"^([ \t]*)({_VISIBLE_SECTION_MARKER})\s*$"
+)
 _INLINE_VISIBLE_SECTION_PATTERN = re.compile(
     rf"([。！？；：:])\s*({_VISIBLE_SECTION_MARKER}\s*\S)"
 )
@@ -279,6 +354,42 @@ def _is_report_heading_line(line: str) -> bool:
         _REPORT_HEADING_LINE_PATTERN.match(stripped)
         or _VISIBLE_SECTION_LINE_PATTERN.match(stripped)
     )
+
+
+def _normalize_orphan_section_marker_lines(content: str) -> str:
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text or not _is_chinese_output():
+        return text
+
+    lines = text.split("\n")
+    normalized: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        match = _ORPHAN_VISIBLE_SECTION_MARKER_LINE_PATTERN.match(line)
+        if not match:
+            normalized.append(line)
+            index += 1
+            continue
+
+        next_index = index + 1
+        while next_index < len(lines) and not lines[next_index].strip():
+            next_index += 1
+
+        if next_index < len(lines):
+            next_line = lines[next_index].strip()
+            if not (
+                _ORPHAN_VISIBLE_SECTION_MARKER_LINE_PATTERN.match(next_line)
+                or _is_report_heading_line(next_line)
+                or _ARABIC_LIST_ITEM_LINE_PATTERN.match(next_line)
+            ):
+                normalized.append(f"{match.group(1)}{match.group(2)}{next_line}")
+                index = next_index + 1
+                continue
+
+        index += 1
+
+    return "\n".join(normalized)
 
 
 def _split_inline_section_headings(content: str) -> str:
@@ -330,11 +441,11 @@ def _convert_plain_headings_to_markdown(content: str) -> str:
             result.append(line)
             continue
         # Convert top-level headings: 一、xxx → # 一、xxx
-        if re.match(r"^[一二三四五六七八九十]+、\s*\S", stripped):
+        if _looks_like_plain_numbered_heading(stripped) and stripped.startswith(tuple("一二三四五六七八九十")):
             result.append(f"# {stripped}")
             continue
         # Convert second-level headings: （一）xxx → ## （一）xxx
-        if re.match(r"^（[一二三四五六七八九十\d]+）\s*\S", stripped):
+        if _looks_like_plain_numbered_heading(stripped) and stripped.startswith("（"):
             result.append(f"## {stripped}")
             continue
         result.append(line)
@@ -343,6 +454,9 @@ def _convert_plain_headings_to_markdown(content: str) -> str:
 
 def _prepare_report_markdown(content: str, target_min_level: Optional[int] = None) -> str:
     text = strip_exchange_only_pseudo_titles(content)
+    text = _normalize_loose_arabic_list_markers(text)
+    text = _strip_sentence_like_section_prefixes_in_lists(text)
+    text = _normalize_orphan_section_marker_lines(text)
     text = _split_inline_section_headings(text)
     text = _convert_plain_headings_to_markdown(text)
     text = _normalize_report_heading_numbering(text)
