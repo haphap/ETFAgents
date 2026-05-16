@@ -304,12 +304,14 @@ def _has_conflicting_primary_action(text: str, rating: PortfolioRating) -> bool:
         )
 
     for match in conflicting_pattern.finditer(content):
-        prefix = content[max(0, match.start() - 24):match.start()]
         sentence_prefix = re.split(r"[。！？!?；;\n]", content[:match.start()])[-1]
+        clause_prefix = re.split(r"[，,、]", sentence_prefix)[-1]
         suffix = content[match.end():match.end() + 8]
         if (
-            _has_conditional_prefix(prefix)
-            or re.search(r"(若|如果|如|待|当|一旦|条件|触发)", sentence_prefix)
+            _has_conditional_prefix(clause_prefix)
+            or re.search(r"(若|如果|如|待|当|一旦|条件|触发)", clause_prefix)
+            or re.search(r"(?:可|才|再|允许|考虑|暂缓)[^，,、。！？!?；;\n]{0,16}$", clause_prefix)
+            or re.search(r"(条件|触发)", sentence_prefix)
             or re.match(r"(?:条件|触发)", suffix)
         ):
             continue

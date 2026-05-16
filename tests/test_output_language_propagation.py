@@ -696,6 +696,22 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("分批减持当前持仓", rendered)
         self.assertIn("维持现有基准仓位", rendered)
 
+    def test_portfolio_decision_catches_direct_conflict_after_conditional_clause(self):
+        rendered = render_portfolio_decision(
+            PortfolioDecision(
+                debate_conclusion="中性观点更稳妥。",
+                action_logic="当前仍以持有为主。",
+                positioning_recommendation="若市场企稳则加仓，反之则立即卖出至零仓位。",
+                rating=PortfolioRating.HOLD,
+                snapshot_stance="持有",
+                snapshot_new_and_rebuttal="新增了对触发条件的约束。",
+                snapshot_to_verify="继续跟踪量价变化。",
+            )
+        )
+
+        self.assertNotIn("立即卖出至零仓位", rendered)
+        self.assertIn("维持现有基准仓位", rendered)
+
     def test_portfolio_decision_rendering_expands_overly_brief_sections(self):
         rendered = render_portfolio_decision(
             PortfolioDecision(
@@ -815,8 +831,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("1. 初始仓位设置。当前维持不超过12%的轻仓头寸", rendered)
         self.assertIn("2. 加仓条件与关键位。加仓条件需同时满足三个技术标准", rendered)
         self.assertIn("3. 减仓与止损条件。减仓条件为价格跌破0.800元整数关口", rendered)
-        self.assertIn("4. 极端退出触发。退出触发（极端情景）", rendered)
-        self.assertIn("5. 再平衡触发。再平衡触发：当ETF溢价率扩大", rendered)
+        self.assertIn("4. 极端退出触发（极端情景）：若美国10年实际利率突破2.20%", rendered)
+        self.assertIn("5. 再平衡触发：当ETF溢价率扩大", rendered)
         self.assertIn("6. 后续验证指标。下一步重点监控的验证指标包括", rendered)
 
     def test_manager_normalization_splits_long_freetext_positioning_advice(self):

@@ -2388,6 +2388,7 @@ _POSITIONING_EXECUTION_CUES = (
     ("后续重点监控", "后续验证指标"),
     ("重点监控", "后续验证指标"),
 )
+# English positioning advice can use the same idea once English report rendering needs it.
 
 
 def _normalize_manager_section_key(title: str) -> str:
@@ -2417,46 +2418,58 @@ def format_chinese_positioning_recommendation(text: str) -> str:
     if len(re.sub(r"\s+", "", content)) < 120:
         return content
 
-    positions: list[tuple[int, str, str]] = []
-    seen_positions: set[int] = set()
+    positions: list[tuple[int, int, str, str]] = []
     for cue, title in _POSITIONING_EXECUTION_CUES:
         match = re.search(re.escape(cue), content)
-        if not match or match.start() in seen_positions:
+        if not match:
             continue
-        positions.append((match.start(), cue, title))
-        seen_positions.add(match.start())
+        start, end = match.span()
+        if any(
+            not (end <= existing_start or start >= existing_end)
+            for existing_start, existing_end, _, _ in positions
+        ):
+            continue
+        positions.append((start, end, cue, title))
     positions.sort(key=lambda item: item[0])
     if not positions:
         return content
 
-    chunks: list[tuple[str, str]] = []
+    chunks: list[tuple[str, str, str]] = []
     first_start = positions[0][0]
     initial = content[:first_start].strip()
     if initial:
-        initial_title = "初始仓位设置" if re.search(r"(仓位|头寸|底仓|配置)", initial) else "执行原则"
-        chunks.append((initial_title, initial))
+        initial_title = (
+            "初始仓位设置"
+            if re.search(r"(仓位|头寸|底仓|配置)", initial)
+            else "执行原则"
+        )
+        chunks.append((initial_title, "", initial))
 
-    for index, (start, _cue, title) in enumerate(positions):
+    for index, (start, _end, cue, title) in enumerate(positions):
         end = positions[index + 1][0] if index + 1 < len(positions) else len(content)
         chunk = content[start:end].strip()
         if chunk:
-            chunks.append((title, chunk))
+            chunks.append((title, cue, chunk))
 
-    deduped: list[tuple[str, str]] = []
-    for title, chunk in chunks:
+    deduped: list[tuple[str, str, str]] = []
+    for title, cue, chunk in chunks:
         if deduped and deduped[-1][0] == title:
-            previous_title, previous_chunk = deduped[-1]
-            deduped[-1] = (previous_title, f"{previous_chunk}{chunk}")
+            previous_title, previous_cue, previous_chunk = deduped[-1]
+            deduped[-1] = (previous_title, previous_cue, f"{previous_chunk}{chunk}")
             continue
-        deduped.append((title, chunk))
+        deduped.append((title, cue, chunk))
 
     if len(deduped) < 2:
         return content
 
     lines = []
-    for index, (title, chunk) in enumerate(deduped, 1):
-        separator = "" if chunk.startswith(("。", "，", "；", "：", ":", ";", ",")) else ""
-        lines.append(f"{index}. {title}。{separator}{chunk}")
+    for index, (title, cue, chunk) in enumerate(deduped, 1):
+        if cue and chunk.startswith(cue):
+            remainder = chunk[len(cue):].lstrip()
+            if remainder.startswith(("：", ":", "（", "(", "。", "，", "；", ";", ",")):
+                lines.append(f"{index}. {title}{remainder}")
+                continue
+        lines.append(f"{index}. {title}。{chunk}")
     return "\n".join(lines)
 
 
