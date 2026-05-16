@@ -37,6 +37,17 @@ class _FakePrompt:
         return runnable
 
 
+class _FakeTool:
+    def __init__(self, name, return_value):
+        self.name = name
+        self.calls = []
+        self.return_value = return_value
+
+    def invoke(self, payload):
+        self.calls.append(payload)
+        return self.return_value
+
+
 class ToolReportUtilsTests(unittest.TestCase):
     def test_returns_tool_response_when_more_tools_needed(self):
         prompt = _FakePrompt()
@@ -121,6 +132,48 @@ class ToolReportUtilsTests(unittest.TestCase):
         self.assertTrue(_is_tool_call_text('<function_call>something</function_call>'))
         self.assertFalse(_is_tool_call_text('Normal report text'))
         self.assertFalse(_is_tool_call_text(''))
+
+    def test_recovers_unexecuted_intent_for_any_configured_trigger_tool(self):
+        prompt = _FakePrompt()
+        news_tool = _FakeTool("get_news", "news data")
+        llm = _FakeLLM(
+            [_FakeResponse(content="好的，接下来我将调用 get_news 工具获取催化剂。")],
+            [_FakeResponse(content="Recovered macro report")],
+        )
+
+        result, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=[news_tool],
+            messages=["state"],
+            system_message="sys",
+            unexecuted_tool_recovery={
+                "trigger_tool_names": ["get_etf_info", "get_news"],
+                "tool_payloads": [
+                    {
+                        "tool": news_tool,
+                        "payload": {
+                            "ticker": "516650.SH",
+                            "start_date": "2026-03-30",
+                            "end_date": "2026-04-30",
+                        },
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(report, "Recovered macro report")
+        self.assertEqual(result.content, "Recovered macro report")
+        self.assertEqual(
+            [
+                {
+                    "ticker": "516650.SH",
+                    "start_date": "2026-03-30",
+                    "end_date": "2026-04-30",
+                }
+            ],
+            news_tool.calls,
+        )
 
 
 if __name__ == "__main__":

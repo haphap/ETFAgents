@@ -51,6 +51,7 @@ class MacroAnalystTests(unittest.TestCase):
         def _mock_run(*args, **kwargs):
             captured["tools"] = [tool.name for tool in args[2]]
             captured["system_message"] = kwargs.get("system_message", "")
+            captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
             return (AIMessage(content="Macro report"), "Macro report")
 
         with patch(
@@ -77,6 +78,11 @@ class MacroAnalystTests(unittest.TestCase):
         self.assertIn("一级和二级标题只写中文标题", system_msg)
         self.assertNotIn("Exposure & Macro Thesis", system_msg)
         self.assertNotIn("Signals & Scenario Analysis", system_msg)
+        self.assertEqual(captured["tools"], captured["recovery"]["trigger_tool_names"])
+        self.assertEqual(
+            captured["tools"],
+            [item["tool"].name for item in captured["recovery"]["tool_payloads"]],
+        )
 
 
 

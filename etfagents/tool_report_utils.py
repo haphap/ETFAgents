@@ -58,6 +58,15 @@ def _looks_like_unexecuted_tool_intent(text: str, tool_name: str) -> bool:
     return bool(re.search(pattern, stripped))
 
 
+def _recovery_trigger_tool_names(recovery_config: dict) -> tuple[str, ...]:
+    names = recovery_config.get("trigger_tool_names")
+    if names is None:
+        names = recovery_config.get("trigger_tool_name")
+    if isinstance(names, str):
+        return (names,)
+    return tuple(name for name in (names or ()) if name)
+
+
 def _invoke_tool_safely(tool, payload: dict) -> str:
     try:
         return str(tool.invoke(payload))
@@ -77,8 +86,11 @@ def _recover_unexecuted_tool_intent(
     if not recovery_config:
         return None, ""
 
-    trigger_tool_name = recovery_config.get("trigger_tool_name")
-    if not _looks_like_unexecuted_tool_intent(report, trigger_tool_name):
+    trigger_tool_names = _recovery_trigger_tool_names(recovery_config)
+    if not any(
+        _looks_like_unexecuted_tool_intent(report, tool_name)
+        for tool_name in trigger_tool_names
+    ):
         return None, ""
 
     tool_payloads = recovery_config.get("tool_payloads") or []

@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -63,6 +64,15 @@ _ETF_MARKET_INDICATORS = {
     "atr": "volatility and stop-distance calibration",
     "vwma": "price-volume confirmation",
 }
+
+
+def _date_days_before(curr_date: str, days: int) -> str:
+    try:
+        return (
+            datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return curr_date
 
 
 def _etf_indicator_catalog() -> str:
@@ -182,6 +192,40 @@ def create_etf_market_analyst(llm):
             tool_names=", ".join(tool.name for tool in tools),
             current_date=current_date,
             instrument_context=instrument_context,
+            unexecuted_tool_recovery={
+                "trigger_tool_names": [tool.name for tool in tools],
+                "tool_payloads": [
+                    {
+                        "tool": get_etf_price_data,
+                        "payload": {
+                            "symbol": asset_symbol,
+                            "start_date": _date_days_before(current_date, 180),
+                            "end_date": current_date,
+                        },
+                    },
+                    {
+                        "tool": get_etf_indicators,
+                        "payload": {
+                            "symbol": asset_symbol,
+                            "indicator": ",".join(_ETF_MARKET_INDICATORS),
+                            "curr_date": current_date,
+                            "look_back_days": 180,
+                        },
+                    },
+                    {
+                        "tool": get_etf_share,
+                        "payload": {"ticker": asset_symbol, "curr_date": current_date},
+                    },
+                    {
+                        "tool": get_etf_nav,
+                        "payload": {"ticker": asset_symbol, "curr_date": current_date},
+                    },
+                    {
+                        "tool": get_etf_universe,
+                        "payload": {"curr_date": current_date, "limit": 20},
+                    },
+                ],
+            },
         )
         report = normalize_chinese_role_terms(report) if report else report
         report = pre_judge_clean(report) if report else report

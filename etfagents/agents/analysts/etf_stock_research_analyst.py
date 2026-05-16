@@ -147,7 +147,7 @@ def create_etf_stock_research_analyst(llm):
             current_date=current_date,
             instrument_context=instrument_context,
             unexecuted_tool_recovery={
-                "trigger_tool_name": "get_etf_top_holdings_research",
+                "trigger_tool_names": [tool.name for tool in tools],
                 "tool_payloads": [
                     {
                         "tool": get_etf_holdings,

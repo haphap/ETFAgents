@@ -1,6 +1,8 @@
+from datetime import datetime, timedelta
+
+from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-import time
-import json
+
 from etfagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_collaboration_stop_instruction,
@@ -12,6 +14,10 @@ from etfagents.agents.utils.agent_utils import (
     get_news,
     normalize_chinese_role_terms,
 )
+from etfagents.agents.utils.analysis_memory import (
+    build_memory_prompt_section,
+    inject_memory_prompt_section,
+)
 from etfagents.agents.utils.report_leads import (
     get_concise_heading_instruction,
     get_no_title_instruction,
@@ -19,15 +25,9 @@ from etfagents.agents.utils.report_leads import (
     post_judge_clean,
     pre_judge_clean,
 )
-from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
-from langchain_core.messages import AIMessage
-from etfagents.tool_report_utils import run_tool_report_chain
-from etfagents.dataflows.config import get_config
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
-from etfagents.agents.utils.analysis_memory import (
-    build_memory_prompt_section,
-    inject_memory_prompt_section,
-)
+from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
+from etfagents.tool_report_utils import run_tool_report_chain
 
 
 _REPORT_SPEC = AnalystReportSpec(
@@ -40,6 +40,15 @@ _REPORT_SPEC = AnalystReportSpec(
         "- 末尾是否附Markdown摘要表格？"
     ),
 )
+
+
+def _date_days_before(curr_date: str, days: int) -> str:
+    try:
+        return (
+            datetime.strptime(curr_date, "%Y-%m-%d") - timedelta(days=days)
+        ).strftime("%Y-%m-%d")
+    except (TypeError, ValueError):
+        return curr_date
 
 
 def create_macro_analyst(llm):
@@ -120,6 +129,39 @@ def create_macro_analyst(llm):
             tool_names=", ".join([tool.name for tool in tools]),
             current_date=current_date,
             instrument_context=instrument_context,
+            unexecuted_tool_recovery={
+                "trigger_tool_names": [tool.name for tool in tools],
+                "tool_payloads": [
+                    {
+                        "tool": get_etf_info,
+                        "payload": {"ticker": asset_symbol, "curr_date": current_date},
+                    },
+                    {
+                        "tool": get_etf_holdings,
+                        "payload": {"ticker": asset_symbol, "curr_date": current_date},
+                    },
+                    {
+                        "tool": get_macro_regime_data,
+                        "payload": {"curr_date": current_date, "look_back_days": 365},
+                    },
+                    {
+                        "tool": get_global_news,
+                        "payload": {
+                            "curr_date": current_date,
+                            "look_back_days": 14,
+                            "limit": 5,
+                        },
+                    },
+                    {
+                        "tool": get_news,
+                        "payload": {
+                            "ticker": asset_symbol,
+                            "start_date": _date_days_before(current_date, 30),
+                            "end_date": current_date,
+                        },
+                    },
+                ],
+            },
         )
         report = normalize_chinese_role_terms(report) if report else report
         report = pre_judge_clean(report) if report else report
