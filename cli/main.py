@@ -329,6 +329,9 @@ _VISIBLE_SECTION_LINE_PATTERN = re.compile(
     r"^\s*(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*\S"
 )
 _VISIBLE_SECTION_MARKER = r"(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)"
+_ORPHAN_VISIBLE_SECTION_MARKER_LINE_PATTERN = re.compile(
+    rf"^([ \t]*)({_VISIBLE_SECTION_MARKER})\s*$"
+)
 _INLINE_VISIBLE_SECTION_PATTERN = re.compile(
     rf"([。！？；：:])\s*({_VISIBLE_SECTION_MARKER}\s*\S)"
 )
@@ -351,6 +354,42 @@ def _is_report_heading_line(line: str) -> bool:
         _REPORT_HEADING_LINE_PATTERN.match(stripped)
         or _VISIBLE_SECTION_LINE_PATTERN.match(stripped)
     )
+
+
+def _normalize_orphan_section_marker_lines(content: str) -> str:
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text:
+        return ""
+
+    lines = text.split("\n")
+    normalized: list[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        match = _ORPHAN_VISIBLE_SECTION_MARKER_LINE_PATTERN.match(line)
+        if not match:
+            normalized.append(line)
+            index += 1
+            continue
+
+        next_index = index + 1
+        while next_index < len(lines) and not lines[next_index].strip():
+            next_index += 1
+
+        if next_index < len(lines):
+            next_line = lines[next_index].strip()
+            if not (
+                _ORPHAN_VISIBLE_SECTION_MARKER_LINE_PATTERN.match(next_line)
+                or _is_report_heading_line(next_line)
+                or _ARABIC_LIST_ITEM_LINE_PATTERN.match(next_line)
+            ):
+                normalized.append(f"{match.group(1)}{match.group(2)}{next_line}")
+                index = next_index + 1
+                continue
+
+        index += 1
+
+    return "\n".join(normalized)
 
 
 def _split_inline_section_headings(content: str) -> str:
@@ -417,6 +456,7 @@ def _prepare_report_markdown(content: str, target_min_level: Optional[int] = Non
     text = strip_exchange_only_pseudo_titles(content)
     text = _normalize_loose_arabic_list_markers(text)
     text = _strip_sentence_like_section_prefixes_in_lists(text)
+    text = _normalize_orphan_section_marker_lines(text)
     text = _split_inline_section_headings(text)
     text = _convert_plain_headings_to_markdown(text)
     text = _normalize_report_heading_numbering(text)

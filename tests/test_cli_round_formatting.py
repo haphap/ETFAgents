@@ -173,6 +173,22 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("2. 风险点", formatted)
         self.assertNotIn("5. 月15日发布的社零数据显示同比上升5.2%。", formatted)
 
+    def test_prepare_report_markdown_merges_orphan_subsection_marker_with_following_heading(self):
+        formatted = _prepare_report_markdown(
+            "一、情绪主线与权重影响\n\n"
+            "（一）\n"
+            "产品情绪与讨论强弱"
+        )
+
+        self.assertIn("# 一、情绪主线与权重影响", formatted)
+        self.assertIn("## （一）产品情绪与讨论强弱", formatted)
+        self.assertNotIn("（一）\n产品情绪与讨论强弱", formatted)
+
+    def test_prepare_report_markdown_drops_dangling_orphan_subsection_marker(self):
+        formatted = _prepare_report_markdown("科创芯片ETF嘉实\n\n（一）")
+
+        self.assertEqual(formatted, "科创芯片ETF嘉实")
+
     def test_risk_management_history_supports_english_prefixes(self):
         risk_state = {
             "aggressive_history": (
