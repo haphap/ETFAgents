@@ -3,38 +3,60 @@ from datetime import datetime, timedelta
 
 from langchain_core.messages import HumanMessage
 
-from etfagents.content_utils import extract_text_content
+from etfagents.content_utils import contains_cjk, extract_text_content
 
 
-_FINAL_REPORT_FALLBACK = (
-    " You have already gathered all required data. "
-    "Do not call any tools again. Write the final report now based only on the "
-    "information already present in the conversation."
-)
-_FINAL_REPORT_USER_NUDGE = (
-    "Write the complete final markdown report now. "
-    "Do not call tools. Do not explain your process. "
-    "Use only the information already present in this conversation."
-)
 TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX = "[tool-recovery:data-unavailable]"
 
 _XML_TOOL_CALL_RE = re.compile(
     r"<tool_call>|<function[=\s]|</?function_call>", re.IGNORECASE
 )
 _DATA_READY_RE = (
-    r"(?:(?:已|已经).{0,40}?(?:获取|收集|拿到|完成).{0,40}?(?:数据|资料|信息)"
-    r"|(?:数据|资料|信息).{0,40}?(?:已|已经).{0,40}?(?:获取|收集|拿到|完成))"
+    r"(?:(?:已|已经).{0,40}?(?:获取|收集|拿到|完成|掌握).{0,40}?(?:数据|资料|信息)"
+    r"|(?:数据|资料|信息).{0,40}?(?:已|已经).{0,40}?(?:获取|收集|拿到|完成|掌握))"
+)
+_EN_DATA_READY_RE = (
+    r"(?:"
+    r"(?:all\s+)?(?:required|retrieved|necessary|needed)\s+data"
+    r"|(?:retrieved|gathered|collected|obtained)\s+(?:all\s+)?"
+    r"(?:(?:required|necessary|needed)\s+)?(?:data|information)"
+    r"|(?:all\s+)?data\s+(?:has\s+been\s+)?(?:retrieved|gathered|collected|obtained)"
+    r"|(?:data|information)\s+(?:is\s+)?(?:ready|available)"
+    r")"
+)
+_EN_REPORT_ACTION_RE = (
+    r"(?:write|draft|compile|generate|produce)"
+    r"(?:\s+the)?(?:\s+(?:full|complete|final))?"
+    r"(?:\s+cross-analysis)?(?:\s+analysis)?\s+report"
 )
 _PROCESS_ONLY_REPORT_RE = re.compile(
     r"(?:现在|好的|接下来|下一步|我|所有|数据|资料|信息|已获取|已经获取)[\s\S]{0,80}?"
     + _DATA_READY_RE
     + r"[\s\S]{0,120}?"
-    r"(?:开始|将|马上|准备|现在|下面|接下来|随后|继续|直接|正式).{0,40}?"
+    r"(?:开始|将|马上|准备|现在|下面|接下来|随后|继续|直接|正式|可以|能够).{0,40}?"
     r"(?:撰写|生成|输出|写).{0,40}?报告",
+    re.IGNORECASE,
+)
+_EN_PROCESS_ONLY_REPORT_RE = re.compile(
+    r"(?:now|okay|alright|next|let me|i(?:'ll| will)?|we(?:'ll| will)?|with all)"
+    r"[\s\S]{0,80}?"
+    r"(?:"
+    + _EN_DATA_READY_RE
+    + r"[\s\S]{0,120}?"
+    + _EN_REPORT_ACTION_RE
+    + r"|"
+    + _EN_REPORT_ACTION_RE
+    + r"[\s\S]{0,120}?(?:based on|using|from)?[\s\S]{0,40}?"
+    + _EN_DATA_READY_RE
+    + r")",
     re.IGNORECASE,
 )
 _PROCESS_ONLY_REPORT_PREFIX_RE = re.compile(
     _PROCESS_ONLY_REPORT_RE.pattern + r"[。.!！]?\s*",
+    re.IGNORECASE,
+)
+_EN_PROCESS_ONLY_REPORT_PREFIX_RE = re.compile(
+    _EN_PROCESS_ONLY_REPORT_RE.pattern + r"[。.!！]?\s*",
     re.IGNORECASE,
 )
 _UNEXECUTED_TOOL_INTENT_TEMPLATE = (
@@ -44,6 +66,42 @@ _UNEXECUTED_TOOL_INTENT_TEMPLATE = (
     r"[\s\S]{{0,120}}?"
     r"{tool_name}"
 )
+
+
+def _should_use_chinese_fallback(system_message: str) -> bool:
+    return contains_cjk(system_message or "")
+
+
+def _build_final_report_fallback(system_message: str) -> str:
+    if _should_use_chinese_fallback(system_message):
+        return (
+            " 你的上一条回复没有给出最终报告正文。"
+            "下一条回复必须只输出面向用户的最终 Markdown 正文，并立刻以开篇概述段起笔。"
+            "不要提及工具、数据已获取/已检索、数据收集、正在撰写、正在整理、下一步或你的过程。"
+            "不要以“现在我来”“接下来”“下面”“我将”“我可以开始”等过程性话术开头。"
+        )
+    return (
+        " Your previous reply did not contain the finished report body. "
+        "The next reply must be the completed end-user markdown only. "
+        "Begin immediately with the opening overview paragraph in the target language. "
+        "Do not mention tools, retrieved data, data collection, writing, drafting, compiling, "
+        "next steps, or your process. Do not begin with phrases like 'Now let me', 'I will', "
+        "'I can now', 'Next', or similar process narration."
+    )
+
+
+def _build_final_report_user_nudge(system_message: str) -> str:
+    if _should_use_chinese_fallback(system_message):
+        return (
+            "只返回最终 Markdown 正文。"
+            "不要写前言、状态说明或过程解释。"
+            "第一行必须是开篇概述段，不能是过程句。"
+        )
+    return (
+        "Return only the final markdown body. "
+        "No preface, no status update, no explanation. "
+        "The first line must be the opening overview paragraph, not a process sentence."
+    )
 
 
 def _is_tool_call_text(text: str) -> bool:
@@ -61,7 +119,11 @@ def _is_process_only_report_text(text: str) -> bool:
         return False
     if re.search(r"(?m)^\s*[一二三四五六七八九十]+、", stripped):
         return False
-    return bool(_PROCESS_ONLY_REPORT_RE.match(stripped[:240]))
+    short = stripped[:240]
+    return bool(
+        _PROCESS_ONLY_REPORT_RE.match(short)
+        or _EN_PROCESS_ONLY_REPORT_RE.match(short)
+    )
 
 
 def _strip_process_only_report_prefix(text: str) -> str:
@@ -74,9 +136,14 @@ def _strip_process_only_report_prefix(text: str) -> str:
             lines.pop(0)
             changed = True
             continue
-        if not _PROCESS_ONLY_REPORT_RE.match(first_line[:240]):
+        if not (
+            _PROCESS_ONLY_REPORT_RE.match(first_line[:240])
+            or _EN_PROCESS_ONLY_REPORT_RE.match(first_line[:240])
+        ):
             break
-        prefix_match = _PROCESS_ONLY_REPORT_PREFIX_RE.match(first_line)
+        prefix_match = _PROCESS_ONLY_REPORT_PREFIX_RE.match(
+            first_line
+        ) or _EN_PROCESS_ONLY_REPORT_PREFIX_RE.match(first_line)
         if not prefix_match:
             break
         remainder = first_line[prefix_match.end():].strip()
@@ -239,8 +306,9 @@ def run_tool_report_chain(
         return result, report
 
     fallback_kwargs = dict(prompt_kwargs)
+    system_message = prompt_kwargs.get("system_message", "")
     fallback_kwargs["system_message"] = (
-        f"{prompt_kwargs['system_message']}{_FINAL_REPORT_FALLBACK}"
+        f"{system_message}{_build_final_report_fallback(system_message)}"
     )
     fallback_prompt = prompt_template.partial(**fallback_kwargs)
     fallback_result = (fallback_prompt | llm).invoke(messages)
@@ -252,7 +320,7 @@ def run_tool_report_chain(
     second_fallback_result = (fallback_prompt | llm).invoke(
         [
             *messages,
-            HumanMessage(content=_FINAL_REPORT_USER_NUDGE),
+            HumanMessage(content=_build_final_report_user_nudge(system_message)),
         ]
     )
     second_fallback_report = _extract_report_text(second_fallback_result)

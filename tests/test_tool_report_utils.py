@@ -1,5 +1,7 @@
 import unittest
 
+from langchain_core.messages import HumanMessage
+
 from etfagents.tool_report_utils import (
     TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX,
     date_days_before,
@@ -36,7 +38,11 @@ class _FakeLLM:
 
 
 class _FakePrompt:
+    def __init__(self):
+        self.partial_calls = []
+
     def partial(self, **_kwargs):
+        self.partial_calls.append(_kwargs)
         return self
 
     def __or__(self, runnable):
@@ -55,6 +61,16 @@ class _FakeTool:
         if self.raises:
             raise self.raises
         return self.return_value
+
+
+class _RecordingLLM(_FakeLLM):
+    def __init__(self, tool_responses, fallback_responses=None):
+        super().__init__(tool_responses, fallback_responses)
+        self.fallback_invocations = []
+
+    def invoke(self, messages):
+        self.fallback_invocations.append(messages)
+        return super().invoke(messages)
 
 
 class ToolReportUtilsTests(unittest.TestCase):
@@ -134,6 +150,62 @@ class ToolReportUtilsTests(unittest.TestCase):
 
         self.assertEqual(report, "Recovered report on second fallback")
         self.assertEqual(result.content, "Recovered report on second fallback")
+
+    def test_fallback_prompts_use_chinese_output_contract(self):
+        prompt = _FakePrompt()
+        llm = _RecordingLLM(
+            [_FakeResponse(content="")],
+            [
+                _FakeResponse(content=""),
+                _FakeResponse(content="Recovered report on second fallback"),
+            ],
+        )
+
+        run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="中文系统提示",
+        )
+
+        fallback_system_message = prompt.partial_calls[1]["system_message"]
+        self.assertIn("下一条回复必须只输出面向用户的最终 Markdown 正文", fallback_system_message)
+        self.assertIn("不要以“现在我来”", fallback_system_message)
+        self.assertNotIn("You have already gathered all required data", fallback_system_message)
+
+        second_fallback_messages = llm.fallback_invocations[1]
+        self.assertIsInstance(second_fallback_messages[-1], HumanMessage)
+        self.assertIn("只返回最终 Markdown 正文", second_fallback_messages[-1].content)
+        self.assertIn("第一行必须是开篇概述段", second_fallback_messages[-1].content)
+
+    def test_fallback_prompts_use_english_output_contract(self):
+        prompt = _FakePrompt()
+        llm = _RecordingLLM(
+            [_FakeResponse(content="")],
+            [
+                _FakeResponse(content=""),
+                _FakeResponse(content="Recovered report on second fallback"),
+            ],
+        )
+
+        run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="English system prompt",
+        )
+
+        fallback_system_message = prompt.partial_calls[1]["system_message"]
+        self.assertIn("The next reply must be the completed end-user markdown only", fallback_system_message)
+        self.assertIn("Do not begin with phrases like 'Now let me'", fallback_system_message)
+        self.assertNotIn("You have already gathered all required data", fallback_system_message)
+
+        second_fallback_messages = llm.fallback_invocations[1]
+        self.assertIsInstance(second_fallback_messages[-1], HumanMessage)
+        self.assertIn("Return only the final markdown body", second_fallback_messages[-1].content)
+        self.assertIn("The first line must be the opening overview paragraph", second_fallback_messages[-1].content)
 
     def test_is_tool_call_text_detects_xml_patterns(self):
         self.assertTrue(_is_tool_call_text('<tool_call><function=foo></tool_call>'))
@@ -250,9 +322,29 @@ class ToolReportUtilsTests(unittest.TestCase):
                 "现在我已获取全部所需数据，下面撰写最终交叉分析报告。"
             )
         )
+        self.assertTrue(
+            _is_process_only_report_text(
+                "现在我已掌握所有必要数据，可以撰写完整的配置报告。"
+            )
+        )
+        self.assertTrue(
+            _is_process_only_report_text(
+                "Now let me compile the full cross-analysis report based on all retrieved data."
+            )
+        )
         self.assertFalse(
             _is_process_only_report_text(
                 "一、市场结构与量价诊断\n已获取的数据说明趋势偏强，报告正文继续展开。"
+            )
+        )
+        self.assertFalse(
+            _is_process_only_report_text(
+                "尽管该ETF的数据已掌握，但市场不可控，需要继续撰写报告来验证风险敞口。"
+            )
+        )
+        self.assertFalse(
+            _is_process_only_report_text(
+                "Now the market structure shows broad participation, and the report below details the evidence."
             )
         )
 
