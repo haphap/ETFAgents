@@ -8,6 +8,24 @@ from etfagents.agents.analysts.social_media_analyst import create_social_media_a
 
 
 _VALIDATION_PASSED_JSON = '{"score": 9, "pass": true, "critical_issues": [], "minor_issues": [], "missing_elements": [], "general_comment": "OK"}'
+_VALID_CATALYST_REPORT = (
+    "重仓股新闻和宏观事件对ETF形成中性偏积极影响，真实支撑仍需等待行业催化扩散。\n\n"
+    "一、情绪主线与权重影响\n"
+    "（一）产品情绪与讨论强弱\n"
+    "Report content。\n\n"
+    "二、事件传导与定价辨别\n"
+    "（一）宏观事件传导\n"
+    "Report content。\n"
+    "（二）真实支撑与短期噪声\n"
+    "Report content。\n\n"
+    "三、后续触发与验证要点\n"
+    "（一）后续监控要点\n"
+    "Report content。\n\n"
+    "四、结论与跟踪表\n"
+    "| 事件 | ETF影响 | 跟踪表 |\n"
+    "| --- | --- | --- |\n"
+    "| 宏观新闻 | 中性 | 继续观察 |"
+)
 
 
 class _CapturingLLM(RunnableLambda):
@@ -19,7 +37,7 @@ class _CapturingLLM(RunnableLambda):
     def _invoke(self, prompt, **kwargs):
         if "报告质量审核员" in str(prompt):
             return AIMessage(content=_VALIDATION_PASSED_JSON)
-        return AIMessage(content="Report content")
+        return AIMessage(content=_VALID_CATALYST_REPORT)
 
 
 class SocialMediaAnalystTests(unittest.TestCase):
@@ -69,7 +87,27 @@ class SocialMediaAnalystTests(unittest.TestCase):
         llm = RunnableLambda(
             lambda prompt, config=None: AIMessage(content=_VALIDATION_PASSED_JSON)
             if "报告质量审核员" in str(prompt)
-            else AIMessage(content="FINAL TRANSACTION PROPOSAL: **OVERWEIGHT**\n\n情绪主线仍偏正面。")
+            else AIMessage(
+                content=(
+                    "FINAL TRANSACTION PROPOSAL: **OVERWEIGHT**\n\n"
+                    "情绪主线仍偏正面，真实支撑仍需等待行业催化扩散。\n\n"
+                    "一、情绪主线与权重影响\n"
+                    "（一）产品情绪与讨论强弱\n"
+                    "报告内容。\n\n"
+                    "二、事件传导与定价辨别\n"
+                    "（一）宏观事件传导\n"
+                    "报告内容。\n"
+                    "（二）真实支撑与短期噪声\n"
+                    "报告内容。\n\n"
+                    "三、后续触发与验证要点\n"
+                    "（一）后续监控要点\n"
+                    "报告内容。\n\n"
+                    "四、结论与跟踪表\n"
+                    "| 事件 | ETF影响 | 跟踪表 |\n"
+                    "| --- | --- | --- |\n"
+                    "| 宏观新闻 | 中性 | 继续观察 |"
+                )
+            )
         )
         node = create_social_media_analyst(llm)
 
@@ -83,7 +121,7 @@ class SocialMediaAnalystTests(unittest.TestCase):
 
         self.assertNotIn("FINAL TRANSACTION PROPOSAL", result["catalyst_sentiment_report"])
         self.assertNotIn("OVERWEIGHT", result["catalyst_sentiment_report"])
-        self.assertIn("情绪主线仍偏正面。", result["catalyst_sentiment_report"])
+        self.assertIn("情绪主线仍偏正面", result["catalyst_sentiment_report"])
 
     @patch("etfagents.agents.analysts.social_media_analyst.get_news_for_queries")
     @patch("etfagents.agents.analysts.social_media_analyst.get_global_news")

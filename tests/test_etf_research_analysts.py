@@ -6,21 +6,26 @@ from langchain_core.runnables import RunnableLambda
 
 from etfagents.agents.analysts.etf_industry_research_analyst import (
     create_etf_industry_research_analyst,
+    _looks_like_complete_holdings_industry_report,
 )
 from etfagents.agents.analysts.etf_market_analyst import (
     create_etf_market_analyst,
+    _looks_like_complete_market_flow_report,
 )
 from etfagents.agents.analysts.macro_analyst import (
     create_macro_analyst,
 )
 from etfagents.agents.analysts.social_media_analyst import (
     create_social_media_analyst,
+    _looks_like_complete_catalyst_sentiment_report,
 )
 from etfagents.agents.analysts.etf_structure_analyst import (
     create_etf_structure_analyst,
+    _looks_like_complete_meso_commodity_report,
 )
 from etfagents.agents.analysts.etf_stock_research_analyst import (
     create_etf_stock_research_analyst,
+    _looks_like_complete_top_holdings_report,
 )
 from etfagents.agents.utils.agent_utils import build_report_title
 from etfagents.agents.utils.report_leads import (
@@ -58,7 +63,20 @@ class _IntentThenFinalLLM(RunnableLambda):
             "券商行业研究显示ETF主导暴露集中在工业金属，需求验证优先级高于估值扩张。\n\n"
             "一、行业主线与分歧焦点\n"
             "（一）共识主线\n"
-            "报告内容。"
+            "报告内容。\n\n"
+            "二、景气、政策与产业链验证\n"
+            "（一）景气与价格对比\n"
+            "报告内容。\n\n"
+            "三、未解问题与风险边界\n"
+            "（一）未解问题\n"
+            "报告内容。\n\n"
+            "四、ETF影响与研报总览\n"
+            "（一）ETF暴露与配置含义\n"
+            "ETF暴露需要等待行业需求验证。\n\n"
+            "（二）研报总览表\n"
+            "| 券商 | 行业关键词 | 立场 |\n"
+            "| --- | --- | --- |\n"
+            "| 示例券商 | 工业金属 | 中性 |"
         )
 
     def _invoke(self, prompt, **kwargs):
@@ -97,6 +115,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         def _mock_run(*args, **kwargs):
             captured["system_message"] = kwargs.get("system_message", "")
             captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
+            captured["acceptance_check"] = kwargs.get("report_acceptance_check")
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -130,6 +149,39 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
+        self.assertIs(
+            captured["acceptance_check"],
+            _looks_like_complete_holdings_industry_report,
+        )
+
+    def test_holdings_industry_acceptance_rejects_delivery_preamble(self):
+        valid_report = (
+            "券商行业研究显示煤炭链条盈利预期仍受煤价下行压制，ETF配置应等待需求和库存同步修复。\n\n"
+            "一、行业主线与分歧焦点\n"
+            "（一）共识主线\n"
+            "报告内容。\n\n"
+            "二、景气、政策与产业链验证\n"
+            "（一）景气与价格对比\n"
+            "报告内容。\n\n"
+            "三、未解问题与风险边界\n"
+            "（一）未解问题\n"
+            "报告内容。\n\n"
+            "四、ETF影响与研报总览\n"
+            "（一）ETF暴露与配置含义\n"
+            "ETF暴露需要等待需求验证。\n\n"
+            "（二）研报总览表\n"
+            "| 券商 | 行业关键词 | 立场 |\n"
+            "| --- | --- | --- |\n"
+            "| 示例券商 | 煤炭 | 谨慎 |"
+        )
+
+        self.assertTrue(_looks_like_complete_holdings_industry_report(valid_report))
+        self.assertFalse(
+            _looks_like_complete_holdings_industry_report(
+                "报告已就绪。以下为煤炭ETF（515220.SH）行业券商研究交叉分析：\n\n"
+                + valid_report
+            )
+        )
 
     def test_recovers_when_model_describes_tool_call_without_executing_it(self):
         llm = _IntentThenFinalLLM()
@@ -179,6 +231,7 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         def _mock_run(*args, **kwargs):
             captured["system_message"] = kwargs.get("system_message", "")
             captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
+            captured["acceptance_check"] = kwargs.get("report_acceptance_check")
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -214,6 +267,39 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("If the structure does not provide a heading, write one that is brief, forceful, and immediately usable", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
+        self.assertIs(
+            captured["acceptance_check"],
+            _looks_like_complete_top_holdings_report,
+        )
+
+    def test_top_holdings_acceptance_rejects_delivery_preamble(self):
+        valid_report = (
+            "券商个股研究显示ETF头部持仓盈利修正方向分化，组合贡献集中在龙头。\n\n"
+            "一、核心持仓共识与分歧\n"
+            "（一）共识主线\n"
+            "报告内容。\n\n"
+            "二、盈利、估值与机构态度\n"
+            "（一）关键数据对比\n"
+            "报告内容。\n\n"
+            "三、催化、盲点与风险边界\n"
+            "（一）未解问题\n"
+            "报告内容。\n\n"
+            "四、ETF影响与研报总览\n"
+            "（一）ETF组合影响\n"
+            "头部持仓对ETF组合影响集中在盈利修正和权重贡献。\n\n"
+            "（二）研报总览表\n"
+            "| 券商 | 持仓 | 评级 |\n"
+            "| --- | --- | --- |\n"
+            "| 示例券商 | 龙头公司 | 买入 |"
+        )
+
+        self.assertTrue(_looks_like_complete_top_holdings_report(valid_report))
+        self.assertFalse(
+            _looks_like_complete_top_holdings_report(
+                "报告已就绪。以下为煤炭ETF（515220.SH）头部持仓的券商研究交叉分析：\n\n"
+                + valid_report
+            )
+        )
 
     def test_recovers_when_model_describes_top_holdings_tool_call_without_executing_it(self):
         llm = _IntentThenFinalLLM(
@@ -222,7 +308,20 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
                 "券商个股研究显示ETF头部持仓盈利修正方向分化，组合贡献集中在龙头。\n\n"
                 "一、核心持仓共识与分歧\n"
                 "（一）共识主线\n"
-                "报告内容。"
+                "报告内容。\n\n"
+                "二、盈利、估值与机构态度\n"
+                "（一）关键数据对比\n"
+                "报告内容。\n\n"
+                "三、催化、盲点与风险边界\n"
+                "（一）未解问题\n"
+                "报告内容。\n\n"
+                "四、ETF影响与研报总览\n"
+                "（一）ETF组合影响\n"
+                "ETF组合影响集中在龙头盈利修正。\n\n"
+                "（二）研报总览表\n"
+                "| 券商 | 持仓 | 评级 |\n"
+                "| --- | --- | --- |\n"
+                "| 示例券商 | 龙头公司 | 买入 |"
             ),
         )
         node = create_etf_stock_research_analyst(llm)
@@ -271,6 +370,7 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
         def _mock_run(*args, **kwargs):
             captured["system_message"] = kwargs.get("system_message", "")
             captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
+            captured["acceptance_check"] = kwargs.get("report_acceptance_check")
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -324,6 +424,34 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
             ["get_commodity_cluster_data"],
             [item["tool"].name for item in captured["recovery"]["tool_payloads"]],
         )
+        self.assertIs(
+            captured["acceptance_check"],
+            _looks_like_complete_meso_commodity_report,
+        )
+
+    def test_meso_commodity_acceptance_rejects_delivery_preamble(self):
+        valid_report = (
+            "铜与热卷的需求强势若不能带动焦煤仓单去化，黑色链利润仍会被上游成本挤压，ETF配置应先保持防守。\n\n"
+            "一、核心矛盾与主线判断\n"
+            "核心矛盾集中在制造业需求和上游成本传导。\n\n"
+            "二、矛盾推演\n"
+            "（一）制造业复苏与上游需求\n"
+            "报告内容。\n\n"
+            "三、情景推演与策略启示\n"
+            "（一）基准情景 — 概率估计 (%)\n"
+            "报告内容。\n\n"
+            "近期合约表现总览\n"
+            "| 合约 | 最新水平 | 信号备注 |\n"
+            "| --- | --- | --- |\n"
+            "| CU | 80000 | 需求验证 |"
+        )
+
+        self.assertTrue(_looks_like_complete_meso_commodity_report(valid_report))
+        self.assertFalse(
+            _looks_like_complete_meso_commodity_report(
+                "报告已就绪。以下为中观商品策略分析：\n\n" + valid_report
+            )
+        )
 
 
 class EtfMarketAnalystPromptTests(unittest.TestCase):
@@ -336,6 +464,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         def _mock_run(*args, **kwargs):
             captured["system_message"] = kwargs.get("system_message", "")
             captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
+            captured["acceptance_check"] = kwargs.get("report_acceptance_check")
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -387,6 +516,56 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertEqual(
             expected_tool_names,
             [item["tool"].name for item in captured["recovery"]["tool_payloads"]],
+        )
+        self.assertIs(
+            captured["acceptance_check"],
+            _looks_like_complete_market_flow_report,
+        )
+
+    def test_market_flow_report_acceptance_requires_complete_report_shape(self):
+        valid_report = (
+            "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
+            "一、市场结构与量价诊断\n"
+            "趋势导语。\n\n"
+            "二、交易确认与执行计划\n"
+            "执行导语。\n\n"
+            "三、关键价位与条件情景推演\n"
+            "情景导语。\n\n"
+            "指标总览\n"
+            "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| MACD | 1 | 上方 | 动能改善 | 下穿转弱 |\n\n"
+            "综合结论：偏多配置，等待回踩确认。"
+        )
+
+        self.assertTrue(_looks_like_complete_market_flow_report(valid_report))
+        self.assertFalse(
+            _looks_like_complete_market_flow_report(
+                "数据已获取完毕，现在整合所有信息撰写报告。"
+            )
+        )
+        self.assertFalse(
+            _looks_like_complete_market_flow_report(
+                "概述：趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
+                "一、市场结构与量价诊断\n趋势导语。\n\n"
+                "二、交易确认与执行计划\n执行导语。\n\n"
+                "三、关键价位与条件情景推演\n情景导语。\n\n"
+                "指标总览\n综合结论：偏多配置。"
+            )
+        )
+        self.assertFalse(
+            _looks_like_complete_market_flow_report(
+                "本报告对159949.SZ进行市场与资金流分析，聚焦量价结构和执行质量。\n\n"
+                "一、市场结构与量价诊断\n趋势导语。\n\n"
+                "二、交易确认与执行计划\n执行导语。\n\n"
+                "三、关键价位与条件情景推演\n情景导语。\n\n"
+                "指标总览\n综合结论：偏多配置。"
+            )
+        )
+        self.assertFalse(
+            _looks_like_complete_market_flow_report(
+                "一、市场结构与量价诊断\n趋势偏多。\n\n二、交易确认与执行计划\n执行。\n\n三、关键价位与条件情景推演\n情景。\n\n指标总览\n综合结论：偏多。"
+            )
         )
 
 
@@ -471,6 +650,7 @@ class ReportTitleNormalizationTests(unittest.TestCase):
             "│  -------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
             "# 技术面与资金流综合诊断\n\n"
             "本报告将围绕当前ETF的量价结构和资金流给出判断。\n"
+            "本报告对515220.SH煤炭ETF国泰进行截至2026年4月30日的宏观与配置分析。\n"
             "结论：偏多，但短线不宜追高。\n"
             "价格仍站在20日均线上方，MACD维持在零轴上方，趋势仍偏强。\n\n"
             "一、市场结构与量价诊断\n\n"
@@ -482,6 +662,7 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         self.assertNotIn("以下是根据评审标准修正后的完整报告", cleaned)
         self.assertNotIn("# 技术面与资金流综合诊断", cleaned)
         self.assertNotIn("本报告将围绕", cleaned)
+        self.assertNotIn("本报告对515220.SH", cleaned)
         self.assertNotIn("结论：偏多", cleaned)
         self.assertNotIn("本节核心结论指出", cleaned)
         self.assertIn("价格仍站在20日均线上方，MACD维持在零轴上方，趋势仍偏强。", cleaned)
@@ -490,6 +671,7 @@ class ReportTitleNormalizationTests(unittest.TestCase):
     def test_clean_generated_report_removes_remaining_format_markers(self):
         report = (
             "核心结论：偏多，但不宜追高。\n"
+            "概述：煤价下行仍压制煤炭ETF风险溢价。\n"
             "（关键技术指标交易含义速览：MACD 金叉代表动能增强）\n"
             "本章节导语：价格仍站在20日均线上方？\n"
             "这意味着什么：趋势尚未破坏？\n"
@@ -497,11 +679,13 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         )
         cleaned = clean_generated_report(report)
         self.assertNotIn("核心结论：", cleaned)
+        self.assertNotIn("概述：", cleaned)
         self.assertNotIn("（关键技术指标交易含义速览", cleaned)
         self.assertNotIn("本章节导语", cleaned)
         self.assertNotIn("这意味着什么", cleaned)
         self.assertNotIn("对交易应该怎么做", cleaned)
         self.assertIn("偏多，但不宜追高。", cleaned)
+        self.assertIn("煤价下行仍压制煤炭ETF风险溢价。", cleaned)
         self.assertIn("价格仍站在20日均线上方。", cleaned)
         self.assertIn("趋势尚未破坏。", cleaned)
         self.assertIn("等待回踩确认后再加仓。", cleaned)
@@ -674,6 +858,33 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
         self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
+
+    def test_catalyst_sentiment_acceptance_rejects_delivery_preamble(self):
+        valid_report = (
+            "宏观新闻和重仓股事件对ETF形成中性偏谨慎影响，真实支撑仍需等待行业催化同步扩散。\n\n"
+            "一、情绪主线与权重影响\n"
+            "（一）产品情绪与讨论强弱\n"
+            "报告内容。\n\n"
+            "二、事件传导与定价辨别\n"
+            "（一）宏观事件传导\n"
+            "报告内容。\n"
+            "（二）真实支撑与短期噪声\n"
+            "报告内容。\n\n"
+            "三、后续触发与验证要点\n"
+            "（一）后续监控要点\n"
+            "报告内容。\n\n"
+            "四、结论与跟踪表\n"
+            "| 事件 | ETF影响 | 跟踪表 |\n"
+            "| --- | --- | --- |\n"
+            "| 宏观新闻 | 中性 | 继续观察 |"
+        )
+
+        self.assertTrue(_looks_like_complete_catalyst_sentiment_report(valid_report))
+        self.assertFalse(
+            _looks_like_complete_catalyst_sentiment_report(
+                "报告已就绪。以下为ETF催化剂与情绪分析：\n\n" + valid_report
+            )
+        )
 
 
 

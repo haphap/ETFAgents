@@ -17,9 +17,12 @@ from etfagents.agents.utils.analysis_memory import (
     inject_memory_prompt_section,
 )
 from etfagents.agents.utils.report_leads import (
+    collect_top_section_marks,
+    contains_markdown_table,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    has_invalid_opening_cap,
     post_judge_clean,
     pre_judge_clean,
 )
@@ -38,6 +41,29 @@ _REPORT_SPEC = AnalystReportSpec(
         "- 末尾是否附Markdown摘要表格？"
     ),
 )
+
+_MACRO_REQUIRED_TOP_SECTIONS = {"一", "二", "三", "四"}
+# Anchors must match the section names emitted by the prompt template below.
+_MACRO_REQUIRED_MARKERS = ("ETF暴露", "配置")
+
+
+def _looks_like_complete_macro_report(report: str) -> bool:
+    """Positive contract for accepting a macro report into graph state."""
+    content = report or ""
+    if not content.strip():
+        return False
+
+    if has_invalid_opening_cap(content):
+        return False
+
+    section_marks = collect_top_section_marks(content)
+    if not _MACRO_REQUIRED_TOP_SECTIONS.issubset(section_marks):
+        return False
+
+    return (
+        all(marker in content for marker in _MACRO_REQUIRED_MARKERS)
+        and contains_markdown_table(content)
+    )
 
 
 def create_macro_analyst(llm):
@@ -65,6 +91,8 @@ def create_macro_analyst(llm):
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
+            "开篇帽段必须直接给出宏观主判断、主导冲击方向和配置含义；不得以'概述：'、'结论：'等标签开头，"
+            "不得写'本报告对…进行分析''本报告将…''本分析基于…'这类任务说明或背景交代。\n"
             "一级和二级标题只写中文标题，不要在括号中追加英文标题、英文翻译或英文注释。\n"
             "每个一级章节（一、二、三、四）以2-3句导语开头总结该节核心结论，然后空行进入子章节。\n\n"
             "一、暴露与宏观主线\n"
@@ -118,6 +146,7 @@ def create_macro_analyst(llm):
             tool_names=", ".join([tool.name for tool in tools]),
             current_date=current_date,
             instrument_context=instrument_context,
+            report_acceptance_check=_looks_like_complete_macro_report,
             unexecuted_tool_recovery={
                 "trigger_tool_names": [tool.name for tool in tools],
                 "tool_payloads": [

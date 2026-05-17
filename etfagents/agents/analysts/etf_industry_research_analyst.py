@@ -10,9 +10,12 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
+    collect_top_section_marks,
+    contains_markdown_table,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    has_invalid_opening_cap,
     post_judge_clean,
     pre_judge_clean,
 )
@@ -36,6 +39,26 @@ _REPORT_SPEC = AnalystReportSpec(
         "- 末尾是否附研报总览表？"
     ),
 )
+
+_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS = {"一", "二", "三", "四"}
+# Anchors must match the section names emitted by the prompt template below.
+_HOLDINGS_INDUSTRY_REQUIRED_MARKERS = ("ETF暴露", "研报总览")
+
+
+def _looks_like_complete_holdings_industry_report(report: str) -> bool:
+    """Positive contract for accepting holdings-industry research into graph state."""
+    content = report or ""
+    if not content.strip() or has_invalid_opening_cap(content):
+        return False
+
+    section_marks = collect_top_section_marks(content)
+    if not _HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS.issubset(section_marks):
+        return False
+
+    return (
+        all(marker in content for marker in _HOLDINGS_INDUSTRY_REQUIRED_MARKERS)
+        and contains_markdown_table(content)
+    )
 
 
 def create_etf_industry_research_analyst(llm):
@@ -150,6 +173,7 @@ def create_etf_industry_research_analyst(llm):
             tool_names=", ".join(tool.name for tool in tools),
             current_date=current_date,
             instrument_context=instrument_context,
+            report_acceptance_check=_looks_like_complete_holdings_industry_report,
             unexecuted_tool_recovery={
                 "trigger_tool_names": [tool.name for tool in tools],
                 "tool_payloads": [

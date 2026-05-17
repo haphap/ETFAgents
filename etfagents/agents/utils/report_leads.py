@@ -37,6 +37,69 @@ _EXCHANGE_ONLY_PSEUDO_TITLE_PATTERN = re.compile(
 _CJK_TEXT_EDGE_RE = re.compile(r"[\u3400-\u9fffA-Za-z0-9%）】》。，；：、.!?！？]$")
 _CJK_TEXT_START_RE = re.compile(r"^[\u3400-\u9fffA-Za-z0-9（【《。！？；，、,.!?;:]")
 _LEADING_PUNCT_RE = re.compile(r"^[。！？；，、,.!?;:]")
+TOP_SECTION_MARK_RE = re.compile(r"(?m)^\s*([一二三四五六七八九十])、")
+OPENING_STRUCTURE_RE = re.compile(
+    r"^\s*(?:"
+    r"#{1,6}\s+\S|"
+    r"[一二三四五六七八九十]+、|"
+    r"（[一二三四五六七八九十\d]+）|"
+    r"(?:[-*•]|\d+[.．、)])\s+\S|"
+    r"\|"
+    r")"
+)
+OPENING_LABEL_RE = re.compile(r"^\s*(?:概述|结论|核心结论|导语)\s*[:：]")
+OPENING_DELIVERY_PREAMBLE_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:报告|分析|内容).{0,12}(?:已|已经)?(?:就绪|完成|生成|整理好|准备好)[。！!；;，,]?\s*"
+    r"(?:以下|下面|现在)"
+    r"|以下(?:是|为).{0,60}(?:报告|分析)"
+    r")"
+)
+
+
+def first_nonempty_line(text: str) -> str:
+    """Return the first non-empty line from generated report text."""
+    lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    return next(
+        (line.strip() for line in lines if line.strip()),
+        "",
+    )
+
+
+def collect_top_section_marks(text: str) -> set[str]:
+    """Return Chinese top-level section marks such as 一/二/三."""
+    return set(TOP_SECTION_MARK_RE.findall(text or ""))
+
+
+def starts_without_overview_paragraph(text: str) -> bool:
+    """Detect reports that start with a heading, section, list, or table."""
+    first_line = first_nonempty_line(text)
+    return bool(first_line and OPENING_STRUCTURE_RE.match(first_line))
+
+
+def has_invalid_opening_cap(
+    text: str,
+    *,
+    reject_labels: bool = True,
+    reject_meta: bool = True,
+) -> bool:
+    """Detect opening lines that are structural, label-style, or task-description prose."""
+    first_line = first_nonempty_line(text)
+    if not first_line or OPENING_STRUCTURE_RE.match(first_line):
+        return True
+    if reject_labels and OPENING_LABEL_RE.match(first_line):
+        return True
+    if OPENING_DELIVERY_PREAMBLE_RE.match(first_line):
+        return True
+    if reject_meta and contains_meta_openers(first_line):
+        return True
+    return False
+
+
+def contains_markdown_table(text: str) -> bool:
+    """Return True when report text includes at least one markdown table row."""
+    return any(_looks_like_markdown_table_line(line) for line in (text or "").splitlines())
+
 
 def get_no_title_instruction() -> str:
     return (
@@ -309,6 +372,7 @@ _LABEL_CUES = (
     "市场含义",
     "配置含义",
     "判断",
+    "概述",
     "证据",
     "合约信号",
     "关键价位",
@@ -496,7 +560,7 @@ _REPORT_PROCESS_PREAMBLE_RE = re.compile(
 
 _META_OPENER_RE = re.compile(
     r"(?m)^\s*"
-    r"(?:本报告(?:将|围绕|聚焦|基于)|本分析(?:将|围绕|聚焦|基于)|本文(?:将|围绕|聚焦|基于)|下文(?:将|围绕|聚焦)"
+    r"(?:本报告(?:将|围绕|聚焦|基于|对[^\n]{0,80}(?:进行|展开))|本分析(?:将|围绕|聚焦|基于|对[^\n]{0,80}(?:进行|展开))|本文(?:将|围绕|聚焦|基于)|下文(?:将|围绕|聚焦)"
     r"|This report(?: provides| aims| reviews| analyzes| focuses on)|This analysis(?: provides| aims| reviews| presents| focuses on)?)"
     r"[^\n]*\n?"
 )

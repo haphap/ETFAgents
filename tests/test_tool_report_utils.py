@@ -278,6 +278,47 @@ class ToolReportUtilsTests(unittest.TestCase):
 
         self.assertEqual("一、市场结构与量价诊断\n趋势偏多。", report)
 
+    def test_acceptance_check_rejects_non_report_and_triggers_fallback(self):
+        prompt = _FakePrompt()
+        llm = _FakeLLM(
+            [_FakeResponse(content="数据已获取完毕，现在整合所有信息撰写报告。")],
+            [_FakeResponse(content="真实报告正文")],
+        )
+
+        result, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+            report_acceptance_check=lambda text: "真实报告" in text,
+        )
+
+        self.assertEqual("真实报告正文", report)
+        self.assertEqual("真实报告正文", result.content)
+
+    def test_acceptance_check_returns_empty_when_all_attempts_rejected(self):
+        prompt = _FakePrompt()
+        llm = _FakeLLM(
+            [_FakeResponse(content="first draft")],
+            [
+                _FakeResponse(content="fallback draft"),
+                _FakeResponse(content="second fallback draft"),
+            ],
+        )
+
+        result, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+            report_acceptance_check=lambda _text: False,
+        )
+
+        self.assertEqual("", report)
+        self.assertEqual("first draft", result.content)
+
     def test_long_process_only_inline_prefix_keeps_report_body(self):
         prompt = _FakePrompt()
         overview = "行业景气修复但利润传导仍不均衡，" * 12
@@ -396,6 +437,33 @@ class ToolReportUtilsTests(unittest.TestCase):
             ],
             news_tool.calls,
         )
+
+    def test_acceptance_check_preserves_unexecuted_tool_recovery(self):
+        prompt = _FakePrompt()
+        news_tool = _FakeTool("get_news", "news data")
+        llm = _FakeLLM(
+            [_FakeResponse(content="好的，接下来我将调用 get_news 工具获取催化剂。")],
+            [_FakeResponse(content="Recovered complete report")],
+        )
+
+        result, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=[news_tool],
+            messages=["state"],
+            system_message="sys",
+            report_acceptance_check=lambda text: text.startswith("Recovered"),
+            unexecuted_tool_recovery={
+                "trigger_tool_names": ["get_news"],
+                "tool_payloads": [
+                    {"tool": news_tool, "payload": {"ticker": "516650.SH"}},
+                ],
+            },
+        )
+
+        self.assertEqual("Recovered complete report", report)
+        self.assertEqual("Recovered complete report", result.content)
+        self.assertEqual([{"ticker": "516650.SH"}], news_tool.calls)
 
     def test_recovery_only_runs_payloads_for_matched_tool_names(self):
         prompt = _FakePrompt()

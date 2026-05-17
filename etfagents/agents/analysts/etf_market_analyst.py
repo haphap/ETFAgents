@@ -19,9 +19,11 @@ from etfagents.agents.utils.analysis_memory import (
     inject_memory_prompt_section,
 )
 from etfagents.agents.utils.report_leads import (
+    collect_top_section_marks,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    has_invalid_opening_cap,
     post_judge_clean,
     pre_judge_clean,
 )
@@ -63,6 +65,9 @@ _ETF_MARKET_INDICATORS = {
     "atr": "volatility and stop-distance calibration",
     "vwma": "price-volume confirmation",
 }
+_MARKET_FLOW_REQUIRED_TOP_SECTIONS = {"一", "二", "三"}
+# Anchors must match the section names emitted by the prompt template below.
+_MARKET_FLOW_REQUIRED_MARKERS = ("指标总览", "综合结论")
 
 
 def _etf_indicator_catalog() -> str:
@@ -70,6 +75,21 @@ def _etf_indicator_catalog() -> str:
         f"- {indicator}: {purpose}" for indicator, purpose in _ETF_MARKET_INDICATORS.items()
     )
 
+
+def _looks_like_complete_market_flow_report(report: str) -> bool:
+    """Positive contract for accepting a market-flow report into graph state."""
+    content = report or ""
+    if not content.strip():
+        return False
+
+    if has_invalid_opening_cap(content):
+        return False
+
+    section_marks = collect_top_section_marks(content)
+    if not _MARKET_FLOW_REQUIRED_TOP_SECTIONS.issubset(section_marks):
+        return False
+
+    return all(marker in content for marker in _MARKET_FLOW_REQUIRED_MARKERS)
 
 
 def create_etf_market_analyst(llm):
@@ -182,6 +202,7 @@ def create_etf_market_analyst(llm):
             tool_names=", ".join(tool.name for tool in tools),
             current_date=current_date,
             instrument_context=instrument_context,
+            report_acceptance_check=_looks_like_complete_market_flow_report,
             unexecuted_tool_recovery={
                 "trigger_tool_names": [tool.name for tool in tools],
                 "tool_payloads": [
