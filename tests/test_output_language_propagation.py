@@ -181,6 +181,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("成交量", system_prompt)
         self.assertIn("份额变化", system_prompt)
         self.assertIn("若没有上方报告里的具体价位、均线数值、量能基数或份额/溢折价数据，就不要下加仓、减仓或回补指令", system_prompt)
+        self.assertIn("所有执行动作的对象必须是ETF整体仓位或ETF目标权重", system_prompt)
         self.assertIn("The three sections must open with DIFFERENT sentences", system_prompt)
         self.assertIn("do not mention sizing, levels, or execution steps", system_prompt)
         self.assertIn("do not restate the thesis rationale", system_prompt)
@@ -201,6 +202,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("舆情与事件影响分析", prompt)
         self.assertIn("ETF持仓行业研究", prompt)
         self.assertIn("ETF头部持仓研究", prompt)
+        self.assertIn("所有执行动作只能针对ETF整体仓位或ETF目标权重", prompt)
         self.assertIn("催化节奏", prompt)
         self.assertNotIn("catalyst timing", prompt)
 
@@ -458,6 +460,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("## 行为逻辑", prompt)
         self.assertIn("## 持仓建议", prompt)
         self.assertIn("关键约束", prompt)
+        self.assertIn("所有执行动作的对象必须是这只ETF的整体仓位", prompt)
         self.assertNotIn("Lessons from past decisions", prompt)
         self.assertIn("催化节奏", prompt)
         self.assertNotIn("catalyst timing", prompt)
@@ -802,6 +805,55 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("当前组合更适合维持增配节奏", rendered)
         self.assertIn("目标仓位先控制在20%至25%", rendered)
         self.assertIn("50日均线443元", rendered)
+
+    def test_portfolio_decision_removes_constituent_trade_instructions(self):
+        rendered = render_portfolio_decision(
+            PortfolioDecision(
+                debate_conclusion="谨慎观点更强，因为盈利下修和资金流转弱同时出现。",
+                action_logic="当前应降低ETF整体目标仓位，并把回补条件绑定在价格和份额修复上。",
+                positioning_recommendation=(
+                    "当前应将仓位从偏多配置的4至5成降至2至3成（对应目标权重约25%），"
+                    "优先减持极端估值标的：永泰能源（4.17%权重，PE 40至75倍）应全部清仓；"
+                    "中国核电（7.91%权重，2026年一季度归母同比-34.19%）应减持至剩余权重约2%；"
+                    "华能国际（3.28%）和上海电力（2.74%）等纯火电敞口应减持至剩余权重约1%。"
+                    "保留长江电力（9.02%）、国投电力（3.61%）、川投能源（3.09%）等底仓。"
+                ),
+                rating=PortfolioRating.UNDERWEIGHT,
+                snapshot_stance="减持",
+                snapshot_new_and_rebuttal="新增了成分股盈利下修对ETF风险的解释。",
+                snapshot_to_verify="继续跟踪ETF价格、份额和溢折价。",
+            )
+        )
+
+        self.assertIn("目标权重约25%", rendered)
+        self.assertIn("实际执行对象仍是ETF整体仓位", rendered)
+        self.assertNotIn("永泰能源", rendered)
+        self.assertNotIn("中国核电", rendered)
+        self.assertNotIn("华能国际", rendered)
+        self.assertNotIn("上海电力", rendered)
+        self.assertNotIn("应全部清仓", rendered)
+        self.assertNotIn("应减持至剩余权重", rendered)
+
+    def test_manager_normalization_removes_constituent_trade_instructions(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **减持**\n"
+            "### （二）建议\n"
+            "当前将ETF目标仓位降至25%，优先减持极端估值标的："
+            "永泰能源（4.17%权重，PE 40至75倍）应全部清仓；"
+            "中国核电（7.91%权重，归母同比-34.19%）应减持至剩余权重约2%。\n\n"
+            "反馈快照:\n"
+            "- 立场: 减持\n"
+            "- 本轮新增与反驳: 永泰能源（4.17%权重）应全部清仓。\n"
+            "- 待验证: ETF价格和份额。"
+        )
+
+        self.assertIn("当前将ETF目标仓位降至25%", normalized)
+        self.assertIn("实际执行对象仍是ETF整体仓位", normalized)
+        self.assertNotIn("永泰能源", normalized)
+        self.assertNotIn("中国核电", normalized)
+        self.assertNotIn("应全部清仓", normalized)
 
     def test_portfolio_decision_rendering_strips_prompt_leakage(self):
         rendered = render_portfolio_decision(

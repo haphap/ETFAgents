@@ -12,6 +12,7 @@ from etfagents.agents.utils.agent_utils import (
     localize_label,
     localize_rating_term,
     strip_manager_instruction_leakage,
+    strip_constituent_trade_instructions,
 )
 from etfagents.agents.utils.rating import detect_chinese_rating, detect_english_rating
 
@@ -44,10 +45,16 @@ class RiskRule(BaseModel):
     note: str = Field(default="", description="Short explanation of the risk rule and why it matters.")
 
 
+_ETF_ONLY_ALLOCATION_SCOPE = (
+    "The execution target is the ETF itself, not individual constituent stocks. "
+    "Use holdings and constituent weights only as attribution evidence; do not recommend buying, selling, trimming, clearing, or retaining named constituents."
+)
+
+
 class ResearchPlan(BaseModel):
     debate_conclusion: str = Field(description="A detailed synthesis paragraph comparing both sides, naming the strongest evidence from each, and explaining the decisive weakness in the losing view for ETF allocation.")
     action_logic: str = Field(description="A detailed evidence-to-allocation paragraph linking ETF structure, flows, catalysts, downside boundaries, and confirmation or invalidation triggers to the final decision.")
-    positioning_recommendation: str = Field(description="Actionable ETF allocation guidance with execution details, exposure sizing, concrete add or reduce conditions, rebalance triggers, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate the numeric level inline in the same sentence instead of referring readers back to an earlier report.")
+    positioning_recommendation: str = Field(description=f"Actionable ETF allocation guidance with execution details, exposure sizing, concrete add or reduce conditions, rebalance triggers, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate the numeric level inline in the same sentence instead of referring readers back to an earlier report. {_ETF_ONLY_ALLOCATION_SCOPE}")
     rating: PortfolioRating = Field(description="Final research-manager rating for ETF allocation.")
     snapshot_stance: str = Field(description="Concise stance for the feedback snapshot.")
     snapshot_new_and_rebuttal: str = Field(description="What was newly added this round and how it rebuts the opposing case.")
@@ -56,7 +63,7 @@ class ResearchPlan(BaseModel):
 
 class TraderProposal(BaseModel):
     thesis: str = Field(description="Concise ETF allocation thesis explaining the proposed action.")
-    execution_plan: str = Field(description="Concrete ETF allocation plan with support or resistance references, exact price or moving-average levels, volume or fund-flow thresholds, catalyst triggers, ETF share or premium-discount checks, and explicit add, reduce, rotate, or exit conditions. Do not say 'wait for confirmation' without numeric thresholds. Write the numeric level inline instead of saying 'the key level in the market report'.")
+    execution_plan: str = Field(description=f"Concrete ETF allocation plan with support or resistance references, exact price or moving-average levels, volume or fund-flow thresholds, catalyst triggers, ETF share or premium-discount checks, and explicit add, reduce, rotate, or exit conditions. Do not say 'wait for confirmation' without numeric thresholds. Write the numeric level inline instead of saying 'the key level in the market report'. {_ETF_ONLY_ALLOCATION_SCOPE}")
     risk_management: str = Field(description="Risk controls, rebalance or invalidation signals, monitoring thresholds, and the actions to take when those thresholds are breached.")
     rating: PortfolioRating = Field(description="Trader recommendation for ETF exposure.")
     target_weight_pct: float | None = Field(default=None, description="Structured target portfolio weight in percent for this ETF, from 0 to 100. Use when the execution plan implies a single target sizing.")
@@ -72,7 +79,7 @@ class TraderProposal(BaseModel):
 class PortfolioDecision(BaseModel):
     debate_conclusion: str = Field(description="A detailed synthesis of the full risk debate across all perspectives, explicitly comparing aggressive, conservative, and neutral cases and stating why the losing view was overruled for ETF allocation.")
     action_logic: str = Field(description="A detailed portfolio-manager paragraph showing how ETF evidence leads to sizing, hedging, rebalance triggers, and risk controls.")
-    positioning_recommendation: str = Field(description="Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate those numeric levels inline rather than telling the reader to look back at the market report.")
+    positioning_recommendation: str = Field(description=f"Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate those numeric levels inline rather than telling the reader to look back at the market report. {_ETF_ONLY_ALLOCATION_SCOPE}")
     rating: PortfolioRating = Field(description="Final portfolio-manager rating for ETF allocation.")
     target_weight_pct: float | None = Field(default=None, description="Structured target portfolio weight in percent for this ETF, from 0 to 100. Use when the final recommendation implies a single target sizing.")
     target_weight_band: tuple[float, float] | None = Field(default=None, description="Structured target weight band in percent as (low, high), from 0 to 100. Use when the final recommendation specifies a sizing range rather than a single weight.")
@@ -493,7 +500,7 @@ def _default_action_logic(rating: PortfolioRating) -> str:
             PortfolioRating.BUY: "当前的明确动作是买入，而不是继续观望，因为这意味着上方报告已经同时给出了更强的主线证据：宏观冲击对该 ETF 的核心暴露不再构成压制，行业供需或库存信号正在改善，且市场与资金流开始验证这一修复。执行上不能把“看多”停留在口号层面，而要把仓位放大建立在可观察的证据上：价格重新站上关键位、成交量或持仓量放大、主要持仓的盈利与催化继续兑现。只要这些证据仍在强化，就可以沿着既定节奏分批加仓；一旦出现宏观异象反向扩大、产业数据再度转弱或量价验证失效，就必须立刻放慢节奏并重新审视买入理由。",
             PortfolioRating.OVERWEIGHT: "当前的明确动作是增持，因为主线逻辑仍偏向有利一侧，但证据强度还不足以支持一次性把风险敞口推到极限。更合适的做法是在已有底仓上逐步加码，把每一步加仓都和新证据绑定起来：例如宏观错配缓解、行业价格与库存出现改善、头部持仓盈利预期继续上修、以及 ETF 自身的流动性和份额变化没有恶化。这样做的意义，不是机械地“看多”，而是在确认赔率和胜率同步改善时放大收益暴露；若后续出现催化递延、利润兑现弱于预期或价格结构转差，就应暂停增持并把仓位退回更中性的水平。",
             PortfolioRating.HOLD: "当前的明确动作是持有，因为现有证据足以说明不必急于撤退，但还不足以支持立即扩大敞口。换句话说，基准判断并不是“没有观点”，而是上行与下行的关键证据仍在拉锯：宏观环境没有坏到必须减仓，可产业、盈利、流动性或价格确认里仍有至少一环没有完成闭合。接下来最重要的不是空泛地“继续观察”，而是盯住真正能改写结论的异象：例如关键支撑是否被重新站稳、成交量和份额是否同步修复、行业库存与价格是否出现方向一致的变化、主要持仓的业绩验证是否落地。只要这些证据没有向同一方向集中，维持仓位就是更有纪律的动作；一旦验证集中向上，可转入增持；若异象集中转弱，则应切换为减仓。",
-            PortfolioRating.UNDERWEIGHT: "当前的明确动作是减持，因为风险释放速度快于利多兑现速度，继续维持原有仓位相当于默认承担一个尚未被充分定价的回撤过程。这里的重点不是宣告长期逻辑彻底结束，而是承认当前最有信息量的证据——宏观压力、行业供需恶化、利润预期下修、或价格与资金流背离——更支持先把净敞口降下来。执行上应优先处理弹性大但验证最弱的仓位，把组合收缩到即使波动继续扩大也能承受的水平；只有当宏观异象缓和、产业数据止跌回升、并且市场重新给出价格与流动性的双重确认时，才考虑逐步回补，而不是抢跑逆势加仓。",
+            PortfolioRating.UNDERWEIGHT: "当前的明确动作是减持，因为风险释放速度快于利多兑现速度，继续维持原有仓位相当于默认承担一个尚未被充分定价的回撤过程。这里的重点不是宣告长期逻辑彻底结束，而是承认当前最有信息量的证据——宏观压力、行业供需恶化、利润预期下修、或价格与资金流背离——更支持先把ETF净敞口降下来。执行上只能调整这只ETF在组合中的整体目标权重，成分股风险用于解释为什么要降ETF仓位，而不是对成分股下达清仓或减持指令；只有当宏观异象缓和、产业数据止跌回升、并且市场重新给出价格与流动性的双重确认时，才考虑逐步回补ETF仓位，而不是抢跑逆势加仓。",
             PortfolioRating.SELL: "当前的明确动作是卖出，因为最新证据链已经不再支持继续忍受持仓风险：如果宏观冲击仍在加深、行业景气与盈利预期同步走弱、而价格结构又没有出现可靠修复，那么继续持有本身就是一种没有被补偿的风险暴露。此时最重要的不是寻找安慰性理由，而是承认基准情景已经转向防守，并把资金从一个下行概率更高的敞口中撤出来。只有在后续重新看到基本面修复、价格站回关键位、量能与资金流再度转正这些条件同时出现时，才值得重新评估入场；在那之前，回避风险比抄底冲动更有价值。",
         }
         return mapping[rating]
@@ -501,7 +508,7 @@ def _default_action_logic(rating: PortfolioRating) -> str:
         PortfolioRating.BUY: "The current decision works only if three conditions continue to hold together: valuation remains supportive, catalysts keep improving, and price structure does not break down. That means execution should favor staged accumulation rather than a one-shot position, with adds tied to confirmation in volume, earnings follow-through, and catalyst delivery. If those validation signals weaken, the build pace should slow immediately and the bullish thesis should be re-tested rather than assumed.",
         PortfolioRating.OVERWEIGHT: "The case supports adding exposure, but only in a measured way, because the upside thesis is still stronger than the downside case while volatility and timing risk remain real. Adds should therefore be linked to catalyst follow-through, valuation digestion, and price support rather than pure momentum chasing. If earnings delivery slips, catalysts fade, or price structure deteriorates, the right move is to pause the adds and move back toward neutral exposure.",
         PortfolioRating.HOLD: "The disciplined move is to maintain current exposure because the upside case is not yet strong enough to justify adding, while the downside case is not yet severe enough to force an immediate trim. The key is to keep monitoring support levels, volume and fund-flow behavior, ETF structure stability, and the next round of macro confirmation. If those inputs improve together, the setup can be revisited for an add; if support breaks or structure quality worsens, the stance should shift toward reduction.",
-        PortfolioRating.UNDERWEIGHT: "The core logic is to reduce net exposure before the market finishes repricing the current risks, rather than waiting passively for volatility to do the damage. Execution should prioritize trimming the weakest-conviction exposure first while keeping only the most defensible core positions under review. Rebuilding should happen only after valuation resets, catalysts re-accelerate, and price structure stabilizes, not before.",
+        PortfolioRating.UNDERWEIGHT: "The core logic is to reduce ETF net exposure before the market finishes repricing the current risks, rather than waiting passively for volatility to do the damage. Execution may adjust only the ETF's overall portfolio weight; constituent risks explain why the ETF weight should fall, but they are not direct instructions to trade named holdings. Rebuilding should happen only after valuation resets, catalysts re-accelerate, and price structure stabilizes, not before.",
         PortfolioRating.SELL: "The current risk-reward is unfavorable enough that staying in the name does not offer a justified payoff for the downside being assumed. Execution should therefore prioritize exiting or staying out until both fundamentals and price structure show evidence of repair. Before that happens, attempts to buy the dip would amount to taking uncompensated risk rather than following a disciplined process.",
     }
     return mapping[rating]
@@ -541,7 +548,7 @@ def _default_execution_plan(rating: PortfolioRating, context_text: str = "") -> 
             PortfolioRating.BUY: f"先以计划目标仓位的20%—30%建立试探仓，后续每一笔只增加10%—15%。只有当价格重新站回{primary_anchor}，且日成交量连续2个交易日达到近20日均量的1.2—1.3倍，同时 ETF 份额继续净申购或溢折价不再走阔，才继续加仓。若催化只是消息预期而未兑现为订单、业绩指引、份额扩张或放量突破，就暂停追价，等待回踩{primary_anchor}不破后再执行下一笔。",
             PortfolioRating.OVERWEIGHT: f"在保留现有底仓的前提下择机增配，但每一笔加仓都要绑定清晰的关键数据：价格至少守住{support_anchor}，日成交量回到近20日均量的1.1—1.2倍以上，且 ETF 份额、净申购或溢折价改善没有转弱。单笔增配宜控制在目标仓位的10%—15%，只有当新增催化从“预期”变成“可验证进展”并连续两个交易时段保持量价承接时，才继续上调；若量价配合不足或催化兑现延迟，就把超配部分压回到底仓。",
             PortfolioRating.HOLD: f"维持当前仓位，不主动追涨或杀跌。这里优先看的关键支撑直接写成{support_anchor}；只有当价格在该位置附近连续2个交易时段止跌企稳，日成交量至少较近5日均量放大15%—20%且明显回到20日均量附近，同时份额或资金流不再恶化，才考虑把持有转为试探性加仓。若新增催化只是消息层面的预期而未带来份额扩张、溢折价改善、资金流确认或放量突破，则继续维持仓位，不提前放大敞口。",
-            PortfolioRating.UNDERWEIGHT: f"优先分2—3笔降低敞口，每一笔先减掉目标仓位的10%—15%，第一笔先处理高弹性但验证最弱的仓位。若反弹连{support_anchor}都收不回，且日成交量仍低于近20日均量的0.9—1.0倍或 ETF 份额继续净赎回，就继续执行减仓；只有当价格重新收复主要均线、日成交量回到20日均量的1.1—1.2倍、份额转为连续净申购，才考虑小比例回补，而不是在缩量反弹里抢跑。",
+            PortfolioRating.UNDERWEIGHT: f"优先分2—3笔降低ETF整体敞口，每一笔先减掉目标仓位的10%—15%，不得把执行动作拆成对成分股的清仓或减持。若反弹连{support_anchor}都收不回，且日成交量仍低于近20日均量的0.9—1.0倍或 ETF 份额继续净赎回，就继续执行ETF层面的减仓；只有当价格重新收复主要均线、日成交量回到20日均量的1.1—1.2倍、份额转为连续净申购，才考虑小比例回补ETF仓位，而不是在缩量反弹里抢跑。",
             PortfolioRating.SELL: f"以退出仓位或避免入场为主，执行上不要等待模糊修复信号。若价格已跌破{support_anchor}，且单日放量达到近20日均量的1.3倍以上，或 ETF 溢折价继续恶化、份额净赎回扩大，就应直接完成清仓；即便后续出现技术性反弹，也要先看到基本面修复、价格重新站回关键均线、日成交量恢复到20日均量上方以及催化兑现三者同时出现，才考虑重新纳入观察名单。",
         }
         return mapping[rating]
@@ -995,6 +1002,9 @@ def render_research_plan(plan: ResearchPlan) -> str:
     positioning_recommendation = _sanitize_positioning_recommendation(
         plan.positioning_recommendation, plan.rating
     )
+    positioning_recommendation = strip_constituent_trade_instructions(
+        positioning_recommendation
+    )
     detailed_positioning = _default_research_positioning_guidance(plan.rating)
     if _compact_text(positioning_recommendation) == _compact_text(
         _default_positioning_guidance(plan.rating)
@@ -1071,12 +1081,14 @@ def render_trader_proposal(plan: TraderProposal, context_text: str = "") -> str:
         strip_headings=heading_aliases,
     )
     execution_plan = _inline_contextual_market_levels(execution_plan, context_text)
+    execution_plan = strip_constituent_trade_instructions(execution_plan)
     if _missing_execution_thresholds(execution_plan) and _compact_text(default_execution_plan) not in _compact_text(execution_plan):
         execution_plan = _merge_sparse_section_with_default(
             execution_plan,
             default_execution_plan,
         )
         execution_plan = _inline_contextual_market_levels(execution_plan, context_text)
+        execution_plan = strip_constituent_trade_instructions(execution_plan)
     thesis = _sanitize_trader_thesis(
         plan.thesis,
         execution_plan,
@@ -1090,6 +1102,7 @@ def render_trader_proposal(plan: TraderProposal, context_text: str = "") -> str:
         plan.rating,
         heading_aliases,
     )
+    risk_management = strip_constituent_trade_instructions(risk_management)
     if _is_chinese_output():
         return collapse_blank_lines(
             "## ETF配置逻辑\n"
@@ -1128,6 +1141,9 @@ def render_portfolio_decision(plan: PortfolioDecision, context_text: str = "") -
     )))
     positioning_recommendation = _sanitize_positioning_recommendation(
         plan.positioning_recommendation, plan.rating
+    )
+    positioning_recommendation = strip_constituent_trade_instructions(
+        positioning_recommendation
     )
     detailed_positioning = _default_research_positioning_guidance(plan.rating, context_text)
     if _compact_text(positioning_recommendation) == _compact_text(

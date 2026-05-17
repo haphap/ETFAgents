@@ -39,6 +39,7 @@ def _portfolio_action_logic_instruction() -> str:
     if _is_chinese_output():
         return (
             "- 说明 ETF 结构、资金流、催化节奏、下行边界、仓位大小以及加仓 / 减仓 / 轮动 / 对冲触发条件如何共同导向你的决策。"
+            " 所有执行动作的对象必须是这只ETF的整体仓位或组合中的ETF目标权重；成分股、重仓股、行业权重只能作为风险归因和证据，不能写成清仓、减持、保留或调仓某只成分股。"
             " 每个触发条件必须引用上方报告中的具体数据——如价格、均线、成交量、份额变化、溢折价、持仓集中度、宏观指标等——并给出明确阈值。"
             ' 不能只写\u201c等待确认\u201d\u201c观察成交量\u201d\u201c关注资金流\u201d这类泛化表述，必须写明\u201c达到什么数值才算确认\u201d。'
             ' 不要写“市场报告中的关键位”或“前文提到的50日均线”这种回指句式，必须把具体数值直接重写在当前句子里。'
@@ -46,6 +47,7 @@ def _portfolio_action_logic_instruction() -> str:
         )
     return (
         "- Explain how ETF structure, fund flows, catalyst timing, downside boundaries, position sizing, and add / reduce / rotate / hedge triggers lead to your decision."
+        " Every execution action must target the ETF position or the ETF's portfolio weight; constituent stocks and holdings weights may be used only as attribution evidence, never as direct buy/sell/trim/retain instructions for named constituents."
         " Every trigger condition must quote specific data from the reports above — prices, moving averages, volume levels, share changes, premium-discount, holdings concentration, macro indicators — with explicit numeric thresholds."
         " Do not use vague phrases like 'wait for confirmation', 'watch volume', or 'monitor fund flows' without stating exactly what numeric level constitutes confirmation."
         " If you cannot cite concrete price levels, moving-average values, volume baselines, or ETF share / premium-discount data from the reports above, do not issue add or reduce instructions."
@@ -158,6 +160,7 @@ Use this exact output order with Markdown headings:
  - Do NOT create extra top-level headings such as `四、评级` or `五、建议`; both must stay under `持仓建议`.
  - Put the single explicit rating label only in `（一）评级`, using `研究结论: **买入/增持/持有/减持/卖出**`.
  - Put all allocation band, add / reduce / rotate / hedge conditions, maximum initial sizing, rebalance triggers, risk controls, and monitoring priorities in `（二）建议`.
+ - The execution object is the ETF only. You may cite constituent names, weights, valuations, or earnings as evidence, but do not instruct the user to clear, trim, retain, or rebalance named constituent stocks.
  - Give a clear, actionable ETF portfolio recommendation—{localize_rating_term("Buy")}, {localize_rating_term("Overweight")}, {localize_rating_term("Hold")}, {localize_rating_term("Underweight")}, or {localize_rating_term("Sell")}—grounded in the debate's strongest evidence.
  - Include concrete execution guidance: target allocation band, add / reduce / rotate conditions, maximum initial sizing, rebalance triggers, risk controls, and what to monitor next.
  - When writing in Chinese, avoid mixed English labels such as "Time Horizon", "Executive Summary", or "Investment Thesis".

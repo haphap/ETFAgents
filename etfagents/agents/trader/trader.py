@@ -26,6 +26,7 @@ def _trader_detail_instruction() -> str:
     if get_output_language().strip().lower() in {'chinese', '中文', 'zh', 'zh-cn', 'zh-hans'}:
         return (
             '对于 ETF 配置执行计划和风险控制，不能只写”等待支撑””观察成交量””关注资金流”这类泛化表述而不给解释。'
+            '所有执行动作的对象必须是ETF整体仓位或ETF目标权重；成分股和重仓股只能作为风险归因，不能写成清仓、减持、保留或调仓某只成分股。'
             '每个论据必须引用上方报告中的具体数据，不能只写泛化判断。请明确什么算关键支撑或阻力，并优先引用市场报告中的具体类型和数值'
             '（例如50日均线位于X元、布林中轨位于Y元、前低位于Z元）；'
             '不要写“市场报告中的关键位”“前文提到的50日均线”这类让读者回头查找的表述，必须把数值直接重写在当前句子里。'
@@ -38,6 +39,7 @@ def _trader_detail_instruction() -> str:
         )
     return (
         "For the ETF allocation execution plan and risk controls, do not use generic phrases such as 'wait for support', 'watch volume', or 'monitor fund flows' without explanation. "
+        "Every execution action must target the ETF position or ETF target weight; constituent stocks may be used only as risk attribution, never as direct buy/sell/trim/retain instructions for named holdings. "
         "Every argument must quote specific data from the reports above — do not rely on generic judgments. "
         "Spell out what counts as key support or resistance by referencing the market report with exact numbers (e.g., 50-day SMA at X, Bollinger mid-band at Y, prior swing low at Z), "
         "and restate those numbers inline in the same sentence instead of telling the reader to look back at the market report. "
