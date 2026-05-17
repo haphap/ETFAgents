@@ -206,6 +206,34 @@ class ToolReportUtilsTests(unittest.TestCase):
 
         self.assertEqual("一、市场结构与量价诊断\n趋势偏多。", report)
 
+    def test_long_process_only_inline_prefix_keeps_report_body(self):
+        prompt = _FakePrompt()
+        overview = "行业景气修复但利润传导仍不均衡，" * 12
+        llm = _FakeLLM(
+            [
+                _FakeResponse(
+                    content=(
+                        "现在我已获取全部所需数据，下面撰写最终交叉分析报告。"
+                        f"{overview}\n\n"
+                        "一、行业主线与分歧焦点\n盈利修复仍需验证。"
+                    )
+                )
+            ]
+        )
+
+        _, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+        )
+
+        self.assertEqual(
+            f"{overview}\n\n一、行业主线与分歧焦点\n盈利修复仍需验证。",
+            report,
+        )
+
     def test_process_only_detector_ignores_real_sectioned_reports(self):
         self.assertTrue(
             _is_process_only_report_text(

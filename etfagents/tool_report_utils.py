@@ -74,9 +74,12 @@ def _strip_process_only_report_prefix(text: str) -> str:
             lines.pop(0)
             changed = True
             continue
-        if len(first_line) > 240 or not _is_process_only_report_text(first_line):
+        if not _PROCESS_ONLY_REPORT_RE.match(first_line[:240]):
             break
-        remainder = _PROCESS_ONLY_REPORT_PREFIX_RE.sub("", first_line, count=1)
+        prefix_match = _PROCESS_ONLY_REPORT_PREFIX_RE.match(first_line)
+        if not prefix_match:
+            break
+        remainder = first_line[prefix_match.end():].strip()
         if remainder:
             lines[0] = remainder
             changed = True
