@@ -344,6 +344,12 @@ _INLINE_SPACED_SUBSECTION_PATTERN = re.compile(
 _INLINE_TOP_TO_SUBSECTION_PATTERN = re.compile(
     r"(?m)^(\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+、[^\n]*?)[\t ]+(?=（[一二三四五六七八九十\d]+）\s*\S)"
 )
+_MARKDOWN_HEADING_PATTERN = re.compile(r"^\s*(#{1,6})\s+\S")
+_EMPTY_MARKDOWN_DECORATION_LINE_PATTERN = re.compile(r"^\s*[*_]{1,4}\s*$")
+_MARKDOWN_LIST_OR_TABLE_LINE_PATTERN = re.compile(
+    r"^\s*(?:[-*+]\s+\S|\d+[.．、)]\s+\S|[|>]|```)"
+)
+_CJK_TEXT_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def _is_report_heading_line(line: str) -> bool:
@@ -423,6 +429,91 @@ def _ensure_report_heading_spacing(content: str) -> str:
     return "\n".join(spaced)
 
 
+def _strip_empty_markdown_decoration_lines(content: str) -> str:
+    lines = (content or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    return "\n".join(
+        line for line in lines if not _EMPTY_MARKDOWN_DECORATION_LINE_PATTERN.match(line)
+    )
+
+
+def _markdown_heading_level(line: str) -> int | None:
+    match = _MARKDOWN_HEADING_PATTERN.match(line or "")
+    return len(match.group(1)) if match else None
+
+
+def _is_empty_subsection_candidate(line: str) -> bool:
+    match = re.match(r"^\s*#{1,6}\s+(.+?)\s*$", line or "")
+    if not match:
+        return False
+    return bool(re.match(r"^（[一二三四五六七八九十\d]+）", match.group(1).strip()))
+
+
+def _strip_empty_report_headings(content: str) -> str:
+    lines = (content or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    if not lines:
+        return ""
+
+    remove_indices: set[int] = set()
+    for index, line in enumerate(lines):
+        level = _markdown_heading_level(line)
+        if level is None or not _is_empty_subsection_candidate(line):
+            continue
+
+        next_index = index + 1
+        while next_index < len(lines) and not lines[next_index].strip():
+            next_index += 1
+
+        next_level = (
+            _markdown_heading_level(lines[next_index])
+            if next_index < len(lines)
+            else None
+        )
+        previous_same_level = any(
+            _markdown_heading_level(previous_line) == level
+            and _is_empty_subsection_candidate(previous_line)
+            for previous_line in lines[:index]
+        )
+        if (next_level is not None and next_level <= level) or (
+            next_index >= len(lines) and previous_same_level
+        ):
+            remove_indices.add(index)
+            remove_indices.update(range(index + 1, next_index))
+
+    return "\n".join(
+        line for index, line in enumerate(lines) if index not in remove_indices
+    )
+
+
+def _is_soft_join_candidate(line: str) -> bool:
+    stripped = (line or "").strip()
+    if not stripped:
+        return False
+    if _markdown_heading_level(stripped) is not None or _is_report_heading_line(stripped):
+        return False
+    return not _MARKDOWN_LIST_OR_TABLE_LINE_PATTERN.match(stripped)
+
+
+def _join_chinese_soft_line_breaks(content: str) -> str:
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text or not _is_chinese_output():
+        return text
+
+    lines = text.split("\n")
+    joined: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if (
+            joined
+            and _is_soft_join_candidate(joined[-1])
+            and _is_soft_join_candidate(stripped)
+            and (_CJK_TEXT_RE.search(joined[-1]) or _CJK_TEXT_RE.search(stripped))
+        ):
+            joined[-1] = f"{joined[-1].rstrip()}{stripped}"
+            continue
+        joined.append(line)
+    return "\n".join(joined)
+
+
 def _convert_plain_headings_to_markdown(content: str) -> str:
     """Convert plain-text Chinese numbered headings (一、/（一）) to markdown headings."""
     text = (content or "").strip()
@@ -454,12 +545,15 @@ def _convert_plain_headings_to_markdown(content: str) -> str:
 
 def _prepare_report_markdown(content: str, target_min_level: Optional[int] = None) -> str:
     text = strip_exchange_only_pseudo_titles(content)
+    text = _strip_empty_markdown_decoration_lines(text)
     text = _normalize_loose_arabic_list_markers(text)
     text = _strip_sentence_like_section_prefixes_in_lists(text)
     text = _normalize_orphan_section_marker_lines(text)
     text = _split_inline_section_headings(text)
     text = _convert_plain_headings_to_markdown(text)
+    text = _strip_empty_report_headings(text)
     text = _normalize_report_heading_numbering(text)
+    text = _join_chinese_soft_line_breaks(text)
     text = _ensure_report_heading_spacing(text)
     if target_min_level is not None:
         text = _relevel_markdown_headings(text, target_min_level)

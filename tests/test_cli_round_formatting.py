@@ -121,6 +121,35 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertNotIn("共识与分歧 （一）", formatted)
         self.assertNotIn("机构态度 （一）", formatted)
 
+    def test_prepare_report_markdown_strips_empty_subheadings_and_markdown_noise(self):
+        formatted = _prepare_report_markdown(
+            "**  \n\n"
+            "二、交易计划\n\n"
+            "（一）价格与量能联动条件\n\n"
+            "（二）分步执行节奏\n\n"
+            "首轮减持窗口内优先压降估值极端敞口。\n\n"
+            "（三）加仓恢复条件\n"
+        )
+
+        self.assertNotIn("**", formatted)
+        self.assertIn("# 一、交易计划", formatted)
+        self.assertNotIn("价格与量能联动条件", formatted)
+        self.assertIn("## （一）分步执行节奏", formatted)
+        self.assertIn("首轮减持窗口内优先压降估值极端敞口。", formatted)
+        self.assertNotIn("加仓恢复条件", formatted)
+
+    def test_prepare_report_markdown_joins_chinese_soft_line_breaks(self):
+        formatted = _prepare_report_markdown(
+            "第一，焦煤的库存堆积是钢铁产业链内部的产能调整，而非全社会用电需求的直接反映。\n"
+            "当前电力需求的核心增长引擎早已切换至第三产业和居民端。"
+        )
+
+        self.assertIn(
+            "第一，焦煤的库存堆积是钢铁产业链内部的产能调整，而非全社会用电需求的直接反映。当前电力需求的核心增长引擎早已切换至第三产业和居民端。",
+            formatted,
+        )
+        self.assertNotIn("直接反映。\n当前电力需求", formatted)
+
     def test_prepare_report_markdown_strips_exchange_only_pseudo_title_line(self):
         formatted = _prepare_report_markdown(
             "# 舆情与事件影响分析\n\n"

@@ -2133,6 +2133,8 @@ _NUMERIC_BOLD_RE = re.compile(
     r"[\d\s.,%＋+\-—~≈≤≥<>=元美元港元点bpbps亿万千百倍x]*$",
     re.IGNORECASE,
 )
+_EMPTY_MARKDOWN_DECORATION_RE = re.compile(r"^\s*[*_]{1,4}\s*$")
+_CJK_TEXT_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def _strip_bold_if_not_numeric(match: re.Match) -> str:
@@ -2140,6 +2142,17 @@ def _strip_bold_if_not_numeric(match: re.Match) -> str:
     if _NUMERIC_BOLD_RE.match(inner.strip()):
         return match.group(0)
     return inner
+
+
+def _join_visible_debate_segment(lines: list[str]) -> str:
+    if not lines:
+        return ""
+    if len(lines) == 1 or not any(_CJK_TEXT_RE.search(line) for line in lines):
+        return "\n".join(lines)
+    joined = lines[0]
+    for line in lines[1:]:
+        joined = f"{joined.rstrip()}{line.strip()}"
+    return joined
 
 
 def normalize_visible_debate_body(text: str) -> str:
@@ -2165,7 +2178,7 @@ def normalize_visible_debate_body(text: str) -> str:
                 line = re.sub(r"(?<!_)__(.+?)__(?!_)", r"\1", line)
                 line = re.sub(r"^\s*>+\s*", "", line)
                 line = line.strip()
-                if not line:
+                if not line or _EMPTY_MARKDOWN_DECORATION_RE.match(line):
                     continue
                 lines.append(line)
                 if _VISIBLE_DEBATE_LIST_RE.match(line):
@@ -2190,13 +2203,13 @@ def normalize_visible_debate_body(text: str) -> str:
         for line in lines:
             if _VISIBLE_SECTION_HEADING_LINE_RE.match(line):
                 if segment:
-                    normalized_blocks.append("\n".join(segment))
+                    normalized_blocks.append(_join_visible_debate_segment(segment))
                     segment = []
                 normalized_blocks.append(line)
                 continue
             segment.append(line)
         if segment:
-            normalized_blocks.append("\n".join(segment))
+            normalized_blocks.append(_join_visible_debate_segment(segment))
 
     return collapse_blank_lines("\n\n".join(normalized_blocks).strip())
 
