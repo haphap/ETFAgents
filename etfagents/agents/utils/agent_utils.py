@@ -2371,13 +2371,19 @@ _CONSTITUENT_DETAIL_RE = re.compile(
     r"(?:\d+(?:\.\d+)?%|权重|PE|同比|归母|亿元)"
     r"[^）)]{0,100}[）)]"
 )
+# This exclusion assumes the common output form `成分股名称（4.17%权重）`.
+# If the captured prefix itself says ETF/配置/仓位, treat it as fund-level text.
 _ETF_LEVEL_DETAIL_NAME_RE = re.compile(
     r"(?:ETF|基金|组合|仓位|配置|敞口|目标权重|基准配置)", re.IGNORECASE
 )
+# Segment-level detector: decide whether a whole sentence fragment contains a
+# constituent trade instruction near a constituent-detail parenthetical.
 _CONSTITUENT_TRADE_ACTION_RE = re.compile(
     r"(?:应|建议|优先|直接|全部|进一步|剩余)?[^。！？!?；;]{0,40}"
     r"(?:清仓|减持|卖出|保留|持有|减至|压至|剩余权重)"
 )
+# Clause-level trimmer: remove the trailing action clause before the first
+# constituent detail while preserving ETF-level target-weight text before it.
 _CONSTITUENT_ACTION_CLAUSE_RE = re.compile(
     r"(?:优先|直接|全部|进一步|建议)?[^，,；;：:\n]{0,40}"
     r"(?:清仓|减持|卖出|保留|持有|减至|剩余权重)"
@@ -2450,10 +2456,14 @@ def _preserve_etf_allocation_prefix(segment: str) -> str:
     if not first_detail:
         return ""
     prefix = segment[: first_detail.start()]
-    clauses = re.split(r"[，,；;：:\n]+", prefix)
+    clauses = [
+        clause.strip()
+        for clause in re.split(r"[，,；;：:\n]+", prefix)
+        if clause.strip()
+    ]
     while clauses and _CONSTITUENT_ACTION_CLAUSE_RE.search(clauses[-1]):
         clauses.pop()
-    prefix = "，".join(clause.strip() for clause in clauses if clause.strip())
+    prefix = "，".join(clauses)
     prefix = prefix.rstrip("，,；;：: ")
     if not re.search(r"(?:ETF|仓位|目标权重|配置|敞口)", prefix):
         return ""

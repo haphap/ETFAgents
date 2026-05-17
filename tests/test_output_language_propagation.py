@@ -827,6 +827,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
 
         self.assertIn("目标权重约25%", rendered)
         self.assertIn("实际执行对象仍是ETF整体仓位", rendered)
+        self.assertNotIn("优先减持极端估值标的", rendered)
         self.assertNotIn("永泰能源", rendered)
         self.assertNotIn("中国核电", rendered)
         self.assertNotIn("华能国际", rendered)
