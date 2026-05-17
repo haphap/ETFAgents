@@ -145,7 +145,7 @@ class ToolReportUtilsTests(unittest.TestCase):
     def test_process_only_report_text_triggers_fallback(self):
         prompt = _FakePrompt()
         llm = _FakeLLM(
-            [_FakeResponse(content="现在我已获取全部所需数据，开始撰写综合诊断报告。")],
+            [_FakeResponse(content="所有数据已获取。现在撰写完整的诊断报告。")],
             [_FakeResponse(content="Real final report")],
         )
 
@@ -160,10 +160,66 @@ class ToolReportUtilsTests(unittest.TestCase):
         self.assertEqual("Real final report", report)
         self.assertEqual("Real final report", result.content)
 
+    def test_process_only_prefix_is_removed_from_real_report(self):
+        prompt = _FakePrompt()
+        llm = _FakeLLM(
+            [
+                _FakeResponse(
+                    content=(
+                        "所有数据已获取。现在撰写完整的诊断报告。\n\n"
+                        "一、市场结构与量价诊断\n趋势偏多。"
+                    )
+                )
+            ]
+        )
+
+        _, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+        )
+
+        self.assertEqual("一、市场结构与量价诊断\n趋势偏多。", report)
+
+    def test_process_only_inline_prefix_keeps_report_body(self):
+        prompt = _FakePrompt()
+        llm = _FakeLLM(
+            [
+                _FakeResponse(
+                    content=(
+                        "所有数据已获取。现在撰写完整的诊断报告。"
+                        "一、市场结构与量价诊断\n趋势偏多。"
+                    )
+                )
+            ]
+        )
+
+        _, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+        )
+
+        self.assertEqual("一、市场结构与量价诊断\n趋势偏多。", report)
+
     def test_process_only_detector_ignores_real_sectioned_reports(self):
         self.assertTrue(
             _is_process_only_report_text(
                 "现在我已获取全部所需数据，开始撰写综合诊断报告。"
+            )
+        )
+        self.assertTrue(
+            _is_process_only_report_text(
+                "所有数据已获取。现在撰写完整的诊断报告。"
+            )
+        )
+        self.assertTrue(
+            _is_process_only_report_text(
+                "现在我已获取全部所需数据，下面撰写最终交叉分析报告。"
             )
         )
         self.assertFalse(
