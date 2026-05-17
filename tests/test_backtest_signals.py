@@ -64,6 +64,24 @@ class BacktestSignalTests(unittest.TestCase):
         self.assertIn("先减仓", "\n".join(signal["reduce_conditions"]))
         self.assertIn("继续跟踪份额变化与资金流", "\n".join(signal["monitoring_points"]))
 
+    def test_trader_signal_extracts_numbered_chinese_sections(self):
+        rendered_text = (
+            "一、当前偏多逻辑仍需等待确认\n"
+            "正文。\n\n"
+            "二、配置执行计划\n"
+            "若价格重新站稳50日均线且成交量回到20日均量上方，再分两次加仓。\n\n"
+            "三、再平衡与风险控制\n"
+            "若跌破关键支撑并放量，则先减仓；继续跟踪份额变化与资金流。\n\n"
+            "四、执行倾向\n"
+            "执行倾向: **增持**"
+        )
+        signal = build_trader_backtest_signal("510300.SH", "2026-01-15", rendered_text)
+
+        self.assertEqual(signal["rating"], "OVERWEIGHT")
+        self.assertIn("再分两次加仓", "\n".join(signal["add_conditions"]))
+        self.assertIn("先减仓", "\n".join(signal["reduce_conditions"]))
+        self.assertIn("继续跟踪份额变化与资金流", "\n".join(signal["monitoring_points"]))
+
     def test_portfolio_signal_extracts_last_step_action_advice(self):
         signal = build_portfolio_backtest_signal(
             "516160.SH",

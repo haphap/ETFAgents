@@ -696,6 +696,70 @@ def _split_sentences(text: str) -> list[str]:
     ]
 
 
+def _has_numbered_blocks(text: str) -> bool:
+    return bool(re.search(r"(?m)^\s*(?:\d+[.．、)]|[一二三四五六七八九十]+、)\s*\S", text or ""))
+
+
+def _trader_block_key(sentence: str) -> str:
+    content = sentence or ""
+    if re.search(r"(减仓|减持|降低|退出|止损|清仓|失守|跌破|破位|转弱|回撤)", content):
+        return "reduce"
+    if re.search(r"(加仓|增配|上调|回补|提高|扩大|买入)", content):
+        return "add"
+    if re.search(r"(跟踪|监控|复核|观察|验证|再平衡|确认|关注)", content):
+        return "monitor"
+    return "initial"
+
+
+def _trader_block_label(key: str, section_kind: str) -> str:
+    if section_kind == "risk":
+        labels = {
+            "initial": "风险预算与仓位边界",
+            "add": "回补与恢复条件",
+            "reduce": "减仓触发的核心条件",
+            "monitor": "监控优先级",
+        }
+    else:
+        labels = {
+            "initial": "初始仓位与执行节奏",
+            "add": "加仓触发条件",
+            "reduce": "减仓触发的核心条件",
+            "monitor": "跟踪验证与再平衡",
+        }
+    return labels.get(key, "执行要点")
+
+
+def _format_trader_numbered_blocks(text: str, section_kind: str = "execution") -> str:
+    content = (text or "").strip()
+    if not content or not _is_chinese_output() or _has_numbered_blocks(content):
+        return content
+
+    sentences = _split_sentences(content)
+    compact = _compact_text(content)
+    if len(sentences) < 3 and len(compact) < 180:
+        return content
+
+    buckets: list[tuple[str, list[str]]] = []
+    index_by_key: dict[str, int] = {}
+    for sentence in sentences:
+        key = _trader_block_key(sentence)
+        if key not in index_by_key:
+            index_by_key[key] = len(buckets)
+            buckets.append((key, []))
+        buckets[index_by_key[key]][1].append(sentence)
+
+    if len(buckets) < 2:
+        return content
+
+    blocks = []
+    for index, (key, grouped_sentences) in enumerate(buckets, start=1):
+        blocks.append(
+            f"{index}. {_trader_block_label(key, section_kind)}\n"
+            + "".join(grouped_sentences)
+        )
+    return "\n\n".join(blocks).strip()
+
+
 def _sentence_similarity(left: str, right: str) -> float:
     left_key = _compact_text(left)
     right_key = _compact_text(right)
@@ -725,6 +789,28 @@ def _remove_overlapping_sentences(text: str, reference: str) -> str:
             continue
         kept.append(sentence)
     return "\n".join(kept).strip()
+
+
+def _strip_numbered_heading_prefix(text: str) -> str:
+    return re.sub(
+        r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+|[1-9]\d*)\s*[、.．)）:：\-]\s*",
+        "",
+        (text or "").strip(),
+    )
+
+
+def _split_trader_heading_and_body(text: str) -> tuple[str, str]:
+    content = (text or "").strip()
+    if not content:
+        return "", ""
+    if not _is_chinese_output():
+        return "", content
+    sentences = _split_sentences(content)
+    if not sentences:
+        return "", content
+    heading = _strip_numbered_heading_prefix(sentences[0]).rstrip("。！？!?；;：:")
+    body = "\n".join(sentences[1:]).strip()
+    return heading or "配置逻辑", body
 
 
 def _trader_thesis_needs_detail(text: str) -> bool:
@@ -1104,13 +1190,22 @@ def render_trader_proposal(plan: TraderProposal, context_text: str = "") -> str:
     )
     risk_management = strip_constituent_trade_instructions(risk_management)
     if _is_chinese_output():
+        thesis_heading, thesis_body = _split_trader_heading_and_body(thesis)
+        execution_plan = _format_trader_numbered_blocks(execution_plan, "execution")
+        risk_management = _format_trader_numbered_blocks(risk_management, "risk")
+        thesis_section = (
+            f"一、{thesis_heading}\n"
+            f"{thesis_body.strip()}\n\n"
+            if thesis_body.strip()
+            else f"一、{thesis_heading}\n\n"
+        )
         return collapse_blank_lines(
-            "## ETF配置逻辑\n"
-            f"{thesis}\n\n"
-            "## 配置执行计划\n"
+            f"{thesis_section}"
+            "二、配置执行计划\n"
             f"{execution_plan}\n\n"
-            "## 再平衡与风险控制\n"
+            "三、再平衡与风险控制\n"
             f"{risk_management}\n\n"
+            "四、执行倾向\n"
             f"执行倾向: **{recommendation}**"
         )
     return collapse_blank_lines(

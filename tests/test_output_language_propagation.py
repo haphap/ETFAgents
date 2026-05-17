@@ -662,13 +662,55 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(rendered.count("## ETF配置逻辑"), 1)
-        self.assertEqual(rendered.count("## 配置执行计划"), 1)
-        self.assertEqual(rendered.count("## 再平衡与风险控制"), 1)
+        self.assertNotIn("## ETF配置逻辑", rendered)
+        self.assertIn("一、当前多空因素并存", rendered)
+        self.assertEqual(rendered.count("二、配置执行计划"), 1)
+        self.assertEqual(rendered.count("三、再平衡与风险控制"), 1)
+        self.assertEqual(rendered.count("四、执行倾向"), 1)
         self.assertNotIn("一、 配置核心逻辑", rendered)
         self.assertNotIn("二、 交易执行计划", rendered)
         self.assertNotIn("三、 调仓与风控机制", rendered)
+        self.assertIn("执行倾向: **持有**", rendered)
         self.assertIn("维持当前仓位，不主动追涨或杀跌", rendered)
+
+    def test_trader_rendering_uses_substantive_thesis_heading(self):
+        rendered = render_trader_proposal(
+            TraderProposal(
+                thesis=(
+                    "一、当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整。"
+                    "资金流仍需确认，执行上不能追高。"
+                ),
+                execution_plan="先维持现仓，等待50日均线确认后再加仓。若跌破支撑则减仓。",
+                risk_management="若成交量放大跌破支撑，则降低仓位。继续跟踪份额变化。",
+                rating=PortfolioRating.OVERWEIGHT,
+            )
+        )
+
+        self.assertIn(
+            "一、当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整\n",
+            rendered,
+        )
+        self.assertIn("\n资金流仍需确认，执行上不能追高。", rendered)
+        self.assertNotIn("一、当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整。资金流", rendered)
+
+    def test_trader_rendering_splits_long_execution_paragraph_into_numbered_points(self):
+        rendered = render_trader_proposal(
+            TraderProposal(
+                thesis="当前主线仍占优，但执行必须等待确认。",
+                execution_plan=(
+                    "先维持现有底仓并把新增仓位拆成两批执行。"
+                    "若价格站稳50日均线且成交量回到20日均量上方，则加仓。"
+                    "继续跟踪ETF份额、溢折价和资金流变化。"
+                ),
+                risk_management="若价格连续两天跌破关键支撑，则降低仓位。继续监控成交量。",
+                rating=PortfolioRating.OVERWEIGHT,
+            )
+        )
+
+        self.assertIn("1. 初始仓位与执行节奏", rendered)
+        self.assertIn("2. 加仓触发条件", rendered)
+        self.assertIn("3. 跟踪验证与再平衡", rendered)
+        self.assertIn("减仓触发的核心条件", rendered)
 
     def test_trader_rendering_expands_execution_plan_missing_price_anchor(self):
         rendered = render_trader_proposal(
