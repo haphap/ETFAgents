@@ -239,7 +239,7 @@ def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
     if _MARKDOWN_H2_RE.search(report):
         issues.append("出现 markdown ## 二级标题（应使用 中文『（一）』格式）")
     if _starts_without_overview_paragraph(report):
-        issues.append("缺少开篇2-4句概述帽段，报告直接以标题、章节、列表或表格开头")
+        issues.append("缺少开篇概述帽段，报告直接以标题、章节、列表或表格开头")
 
     lowered = report.lower()
     for token in spec.required_indicator_tokens:

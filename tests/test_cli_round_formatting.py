@@ -447,6 +447,28 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertNotIn("##### 决策摘要", formatted)
         self.assertLess(formatted.index("这是正文论证。"), formatted.index("决策摘要:\n- 评级: 增持"))
 
+    def test_research_team_history_parses_noisy_structured_markers(self):
+        debate_state = {
+            "bull_history": (
+                "多头分析师: 这是正文论证。\n"
+                "；决策摘要： - 评级: 增持\n"
+                "- 置信度: 70%\n"
+                "- 时间区间: 3个月\n"
+                "反馈快照，- 当前观点: 增持\n"
+                "- 发生了什么变化: 新增催化剂。\n"
+                "- 为什么变化: 需求增强。"
+            ),
+            "bear_history": "",
+            "judge_decision": "",
+        }
+
+        formatted = format_research_team_history(debate_state)
+
+        self.assertIn("这是正文论证。", formatted)
+        self.assertIn("决策摘要:\n- 评级: 增持", formatted)
+        self.assertIn("- 时间区间: 3个月", formatted)
+        self.assertNotIn("反馈快照", formatted)
+
     def test_risk_history_strips_duplicate_role_self_introduction(self):
         risk_state = {
             "aggressive_history": "",
@@ -599,6 +621,30 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertNotIn("评级: 增持", formatted)
         self.assertIn("研究结论: **增持**", formatted)
         self.assertIn("建议针对回踩后的确认信号分批加仓", formatted)
+
+    def test_portfolio_manager_splits_inline_manager_heading_and_strips_noisy_snapshot(self):
+        risk_state = {
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": (
+                "一、辩论结论\n"
+                "综合结论：维持减持。\n\n"
+                "二、行为逻辑 先等待发电量与折价修复的双重确认，再决定是否回补仓位。\n\n"
+                "三、持仓建议 维持两成仓位，跌破清仓线则进一步减仓。\n\n"
+                "反馈快照，- 立场: 维持减持。\n"
+                "- 本轮新增与反驳: 焦煤与火电盈利链条继续承压。"
+            ),
+        }
+
+        formatted = format_risk_management_history(risk_state)
+
+        self.assertIn("#### 二、行为逻辑", formatted)
+        self.assertIn("先等待发电量与折价修复的双重确认", formatted)
+        self.assertNotIn("#### 二、行为逻辑 先等待", formatted)
+        self.assertIn("#### 三、持仓建议", formatted)
+        self.assertNotIn("#### 三、持仓建议 维持两成仓位", formatted)
+        self.assertNotIn("反馈快照", formatted)
 
     def test_message_buffer_localizes_etf_structure_section_title_in_chinese(self):
         buffer = MessageBuffer()

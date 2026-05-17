@@ -25,16 +25,48 @@ _DATA_READY_RE = (
     r"(?:(?:已|已经).{0,40}?(?:获取|收集|拿到|完成|掌握).{0,40}?(?:数据|资料|信息)"
     r"|(?:数据|资料|信息).{0,40}?(?:已|已经).{0,40}?(?:获取|收集|拿到|完成|掌握))"
 )
+_EN_DATA_READY_RE = (
+    r"(?:"
+    r"(?:all\s+)?(?:required|retrieved|necessary|needed)\s+data"
+    r"|(?:retrieved|gathered|collected|obtained)\s+(?:all\s+)?"
+    r"(?:(?:required|necessary|needed)\s+)?(?:data|information)"
+    r"|(?:all\s+)?data\s+(?:has\s+been\s+)?(?:retrieved|gathered|collected|obtained)"
+    r"|(?:data|information)\s+(?:is\s+)?(?:ready|available)"
+    r")"
+)
+_EN_REPORT_ACTION_RE = (
+    r"(?:write|draft|compile|generate|produce)"
+    r"(?:\s+the)?(?:\s+(?:full|complete|final))?"
+    r"(?:\s+cross-analysis)?(?:\s+analysis)?\s+report"
+)
 _PROCESS_ONLY_REPORT_RE = re.compile(
     r"(?:现在|好的|接下来|下一步|我|所有|数据|资料|信息|已获取|已经获取)[\s\S]{0,80}?"
     + _DATA_READY_RE
     + r"[\s\S]{0,120}?"
-    r"(?:开始|将|马上|准备|现在|下面|接下来|随后|继续|直接|正式|可以|可|能够).{0,40}?"
+    r"(?:开始|将|马上|准备|现在|下面|接下来|随后|继续|直接|正式|可以|能够).{0,40}?"
     r"(?:撰写|生成|输出|写).{0,40}?报告",
+    re.IGNORECASE,
+)
+_EN_PROCESS_ONLY_REPORT_RE = re.compile(
+    r"(?:now|okay|alright|next|let me|i(?:'ll| will)?|we(?:'ll| will)?|with all)"
+    r"[\s\S]{0,80}?"
+    r"(?:"
+    + _EN_DATA_READY_RE
+    + r"[\s\S]{0,120}?"
+    + _EN_REPORT_ACTION_RE
+    + r"|"
+    + _EN_REPORT_ACTION_RE
+    + r"[\s\S]{0,120}?(?:based on|using|from)?[\s\S]{0,40}?"
+    + _EN_DATA_READY_RE
+    + r")",
     re.IGNORECASE,
 )
 _PROCESS_ONLY_REPORT_PREFIX_RE = re.compile(
     _PROCESS_ONLY_REPORT_RE.pattern + r"[。.!！]?\s*",
+    re.IGNORECASE,
+)
+_EN_PROCESS_ONLY_REPORT_PREFIX_RE = re.compile(
+    _EN_PROCESS_ONLY_REPORT_RE.pattern + r"[。.!！]?\s*",
     re.IGNORECASE,
 )
 _UNEXECUTED_TOOL_INTENT_TEMPLATE = (
@@ -61,7 +93,11 @@ def _is_process_only_report_text(text: str) -> bool:
         return False
     if re.search(r"(?m)^\s*[一二三四五六七八九十]+、", stripped):
         return False
-    return bool(_PROCESS_ONLY_REPORT_RE.match(stripped[:240]))
+    short = stripped[:240]
+    return bool(
+        _PROCESS_ONLY_REPORT_RE.match(short)
+        or _EN_PROCESS_ONLY_REPORT_RE.match(short)
+    )
 
 
 def _strip_process_only_report_prefix(text: str) -> str:
@@ -74,9 +110,14 @@ def _strip_process_only_report_prefix(text: str) -> str:
             lines.pop(0)
             changed = True
             continue
-        if not _PROCESS_ONLY_REPORT_RE.match(first_line[:240]):
+        if not (
+            _PROCESS_ONLY_REPORT_RE.match(first_line[:240])
+            or _EN_PROCESS_ONLY_REPORT_RE.match(first_line[:240])
+        ):
             break
-        prefix_match = _PROCESS_ONLY_REPORT_PREFIX_RE.match(first_line)
+        prefix_match = _PROCESS_ONLY_REPORT_PREFIX_RE.match(
+            first_line
+        ) or _EN_PROCESS_ONLY_REPORT_PREFIX_RE.match(first_line)
         if not prefix_match:
             break
         remainder = first_line[prefix_match.end():].strip()

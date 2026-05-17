@@ -1088,6 +1088,13 @@ def get_collaboration_stop_instruction() -> str:
 SNAPSHOT_MARKERS = ("FEEDBACK SNAPSHOT:", "反馈快照:")
 SNAPSHOT_TEMPLATE = get_snapshot_template()
 DECISION_SUMMARY_MARKERS = ("DECISION SUMMARY:", "决策摘要:")
+_STRUCTURED_BLOCK_EDGE_RE = r"[ \t│|>*-]*"
+_SNAPSHOT_MARKER_VARIANT_RE = re.compile(
+    rf"(?im)(^|[\n；;]){_STRUCTURED_BLOCK_EDGE_RE}(FEEDBACK\s+SNAPSHOT|反馈快照)\s*[:：,，;；-]*"
+)
+_DECISION_SUMMARY_MARKER_VARIANT_RE = re.compile(
+    rf"(?im)(^|[\n；;]){_STRUCTURED_BLOCK_EDGE_RE}(DECISION\s+SUMMARY|决策摘要)\s*[:：,，;；-]*"
+)
 _XML_FINAL_ANSWER_RE = re.compile(
     r"```xml\s*(<final_answer>.*?</final_answer>)\s*```|(<final_answer>.*?</final_answer>)",
     re.IGNORECASE | re.DOTALL,
@@ -1162,6 +1169,40 @@ def _condense_excerpt(text: str, limit: int = 120) -> str:
     if len(compact) <= limit:
         return compact
     return compact[: limit - 3].rstrip() + "..."
+
+
+def _normalize_structured_block_markers(text: str) -> str:
+    """Canonicalize noisy marker variants like `反馈快照，` or `；决策摘要：`."""
+    if not text:
+        return ""
+
+    normalized = str(text).replace("\r\n", "\n").replace("\r", "\n")
+
+    def _replace_snapshot(match: re.Match[str]) -> str:
+        prefix = match.group(1)
+        separator = "\n" if prefix in {"；", ";"} else prefix
+        label = "FEEDBACK SNAPSHOT:" if "feedback" in match.group(2).lower() else "反馈快照:"
+        return f"{separator}{label}"
+
+    def _replace_summary(match: re.Match[str]) -> str:
+        prefix = match.group(1)
+        separator = "\n" if prefix in {"；", ";"} else prefix
+        label = "DECISION SUMMARY:" if "decision" in match.group(2).lower() else "决策摘要:"
+        return f"{separator}{label}"
+
+    normalized = _SNAPSHOT_MARKER_VARIANT_RE.sub(_replace_snapshot, normalized)
+    normalized = _DECISION_SUMMARY_MARKER_VARIANT_RE.sub(_replace_summary, normalized)
+    normalized = re.sub(
+        r"(?im)(反馈快照:|FEEDBACK SNAPSHOT:)\s*(?=-\s*\S)",
+        r"\1\n",
+        normalized,
+    )
+    normalized = re.sub(
+        r"(?im)(决策摘要:|DECISION SUMMARY:)\s*(?=-\s*\S)",
+        r"\1\n",
+        normalized,
+    )
+    return normalized
 
 
 def _get_rating_patterns() -> list[tuple[str, tuple[str, ...]]]:
@@ -1510,6 +1551,8 @@ def extract_analyst_decision_summary(text: str) -> str:
     if not text:
         return ""
 
+    text = _normalize_structured_block_markers(text)
+
     best_idx = -1
     best_marker = None
     for marker in DECISION_SUMMARY_MARKERS:
@@ -1536,6 +1579,7 @@ def extract_analyst_decision_summary(text: str) -> str:
 def _strip_reflections_section(text: str) -> str:
     if not text:
         return ""
+    text = _normalize_structured_block_markers(text)
     match = _REFLECTIONS_HEADING_RE.search(text)
     if not match:
         return text
@@ -1554,7 +1598,7 @@ def strip_analyst_decision_summary(text: str) -> str:
     if not text:
         return ""
 
-    cleaned = _strip_reflections_section(text)
+    cleaned = _strip_reflections_section(_normalize_structured_block_markers(text))
     cleaned = _XML_FINAL_ANSWER_RE.sub("", cleaned)
 
     best_idx = -1
@@ -1981,6 +2025,8 @@ def extract_feedback_snapshot(text: str) -> str:
             return "反馈快照:\n- 立场: 暂无。\n- 本轮新增与反驳: 暂无。\n- 待验证: 暂无。"
         return "FEEDBACK SNAPSHOT:\n- Stance: None yet.\n- New this round & rebuttal: None yet.\n- To verify: None yet."
 
+    text = _normalize_structured_block_markers(text)
+
     for marker in SNAPSHOT_MARKERS:
         idx = text.rfind(marker)
         if idx != -1:
@@ -2316,6 +2362,7 @@ def strip_feedback_snapshot(text: str) -> str:
     """Remove the feedback snapshot block from the visible argument body."""
     if not text:
         return ""
+    text = _normalize_structured_block_markers(text)
     best_idx = -1
     for marker in SNAPSHOT_MARKERS:
         idx = text.rfind(marker)
@@ -2962,7 +3009,9 @@ def _dedupe_and_fill_manager_sections(text: str) -> str:
 
 def normalize_chinese_manager_terms(text: str) -> str:
     """Normalize Chinese manager wording without altering snapshot semantics."""
-    normalized = normalize_chinese_role_terms(text or "")
+    normalized = _normalize_structured_block_markers(
+        normalize_chinese_role_terms(text or "")
+    )
     if not normalized or not _is_chinese_output():
         return normalized
 

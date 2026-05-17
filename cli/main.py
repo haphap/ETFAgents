@@ -345,6 +345,10 @@ _INLINE_SPACED_SUBSECTION_PATTERN = re.compile(
 _INLINE_TOP_TO_SUBSECTION_PATTERN = re.compile(
     r"(?m)^(\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+、[^\n]*?)[\t ]+(?=（[一二三四五六七八九十\d]+）\s*\S)"
 )
+_INLINE_MANAGER_SECTION_BODY_PATTERN = re.compile(
+    r"(?m)^(\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、\s*)?"
+    r"(?:辩论结论|行为逻辑|持仓建议|研究结论))\s+(?=\S)(.+)$"
+)
 _MARKDOWN_HEADING_PATTERN = re.compile(r"^\s*(#{1,6})\s+\S")
 _EMPTY_MARKDOWN_DECORATION_LINE_PATTERN = re.compile(r"^\s*[*_]{1,4}\s*$")
 _MARKDOWN_LIST_OR_TABLE_LINE_PATTERN = re.compile(
@@ -402,6 +406,7 @@ def _split_inline_section_headings(content: str) -> str:
     text = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     if not text:
         return ""
+    text = _INLINE_MANAGER_SECTION_BODY_PATTERN.sub(r"\1\n\2", text)
     text = _INLINE_MARKDOWN_VISIBLE_SECTION_PATTERN.sub("\n\n", text)
     text = _INLINE_VISIBLE_SECTION_PATTERN.sub(r"\1\n\n\2", text)
     text = _INLINE_TOP_TO_SUBSECTION_PATTERN.sub(r"\1\n\n", text)

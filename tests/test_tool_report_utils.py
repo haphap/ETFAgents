@@ -255,9 +255,24 @@ class ToolReportUtilsTests(unittest.TestCase):
                 "现在我已掌握所有必要数据，可以撰写完整的配置报告。"
             )
         )
+        self.assertTrue(
+            _is_process_only_report_text(
+                "Now let me compile the full cross-analysis report based on all retrieved data."
+            )
+        )
         self.assertFalse(
             _is_process_only_report_text(
                 "一、市场结构与量价诊断\n已获取的数据说明趋势偏强，报告正文继续展开。"
+            )
+        )
+        self.assertFalse(
+            _is_process_only_report_text(
+                "尽管该ETF的数据已掌握，但市场不可控，需要继续撰写报告来验证风险敞口。"
+            )
+        )
+        self.assertFalse(
+            _is_process_only_report_text(
+                "Now the market structure shows broad participation, and the report below details the evidence."
             )
         )
 
