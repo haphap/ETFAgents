@@ -2364,6 +2364,110 @@ _MANAGER_SCHEMA_FIELD_LINE_RE = re.compile(
     r"\b(?:target_weight_pct|target_weight_band|execution_timing|add_triggers|reduce_triggers|exit_triggers|rebalance_triggers|risk_controls)\b"
 )
 _MANAGER_SCHEMA_PUNCT_ONLY_RE = re.compile(r'^[\s\[\]\{\}",:：]+$')
+# Match a named holding followed by a parenthetical with constituent-level
+# financial data, e.g. `中国核电（7.91%权重，归母同比-34.19%）`.
+_CONSTITUENT_DETAIL_RE = re.compile(
+    r"(?P<name>[\u4e00-\u9fffA-Za-z]{2,20})[（(][^）)]{0,100}"
+    r"(?:\d+(?:\.\d+)?%|权重|PE|同比|归母|亿元)"
+    r"[^）)]{0,100}[）)]"
+)
+# This exclusion assumes the common output form `成分股名称（4.17%权重）`.
+# If the captured prefix itself says ETF/配置/仓位, treat it as fund-level text.
+_ETF_LEVEL_DETAIL_NAME_RE = re.compile(
+    r"(?:ETF|基金|组合|仓位|配置|敞口|目标权重|基准配置)", re.IGNORECASE
+)
+# Segment-level detector: decide whether a whole sentence fragment contains a
+# constituent trade instruction near a constituent-detail parenthetical.
+_CONSTITUENT_TRADE_ACTION_RE = re.compile(
+    r"(?:应|建议|优先|直接|全部|进一步|剩余)?[^。！？!?；;]{0,40}"
+    r"(?:清仓|减持|卖出|保留|持有|减至|压至|剩余权重)"
+)
+# Clause-level trimmer: remove the trailing action clause before the first
+# constituent detail while preserving ETF-level target-weight text before it.
+_CONSTITUENT_ACTION_CLAUSE_RE = re.compile(
+    r"(?:优先|直接|全部|进一步|建议)?[^，,；;：:\n]{0,40}"
+    r"(?:清仓|减持|卖出|保留|持有|减至|剩余权重)"
+)
+_ETF_ALLOCATION_SCOPE_SENTENCE = (
+    "成分股层面的估值、盈利和权重信息仅作为ETF仓位调整依据，实际执行对象仍是ETF整体仓位，不对成分股给出直接交易指令。"
+)
+
+
+def strip_constituent_trade_instructions(text: str) -> str:
+    """Remove direct constituent-stock trade instructions from ETF allocation prose."""
+    content = text or ""
+    # English prompts and schema descriptions carry the same ETF-only constraint.
+    # Keep this regex sanitizer Chinese-only to avoid brittle English name parsing.
+    if not content or not _is_chinese_output():
+        return content.strip()
+
+    parts = re.split(r"([。！？!?；;]\s*)", content)
+    if not parts:
+        return content.strip()
+
+    cleaned_parts: list[str] = []
+    inserted_scope_note = False
+    for index in range(0, len(parts), 2):
+        segment = parts[index]
+        punctuation = parts[index + 1] if index + 1 < len(parts) else ""
+        if not segment:
+            cleaned_parts.append(segment + punctuation)
+            continue
+
+        if not _has_constituent_trade_instruction(segment):
+            cleaned_parts.append(segment + punctuation)
+            continue
+
+        prefix = _preserve_etf_allocation_prefix(segment)
+        if prefix:
+            suffix = "" if prefix.endswith(("，", "、", "；", "：", ",", ";", ":")) else "，"
+            cleaned_parts.append(f"{prefix}{suffix}{_ETF_ALLOCATION_SCOPE_SENTENCE}")
+            inserted_scope_note = True
+            continue
+        if not inserted_scope_note:
+            cleaned_parts.append(_ETF_ALLOCATION_SCOPE_SENTENCE)
+            inserted_scope_note = True
+
+    cleaned = "".join(cleaned_parts)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _has_constituent_trade_instruction(segment: str) -> bool:
+    if not _CONSTITUENT_TRADE_ACTION_RE.search(segment):
+        return False
+    return any(_is_constituent_detail_match(match) for match in _CONSTITUENT_DETAIL_RE.finditer(segment))
+
+
+def _is_constituent_detail_match(match: re.Match) -> bool:
+    name = (match.group("name") or "").strip()
+    return bool(name) and not _ETF_LEVEL_DETAIL_NAME_RE.search(name)
+
+
+def _preserve_etf_allocation_prefix(segment: str) -> str:
+    first_detail = next(
+        (
+            match
+            for match in _CONSTITUENT_DETAIL_RE.finditer(segment)
+            if _is_constituent_detail_match(match)
+        ),
+        None,
+    )
+    if not first_detail:
+        return ""
+    prefix = segment[: first_detail.start()]
+    clauses = [
+        clause.strip()
+        for clause in re.split(r"[，,；;：:\n]+", prefix)
+        if clause.strip()
+    ]
+    while clauses and _CONSTITUENT_ACTION_CLAUSE_RE.search(clauses[-1]):
+        clauses.pop()
+    prefix = "，".join(clauses)
+    prefix = prefix.rstrip("，,；;：: ")
+    if not re.search(r"(?:ETF|仓位|目标权重|配置|敞口)", prefix):
+        return ""
+    return prefix
 
 
 def strip_manager_instruction_leakage(text: str) -> str:
@@ -2863,8 +2967,14 @@ def normalize_chinese_manager_terms(text: str) -> str:
         return normalized
 
     has_explicit_snapshot = any(marker in normalized for marker in SNAPSHOT_MARKERS)
-    body = strip_manager_instruction_leakage(strip_all_feedback_snapshots(normalized))
-    snapshot = extract_feedback_snapshot(normalized) if has_explicit_snapshot else ""
+    body = strip_constituent_trade_instructions(
+        strip_manager_instruction_leakage(strip_all_feedback_snapshots(normalized))
+    )
+    snapshot = (
+        strip_constituent_trade_instructions(extract_feedback_snapshot(normalized))
+        if has_explicit_snapshot
+        else ""
+    )
     replacements = (
         ("## Debate Verdict", "## 辩论结论"),
         ("## Debate Conclusion", "## 辩论结论"),

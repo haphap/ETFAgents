@@ -54,6 +54,7 @@ def _research_detail_instruction(section: str) -> str:
             return (
                 "- 这一部分必须写成详细执行段落，至少 4 句，不能只给一句“维持持有/增持”。"
                 " 必须明确写出初始仓位带、最多先建多少仓、何时加仓/减仓/轮动、什么条件触发再平衡，以及下一步重点监控哪些验证指标。"
+                " 所有执行动作只能针对ETF整体仓位或ETF目标权重；成分股和重仓股只能作为风险归因，不能写成清仓、减持、保留或调仓某只成分股。"
                 " 不要重复“行为逻辑”里的原句，而要把研究结论翻译成可执行的仓位动作。"
             )
         return (
@@ -73,6 +74,7 @@ def _research_detail_instruction(section: str) -> str:
         return (
             "- Write this section as a detailed execution paragraph with at least 4 full sentences; do not stop at a one-line 'hold/overweight' statement."
             " You must spell out the initial allocation band, maximum starter size, add / reduce / rotate conditions, rebalance triggers, and the next monitoring priorities."
+            " Every execution action must target the ETF position or ETF target weight; constituent stocks may be used only as risk attribution, never as direct buy/sell/trim/retain instructions for named holdings."
             " Do not repeat the action-logic sentences verbatim; translate the research conclusion into concrete position-management instructions."
         )
     return (
@@ -144,6 +146,7 @@ Use this exact output order with Markdown headings:
         - Do NOT create extra top-level headings such as `四、评级` or `五、建议`; both must stay under `持仓建议`.
         - Put the single explicit recommendation label only in `（一）评级`.
         - Put all execution detail, allocation band, add / reduce / rotate conditions, rebalance triggers, risk controls, and monitoring priorities in `（二）建议`.
+        - The execution object is the ETF only. You may cite constituent names, weights, valuations, or earnings as evidence, but do not instruct the user to clear, trim, retain, or rebalance named constituent stocks.
         - Give a clear, actionable ETF allocation recommendation—{localize_rating_term("Buy")}, {localize_rating_term("Overweight")}, {localize_rating_term("Hold")}, {localize_rating_term("Underweight")}, or {localize_rating_term("Sell")}—grounded in the debate's strongest arguments.
         - Include concrete execution guidance for the trader: initial allocation band, add / reduce / rotate conditions, rebalance triggers, risk controls, and what to monitor next.
         - The rating field and the positioning recommendation text must point to the same action. Do not restate a different recommendation in prose.
