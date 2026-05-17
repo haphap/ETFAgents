@@ -200,6 +200,25 @@ def validate_and_refine(
 _TOP_SECTION_RE = re.compile(r"(?m)^\s*([一二三四五六七八九十])、")
 _MARKDOWN_H2_RE = re.compile(r"(?m)^\s*##\s+\S")
 _MARKDOWN_H1_RE = re.compile(r"(?m)^\s*#\s+\S")
+_OPENING_STRUCTURE_RE = re.compile(
+    r"^\s*(?:"
+    r"#{1,6}\s+\S|"
+    r"[一二三四五六七八九十]+、|"
+    r"（[一二三四五六七八九十\d]+）|"
+    r"(?:[-*•]|\d+[.．、)])\s+\S|"
+    r"\|"
+    r")"
+)
+
+
+def _starts_without_overview_paragraph(report: str) -> bool:
+    """Detect reports that skip the required opening cap paragraph."""
+    for line in report.replace("\r\n", "\n").replace("\r", "\n").splitlines():
+        first_line = line.strip()
+        if not first_line:
+            continue
+        return bool(_OPENING_STRUCTURE_RE.match(first_line))
+    return False
 
 
 def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
@@ -219,6 +238,8 @@ def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
         issues.append("出现 markdown # H1 标题（应改为正文或中文一级编号）")
     if _MARKDOWN_H2_RE.search(report):
         issues.append("出现 markdown ## 二级标题（应使用 中文『（一）』格式）")
+    if _starts_without_overview_paragraph(report):
+        issues.append("缺少开篇2-4句概述帽段，报告直接以标题、章节、列表或表格开头")
 
     lowered = report.lower()
     for token in spec.required_indicator_tokens:

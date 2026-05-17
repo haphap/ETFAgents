@@ -41,6 +41,7 @@ _LEADING_PUNCT_RE = re.compile(r"^[。！？；，、,.!?;:]")
 def get_no_title_instruction() -> str:
     return (
         " Do NOT write a report title or H1 heading. Start directly with a 2-4 sentence overview paragraph before section one. "
+        "For Chinese reports, write that overview before the first '一、' section; never start directly with '一、', '（一）', a bullet list, or a table. "
         "Do NOT repeat the report subject as a standalone title-like line anywhere in the body, and never construct pseudo-titles from only SH / SZ / HK / BJ or similar exchange suffixes."
     )
 

@@ -108,6 +108,20 @@ class StaticValidateTests(unittest.TestCase):
         verdict = static_validate(report, _MARKET_SPEC)
         self.assertTrue(any("H1" in item for item in verdict.critical_issues))
         self.assertTrue(any("##" in item for item in verdict.critical_issues))
+        self.assertTrue(any("概述帽段" in item for item in verdict.critical_issues))
+
+    def test_starting_with_top_section_records_missing_overview_cap(self):
+        report = (
+            "一、市场结构与量价诊断\n"
+            "MACD 金叉，RSI 60。\n\n"
+            "二、交易确认与执行计划\n"
+            "正常加仓。\n\n"
+            "三、关键价位与条件情景推演\n"
+            "失守 2.05 元则下调评级。\n"
+        )
+        verdict = static_validate(report, _MARKET_SPEC)
+        self.assertTrue(any("概述帽段" in item for item in verdict.critical_issues))
+        self.assertFalse(verdict.missing_elements, msg=verdict.missing_elements)
 
     def test_required_tail_token_search_uses_window(self):
         spec = AnalystReportSpec(
@@ -213,6 +227,32 @@ class ValidationModeTests(unittest.TestCase):
         )
         self.assertEqual("重写后的清洁报告。", out)
         # Only one LLM call (refine) — static_only never invokes the judge.
+        self.assertEqual(1, llm.invoke.call_count)
+
+    def test_static_only_triggers_refine_when_opening_overview_cap_missing(self):
+        llm = MagicMock()
+
+        def _invoke(prompt, **_kwargs):
+            self.assertIn("概述帽段", prompt)
+            return AIMessage(content="整体偏多，开篇先给出结论。\n\n一、市场结构与量价诊断\nMACD 金叉，RSI 60。")
+
+        llm.invoke.side_effect = _invoke
+
+        bad_report = (
+            "一、市场结构与量价诊断\n"
+            "MACD 金叉，RSI 60。\n\n"
+            "二、交易确认与执行计划\n"
+            "正常加仓。\n\n"
+            "三、关键价位与条件情景推演\n"
+            "失守 2.05 元则下调评级。\n"
+        )
+        out = validate_and_refine(
+            bad_report,
+            llm,
+            _MARKET_SPEC,
+            validation_mode="static_only",
+        )
+        self.assertTrue(out.startswith("整体偏多"))
         self.assertEqual(1, llm.invoke.call_count)
 
     def test_static_plus_llm_uses_legacy_pass_alias(self):
