@@ -415,6 +415,27 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("共振 （一）", body)
         self.assertNotIn("##", body)
 
+    def test_visible_debate_body_promotes_inline_numbered_sentence_to_heading(self):
+        body = normalize_visible_debate_body(
+            "一、石油ETF看似拥有供给端支撑，实则正在被成本传导断裂反噬。"
+            "你重点强调原油持仓增幅116.67%，但聚乙烯仓单暴增79.93%。"
+        )
+
+        self.assertIn(
+            "一、石油ETF看似拥有供给端支撑，实则正在被成本传导断裂反噬\n\n"
+            "你重点强调原油持仓增幅116.67%",
+            body,
+        )
+
+    def test_visible_debate_body_strips_second_person_heading_prefix(self):
+        body = normalize_visible_debate_body(
+            "一、你的成本传导断裂叙事忽略了ETF独有的对冲结构。"
+            "空头分析师反复强调聚乙烯仓单暴增。"
+        )
+
+        self.assertIn("一、成本传导断裂叙事忽略了ETF独有的对冲结构", body)
+        self.assertNotIn("一、你的成本传导断裂叙事", body)
+
     def test_visible_debate_body_strips_empty_markdown_and_joins_soft_breaks(self):
         body = normalize_visible_debate_body(
             "**  \n"
@@ -945,7 +966,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
 
         self.assertIn("当前将ETF目标仓位降至25%", normalized)
-        self.assertIn("实际执行对象仍是ETF整体仓位", normalized)
+        self.assertNotIn("实际执行对象仍是ETF整体仓位", normalized)
         self.assertNotIn("永泰能源", normalized)
         self.assertNotIn("中国核电", normalized)
         self.assertNotIn("应全部清仓", normalized)

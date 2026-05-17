@@ -2171,6 +2171,12 @@ _INLINE_MARKDOWN_CHINESE_HEADING_RE = re.compile(
 _VISIBLE_SECTION_HEADING_LINE_RE = re.compile(
     r"^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*\S"
 )
+_VISIBLE_INLINE_SECTION_SENTENCE_RE = re.compile(
+    r"^((?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*)"
+    r"([^。！？!?；;\n]{6,120})"
+    r"([。！？!?])"
+    r"(\S.*)$"
+)
 
 
 _NUMERIC_BOLD_RE = re.compile(
@@ -2222,6 +2228,24 @@ def _is_visible_debate_soft_join_candidate(line: str) -> bool:
     )
 
 
+def _strip_second_person_heading_prefix(title: str) -> str:
+    stripped = (title or "").strip()
+    for prefix in ("你的", "你对", "你在", "你把", "你用", "你拿", "你说", "你"):
+        if stripped.startswith(prefix) and len(stripped) > len(prefix) + 4:
+            return stripped[len(prefix):].lstrip("，,：: ")
+    return stripped
+
+
+def _split_inline_visible_section_sentence(line: str) -> list[str]:
+    match = _VISIBLE_INLINE_SECTION_SENTENCE_RE.match((line or "").strip())
+    if not match:
+        return [line]
+
+    marker, title, punctuation, body = match.groups()
+    heading = f"{marker}{_strip_second_person_heading_prefix(title)}"
+    return [heading, f"{body.strip()}"]
+
+
 def normalize_visible_debate_body(text: str) -> str:
     """Normalize visible debate bodies for display without touching structured blocks."""
     content = (text or "").strip()
@@ -2247,9 +2271,10 @@ def normalize_visible_debate_body(text: str) -> str:
                 line = line.strip()
                 if not line or _EMPTY_MARKDOWN_DECORATION_RE.match(line):
                     continue
-                lines.append(line)
-                if _VISIBLE_DEBATE_LIST_RE.match(line):
-                    list_line_count += 1
+                for split_line in _split_inline_visible_section_sentence(line):
+                    lines.append(split_line)
+                    if _VISIBLE_DEBATE_LIST_RE.match(split_line):
+                        list_line_count += 1
 
         if not lines:
             continue
@@ -2440,7 +2465,7 @@ _ETF_ALLOCATION_SCOPE_SENTENCE = (
 )
 
 
-def strip_constituent_trade_instructions(text: str, *, insert_scope_note: bool = True) -> str:
+def strip_constituent_trade_instructions(text: str, *, insert_scope_note: bool = False) -> str:
     """Remove direct constituent-stock trade instructions from ETF allocation prose."""
     content = text or ""
     # English prompts and schema descriptions carry the same ETF-only constraint.

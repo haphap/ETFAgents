@@ -200,6 +200,8 @@ def _looks_like_plain_numbered_heading(line: str) -> bool:
     stripped = (line or "").strip()
     if not stripped:
         return False
+    if _VISIBLE_ORDINAL_CONTINUATION_PATTERN.match(stripped):
+        return False
     for pattern in (_PLAIN_TOP_LEVEL_HEADING_PATTERN, _PLAIN_SECOND_LEVEL_HEADING_PATTERN):
         match = pattern.match(stripped)
         if not match:
@@ -329,6 +331,12 @@ _REPORT_HEADING_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+\S")
 _VISIBLE_SECTION_LINE_PATTERN = re.compile(
     r"^\s*(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)\s*\S"
 )
+_VISIBLE_ORDINAL_CONTINUATION_PATTERN = re.compile(
+    r"^\s*[一二三四五六七八九十]+、[一二三四五六七八九十\d]+轮"
+)
+_WRAPPED_ORDINAL_ROUND_PHRASE_RE = re.compile(
+    r"(在第)\s*\n+\s*([一二三四五六七八九十]+、[一二三四五六七八九十\d]+轮)"
+)
 _VISIBLE_SECTION_MARKER = r"(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)"
 _ORPHAN_VISIBLE_SECTION_MARKER_LINE_PATTERN = re.compile(
     rf"^([ \t]*)({_VISIBLE_SECTION_MARKER})\s*$"
@@ -354,11 +362,23 @@ _EMPTY_MARKDOWN_DECORATION_LINE_PATTERN = re.compile(r"^\s*[*_]{1,4}\s*$")
 _MARKDOWN_LIST_OR_TABLE_LINE_PATTERN = re.compile(
     r"^\s*(?:[-*+]\s+\S|\d+[.．、)]\s+\S|[|>]|```)"
 )
+_CHINESE_ORDERED_CUE_RE = re.compile(r"(第一|第二|第三|第四|第五|首先|其次|再次|最后)[，,]")
+_CHINESE_SENTENCE_RE = re.compile(r"[^。！？!?]+[。！？!?]?")
+_ORPHAN_SNAPSHOT_ITEM_RE = re.compile(
+    r"^\s*-\s*(?:立场|本轮新增|本轮新增与反驳|待验证|Stance|New this round|To verify)\s*[:：]",
+    re.IGNORECASE,
+)
+_ETF_SCOPE_NOTE_RE = re.compile(
+    r"成分股层面的估值、盈利和权重信息仅作为ETF仓位调整依据，"
+    r"实际执行对象仍是ETF整体仓位，不对成分股给出直接交易指令。?"
+)
 
 
 def _is_report_heading_line(line: str) -> bool:
     stripped = (line or "").strip()
     if not stripped:
+        return False
+    if _VISIBLE_ORDINAL_CONTINUATION_PATTERN.match(stripped):
         return False
     return bool(
         _REPORT_HEADING_LINE_PATTERN.match(stripped)
@@ -596,6 +616,73 @@ def _join_chinese_soft_line_breaks(content: str) -> str:
             continue
         joined.append(line)
     return "\n".join(joined)
+
+
+def _format_dense_chinese_manager_paragraph(paragraph: str) -> str:
+    text = (paragraph or "").strip()
+    if not text or not contains_cjk(text):
+        return paragraph
+    if _MARKDOWN_LIST_OR_TABLE_LINE_PATTERN.match(text) or _is_report_heading_line(text):
+        return paragraph
+
+    ordered_matches = list(_CHINESE_ORDERED_CUE_RE.finditer(text))
+    if len(ordered_matches) >= 2:
+        prefix = text[: ordered_matches[0].start()].rstrip("：:；;，, ")
+        items = []
+        for index, match in enumerate(ordered_matches):
+            end = ordered_matches[index + 1].start() if index + 1 < len(ordered_matches) else len(text)
+            item = text[match.start():end].strip("；;。 ")
+            if item:
+                items.append(item)
+        if prefix and len(items) >= 2:
+            return "\n\n".join([f"{prefix}：", *[f"{idx}. {item}" for idx, item in enumerate(items, 1)]])
+
+    include_match = re.search(r"(包括|如下|具体阈值包括)[:：]", text)
+    if include_match:
+        prefix = text[: include_match.end()].strip()
+        rest = text[include_match.end():].strip()
+        chunks = [chunk.strip("；;。 ") for chunk in re.split(r"[；;]", rest) if chunk.strip("；;。 ")]
+        if len(chunks) >= 3:
+            return "\n\n".join([prefix, *[f"{idx}. {chunk}" for idx, chunk in enumerate(chunks, 1)]])
+
+    sentences = [match.group(0).strip() for match in _CHINESE_SENTENCE_RE.finditer(text) if match.group(0).strip()]
+    if len(text) >= 220 and len(sentences) >= 5:
+        grouped = ["".join(sentences[index:index + 2]) for index in range(0, len(sentences), 2)]
+        return "\n\n".join(grouped)
+    return paragraph
+
+
+def _format_research_manager_readability(content: str) -> str:
+    if not content or not _is_chinese_output():
+        return content
+
+    blocks = re.split(r"\n\s*\n", content)
+    formatted = [_format_dense_chinese_manager_paragraph(block) for block in blocks]
+    return "\n\n".join(formatted)
+
+
+def _join_wrapped_ordinal_round_phrases(content: str) -> str:
+    return _WRAPPED_ORDINAL_ROUND_PHRASE_RE.sub(r"\1\2", content or "")
+
+
+def _strip_orphan_manager_snapshot_items(content: str) -> str:
+    lines = (content or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    if not lines:
+        return ""
+
+    cut_index = len(lines)
+    for index, line in enumerate(lines):
+        if _ORPHAN_SNAPSHOT_ITEM_RE.match(line):
+            cut_index = index
+            break
+    if cut_index < len(lines) and cut_index > 0:
+        previous = lines[cut_index - 1].strip()
+        if _ETF_SCOPE_NOTE_RE.search(previous):
+            cut_index -= 1
+
+    cleaned = "\n".join(lines[:cut_index])
+    cleaned = _ETF_SCOPE_NOTE_RE.sub("", cleaned)
+    return collapse_blank_lines(cleaned)
 
 
 def _convert_plain_headings_to_markdown(content: str) -> str:
@@ -934,6 +1021,7 @@ def _format_grouped_rounds(
     manager_snapshot_path: str = "",
     manager_show_snapshot: bool = True,
     show_round_snapshots: bool = True,
+    manager_readability: bool = False,
 ) -> str:
     is_chinese = _is_chinese_output()
     turns_by_speaker = {
@@ -978,7 +1066,7 @@ def _format_grouped_rounds(
     if manager_title and manager_content and manager_content.strip():
         parts.append(
             f"### {manager_title}\n"
-            f"{_format_manager_decision(manager_content, manager_snapshot_path, show_snapshot_summary=manager_show_snapshot, nested_min_heading_level=4)}"
+            f"{_format_manager_decision(manager_content, manager_snapshot_path, show_snapshot_summary=manager_show_snapshot, nested_min_heading_level=4, improve_readability=manager_readability)}"
         )
 
     return collapse_blank_lines("\n\n".join(parts))
@@ -989,6 +1077,7 @@ def _format_manager_decision(
     snapshot_path: str = "",
     show_snapshot_summary: bool = True,
     nested_min_heading_level: Optional[int] = None,
+    improve_readability: bool = False,
 ) -> str:
     """Show the manager's conclusion first, then a short snapshot summary."""
     content = (manager_content or "").strip()
@@ -996,10 +1085,14 @@ def _format_manager_decision(
         return ""
 
     body = normalize_chinese_manager_terms(strip_all_feedback_snapshots(content))
+    body = _strip_orphan_manager_snapshot_items(body)
     if nested_min_heading_level is not None:
         body = _prepare_report_markdown(body, nested_min_heading_level)
     else:
         body = _prepare_report_markdown(body)
+    body = _join_wrapped_ordinal_round_phrases(body)
+    if improve_readability:
+        body = _format_research_manager_readability(body)
     snapshot_summary = ""
     if show_snapshot_summary:
         snapshot = normalize_chinese_role_terms(extract_feedback_snapshot(content))
@@ -1037,6 +1130,7 @@ def format_research_team_history(debate_state: dict) -> str:
         manager_snapshot_path=debate_state.get("judge_snapshot_path", ""),
         manager_show_snapshot=False,
         show_round_snapshots=False,
+        manager_readability=True,
     )
 
 
@@ -1059,6 +1153,7 @@ def format_risk_management_history(risk_state: dict, include_manager: bool = Tru
         manager_snapshot_path=risk_state.get("judge_snapshot_path", "") if include_manager else "",
         manager_show_snapshot=False,
         show_round_snapshots=False,
+        manager_readability=True,
     )
 
 
@@ -1667,6 +1762,7 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
                     debate.get("judge_snapshot_path", ""),
                     show_snapshot_summary=False,
                     nested_min_heading_level=None,
+                    improve_readability=True,
                 ),
                 encoding="utf-8",
             )
@@ -1742,13 +1838,14 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
                 risk.get("judge_snapshot_path", ""),
                 show_snapshot_summary=False,
                 nested_min_heading_level=None,
+                improve_readability=True,
             )
             (portfolio_dir / "decision.md").write_text(formatted_portfolio, encoding="utf-8")
             sections.append(
                 collapse_blank_lines(
                     f"## {_localize_cli_label('V. Portfolio Manager Decision', 'V. 投资组合经理决策')}\n"
                     f"### {_localize_cli_role_title('Portfolio Manager')}\n"
-                    f"{_format_manager_decision(risk['judge_decision'], risk.get('judge_snapshot_path', ''), show_snapshot_summary=False, nested_min_heading_level=4)}"
+                    f"{_format_manager_decision(risk['judge_decision'], risk.get('judge_snapshot_path', ''), show_snapshot_summary=False, nested_min_heading_level=4, improve_readability=True)}"
                 )
             )
 
