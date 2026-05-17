@@ -11,6 +11,7 @@ from etfagents.agents.utils.agent_utils import (
     get_output_language,
     localize_label,
     localize_rating_term,
+    strip_feedback_snapshot,
     strip_manager_instruction_leakage,
     strip_constituent_trade_instructions,
 )
@@ -327,7 +328,7 @@ def _has_conflicting_primary_action(text: str, rating: PortfolioRating) -> bool:
 
 
 def _sanitize_positioning_recommendation(text: str, rating: PortfolioRating) -> str:
-    content = strip_manager_instruction_leakage((text or "").strip())
+    content = strip_feedback_snapshot(strip_manager_instruction_leakage((text or "").strip()))
     if not content:
         return _default_positioning_guidance(rating)
     content = _normalize_portfolio_chinese_phrasing(content)
@@ -1268,7 +1269,8 @@ def render_portfolio_decision(plan: PortfolioDecision, context_text: str = "") -
         plan.positioning_recommendation, plan.rating
     )
     positioning_recommendation = strip_constituent_trade_instructions(
-        positioning_recommendation
+        positioning_recommendation,
+        insert_scope_note=False,
     )
     detailed_positioning = _default_research_positioning_guidance(plan.rating, context_text)
     if _compact_text(positioning_recommendation) == _compact_text(

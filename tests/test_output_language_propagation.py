@@ -899,7 +899,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
 
         self.assertIn("目标权重约25%", rendered)
-        self.assertIn("实际执行对象仍是ETF整体仓位", rendered)
+        self.assertNotIn("实际执行对象仍是ETF整体仓位", rendered)
         self.assertNotIn("优先减持极端估值标的", rendered)
         self.assertNotIn("永泰能源", rendered)
         self.assertNotIn("中国核电", rendered)
@@ -949,6 +949,31 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("永泰能源", normalized)
         self.assertNotIn("中国核电", normalized)
         self.assertNotIn("应全部清仓", normalized)
+
+    def test_portfolio_decision_rendering_strips_snapshot_leakage_from_positioning_recommendation(self):
+        rendered = render_portfolio_decision(
+            PortfolioDecision(
+                debate_conclusion="中性观点更稳妥，但产业修复与资金承接尚未完全失效。",
+                action_logic="维持基础仓位，同时把后续动作绑定在价格和资金流验证上。",
+                positioning_recommendation=(
+                    "目标仓位先维持在15%至20%，若净值回落至2.08元附近仍有承接，再考虑小幅回补。\n"
+                    "反馈快照:\n"
+                    "- 立场: 持有\n"
+                    "- 本轮新增与反驳: 新增了对仓位上限与回补价位的约束。\n"
+                    "- 待验证: 继续跟踪份额变化、成交量和净值承接。"
+                ),
+                rating=PortfolioRating.HOLD,
+                snapshot_stance="持有",
+                snapshot_new_and_rebuttal="新增了对仓位上限与回补价位的约束。",
+                snapshot_to_verify="继续跟踪份额变化、成交量和净值承接。",
+            )
+        )
+
+        advice_section = rendered.split("### （二）建议\n", 1)[1].split("\n\n反馈快照:", 1)[0]
+        self.assertIn("目标仓位先维持在15%至20%", advice_section)
+        self.assertNotIn("本轮新增与反驳", advice_section)
+        self.assertNotIn("待验证", advice_section)
+        self.assertEqual(rendered.count("反馈快照:"), 1)
 
     def test_portfolio_decision_rendering_strips_prompt_leakage(self):
         rendered = render_portfolio_decision(
