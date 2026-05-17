@@ -648,6 +648,7 @@ class ReportTitleNormalizationTests(unittest.TestCase):
             "以下是根据评审标准修正后的完整报告，直接陈述核心结论并补充第三部分导语，保留原有正确分析与数据。                                                               │\n"
             "│                                                                                                                                                                 │\n"
             "│  -------------------------------------------------------------------------------------------------------------------------------------------------------------\n"
+            "直接进入正文。\n"
             "# 技术面与资金流综合诊断\n\n"
             "本报告将围绕当前ETF的量价结构和资金流给出判断。\n"
             "本报告对515220.SH煤炭ETF国泰进行截至2026年4月30日的宏观与配置分析。\n"
@@ -660,6 +661,7 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         cleaned = clean_generated_report(report)
         self.assertTrue(cleaned.startswith("偏多，但短线不宜追高。"))
         self.assertNotIn("以下是根据评审标准修正后的完整报告", cleaned)
+        self.assertNotIn("直接进入正文", cleaned)
         self.assertNotIn("# 技术面与资金流综合诊断", cleaned)
         self.assertNotIn("本报告将围绕", cleaned)
         self.assertNotIn("本报告对515220.SH", cleaned)

@@ -89,11 +89,11 @@ def get_no_greeting_instruction() -> str:
     """Return a prompt instruction forbidding greeting openers."""
     if _is_chinese_output():
         return (
-            " 直接进入正文，严禁以问候语开头（如「你好，空头分析师」、「大家好」等），"
+            " 第一句话必须是你的实质论点，严禁以问候语开头（如「你好，空头分析师」、「大家好」等），"
             "也不要在正文中重复自己的角色名称。"
         )
     return (
-        " Start directly with your argument. Do not open with greetings or salutations "
+        " Make the first sentence your substantive argument. Do not open with greetings or salutations "
         "(e.g. 'Hello, Bear Analyst'). Do not repeat your own role name in the body."
     )
 

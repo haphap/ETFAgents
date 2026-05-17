@@ -103,7 +103,7 @@ def contains_markdown_table(text: str) -> bool:
 
 def get_no_title_instruction() -> str:
     return (
-        " Do NOT write a report title or H1 heading. Start directly with a 2-4 sentence overview paragraph before section one. "
+        " Do NOT write a report title or H1 heading. Begin with a 2-4 sentence overview paragraph before section one. "
         "For Chinese reports, write that overview before the first '一、' section; never start directly with '一、', '（一）', a bullet list, or a table. "
         "Do NOT repeat the report subject as a standalone title-like line anywhere in the body, and never construct pseudo-titles from only SH / SZ / HK / BJ or similar exchange suffixes."
     )
@@ -557,6 +557,10 @@ _REPORT_PROCESS_PREAMBLE_RE = re.compile(
     r"(?:数据|资料|信息).{0,12}?(?:已|已经)?(?:获取|收集|拿到|完成)[。！!；;，,]?\s*"
     r"(?:以下|下面).{0,80}?(?:撰写|生成|输出|写).{0,60}?报告[。！!；;，,]?\s*"
 )
+_PROMPT_INSTRUCTION_LEAK_RE = re.compile(
+    r"(?m)^\s*(?:直接进入正文|Start directly with (?:your )?(?:argument|body|report))"
+    r"[。.!！]?\s*$\n?"
+)
 
 _META_OPENER_RE = re.compile(
     r"(?m)^\s*"
@@ -596,6 +600,7 @@ def strip_refine_preamble(report: str) -> str:
         return ""
     cleaned = _REFINE_PREAMBLE_RE.sub("", report)
     cleaned = _REPORT_PROCESS_PREAMBLE_RE.sub("", cleaned)
+    cleaned = _PROMPT_INSTRUCTION_LEAK_RE.sub("", cleaned)
     cleaned = strip_artifact_only_lines(cleaned)
     return _strip_leading_artifact_lines(cleaned)
 
