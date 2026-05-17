@@ -31,6 +31,7 @@ from etfagents.agents.utils.agent_utils import build_report_title
 from etfagents.agents.utils.report_leads import (
     clean_generated_report,
     ensure_h1_title,
+    normalize_boxed_text_wrapping,
     post_judge_clean,
     strip_report_title,
     strip_refine_preamble,
@@ -691,6 +692,24 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         self.assertIn("价格仍站在20日均线上方。", cleaned)
         self.assertIn("趋势尚未破坏。", cleaned)
         self.assertIn("等待回踩确认后再加仓。", cleaned)
+
+    def test_clean_generated_report_removes_delivery_preamble_and_pseudo_title(self):
+        report = (
+            "数据已全部获取完毕，现在撰写完整报告。\n\n"
+            "ETF头部持仓分析报告：561360.SH 石油ETF国泰   。\n"
+            "正文第一句。"
+        )
+        cleaned = clean_generated_report(report)
+        self.assertEqual(cleaned, "正文第一句。")
+
+    def test_normalize_boxed_text_wrapping_keeps_inline_round_reference_together(self):
+        report = (
+            "此外，中性风险分析师在第\n"
+            "二、三轮中用量化证据（聚乙烯仓单持续堆积+PTA涨幅不足原油十分之一）进一步削弱了激进派关于“93%权重受益”的统计错误。"
+        )
+        cleaned = normalize_boxed_text_wrapping(report)
+        self.assertIn("在第二、三轮中用量化证据", cleaned)
+        self.assertNotIn("在第\n二、三轮", cleaned)
 
     def test_clean_generated_report_removes_markdown_heading_labels_for_all_analysts(self):
         report = (

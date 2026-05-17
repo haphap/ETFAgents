@@ -294,6 +294,8 @@ def _looks_like_structural_line(line: str) -> bool:
         return True
     if _looks_like_section_heading(stripped) or _looks_like_markdown_table_line(stripped):
         return True
+    if _PSEUDO_REPORT_TITLE_RE.match(stripped):
+        return True
     if _LEADING_LABEL_PREFIX_RE.search(stripped) or _QA_LABEL_RE.search(stripped):
         return True
     if _SELF_REFERENTIAL_META_LEAD_RE.search(stripped) or _META_OPENER_RE.search(stripped):
@@ -313,6 +315,7 @@ def normalize_boxed_text_wrapping(report: str) -> str:
     if not report:
         return ""
 
+    report = _PSEUDO_REPORT_TITLE_RE.sub("", report)
     raw_lines = report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
     lines = [_strip_box_edge_line(line) for line in raw_lines]
     merged: list[str] = []
@@ -322,17 +325,20 @@ def normalize_boxed_text_wrapping(report: str) -> str:
             continue
 
         prev = merged[-1]
+        wrapped_inline_section = bool(prev.rstrip().endswith("第") and re.match(r"^[一二三四五六七八九十]+、", line.lstrip()))
         if (
             prev
             and line
             and not _looks_like_structural_line(prev)
-            and not _looks_like_structural_line(line)
+            and (wrapped_inline_section or not _looks_like_structural_line(line))
             and _CJK_TEXT_EDGE_RE.search(prev)
             and _CJK_TEXT_START_RE.match(line)
         ):
             separator = (
                 ""
-                if _LEADING_PUNCT_RE.match(line.lstrip()) or re.search(r"[。！？；，、]$", prev.rstrip())
+                if wrapped_inline_section
+                or _LEADING_PUNCT_RE.match(line.lstrip())
+                or re.search(r"[。！？；，、]$", prev.rstrip())
                 else " "
             )
             merged[-1] = f"{prev.rstrip()}{separator}{line.lstrip()}"
@@ -441,6 +447,10 @@ _DECISION_LABEL_PREFIX_RE = re.compile(
 )
 
 _ARTIFACT_ONLY_LINE_RE = re.compile(r"^[\s│|╭╮╰╯┌┐└┘├┤┬┴┼─━—-]+$")
+_PSEUDO_REPORT_TITLE_RE = re.compile(
+    r"(?m)^\s*(?:ETF(?:头部持仓分析|持仓行业分析|头部持仓|持仓行业|配置逻辑|分析)?报告|(?:头部持仓|持仓行业|技术面与资金流|宏观框架)分析报告)"
+    r"\s*[:：][^\n]*$"
+)
 _INTERROGATIVE_CUE_RE = re.compile(
     r"(?:吗|么|呢|为何|为什么|如何|是否|是不是|能否|可否|会否|多少|几时|几月|几日|哪个|哪些|哪类|哪种|哪一|谁|什么|怎么|怎麽|咋|what|why|how|whether|when|where|which|who)",
     re.IGNORECASE,
@@ -553,9 +563,11 @@ _REFINE_PREAMBLE_RE = re.compile(
     r"[^\n]*\n?"
 )
 _REPORT_PROCESS_PREAMBLE_RE = re.compile(
-    r"(?m)^\s*"
-    r"(?:数据|资料|信息).{0,12}?(?:已|已经)?(?:获取|收集|拿到|完成)[。！!；;，,]?\s*"
-    r"(?:以下|下面).{0,80}?(?:撰写|生成|输出|写).{0,60}?报告[。！!；;，,]?\s*"
+    r"(?m)^\s*(?:"
+    r"(?:数据|资料|信息).{0,20}?(?:已|已经)?(?:全部|均已)?(?:获取|收集|拿到).{0,8}?(?:完毕|完成)?"
+    r"(?:[。！!；;，,]\s*(?:以下|下面|现在).{0,80}?(?:撰写|生成|输出|写).{0,60}?报告)?"
+    r"|(?:以下|下面|现在).{0,80}?(?:撰写|生成|输出|写).{0,60}?完整?报告"
+    r")\s*[。！!；;，,]?\s*"
 )
 _PROMPT_INSTRUCTION_LEAK_RE = re.compile(
     r"(?m)^\s*(?:直接进入正文|Start directly with (?:your )?(?:argument|body|report))"
@@ -601,6 +613,7 @@ def strip_refine_preamble(report: str) -> str:
     cleaned = _REFINE_PREAMBLE_RE.sub("", report)
     cleaned = _REPORT_PROCESS_PREAMBLE_RE.sub("", cleaned)
     cleaned = _PROMPT_INSTRUCTION_LEAK_RE.sub("", cleaned)
+    cleaned = _PSEUDO_REPORT_TITLE_RE.sub("", cleaned)
     cleaned = strip_artifact_only_lines(cleaned)
     return _strip_leading_artifact_lines(cleaned)
 
