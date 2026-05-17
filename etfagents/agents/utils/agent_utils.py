@@ -2440,7 +2440,7 @@ _ETF_ALLOCATION_SCOPE_SENTENCE = (
 )
 
 
-def strip_constituent_trade_instructions(text: str, *, insert_scope_note: bool = True) -> str:
+def strip_constituent_trade_instructions(text: str, *, insert_scope_note: bool = False) -> str:
     """Remove direct constituent-stock trade instructions from ETF allocation prose."""
     content = text or ""
     # English prompts and schema descriptions carry the same ETF-only constraint.

@@ -107,6 +107,7 @@ def create_portfolio_manager(llm, memory=None):
         neutral_snapshot_display = risk_debate_state.get("neutral_snapshot", "")
         debate_brief = risk_debate_state.get("debate_brief", "")
         memory_section = build_memory_prompt_section(state, role="portfolio_manager")
+        analysis_date = str(state.get("trade_date") or state.get("analysis_date") or "unknown")
 
         # Load full snapshots from files
         aggressive_snapshot_full = load_snapshot_file(risk_debate_state.get("aggressive_snapshot_path", "")) or aggressive_snapshot_display
@@ -137,6 +138,7 @@ Output only the finished report. Never copy, quote, or paraphrase the writing ru
 Populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values.
 For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct.
 Never expose machine-readable field names such as target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, or risk_controls in the visible prose.
+The analysis date is {analysis_date}. Treat dated macro / earnings / policy events as calendar-sensitive: cite an exact event date only when it is present in the provided evidence and still relevant as of the analysis date; otherwise describe the next verified release or observable threshold without repeating a stale calendar date.
 
 Use this exact output order with Markdown headings:
 ## {localize_label("Debate Conclusion", "辩论结论")}
