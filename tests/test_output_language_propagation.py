@@ -831,8 +831,29 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("中国核电", rendered)
         self.assertNotIn("华能国际", rendered)
         self.assertNotIn("上海电力", rendered)
+        self.assertNotIn("长江电力", rendered)
+        self.assertNotIn("国投电力", rendered)
         self.assertNotIn("应全部清仓", rendered)
         self.assertNotIn("应减持至剩余权重", rendered)
+
+    def test_portfolio_decision_keeps_legitimate_etf_parenthetical(self):
+        rendered = render_portfolio_decision(
+            PortfolioDecision(
+                debate_conclusion="多空因素均衡，当前更适合控制节奏。",
+                action_logic="当前维持ETF目标仓位，并把后续调整绑定在价格和份额验证上。",
+                positioning_recommendation=(
+                    "建议在25%-30%区间持有这只ETF（对应基准配置约5%），"
+                    "若价格重新站稳1.25元且份额连续2日净申购，再评估是否上调ETF仓位。"
+                ),
+                rating=PortfolioRating.HOLD,
+                snapshot_stance="持有",
+                snapshot_new_and_rebuttal="新增了ETF目标仓位约束。",
+                snapshot_to_verify="继续跟踪ETF价格和份额。",
+            )
+        )
+
+        self.assertIn("建议在25%-30%区间持有这只ETF（对应基准配置约5%）", rendered)
+        self.assertNotIn("实际执行对象仍是ETF整体仓位", rendered)
 
     def test_manager_normalization_removes_constituent_trade_instructions(self):
         normalized = normalize_chinese_manager_terms(

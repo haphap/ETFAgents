@@ -2364,15 +2364,23 @@ _MANAGER_SCHEMA_FIELD_LINE_RE = re.compile(
     r"\b(?:target_weight_pct|target_weight_band|execution_timing|add_triggers|reduce_triggers|exit_triggers|rebalance_triggers|risk_controls)\b"
 )
 _MANAGER_SCHEMA_PUNCT_ONLY_RE = re.compile(r'^[\s\[\]\{\}",:：]+$')
+# Match a named holding followed by a parenthetical with constituent-level
+# financial data, e.g. `中国核电（7.91%权重，归母同比-34.19%）`.
 _CONSTITUENT_DETAIL_RE = re.compile(
-    r"[\u4e00-\u9fffA-Za-z]{2,20}[（(][^）)]{0,100}"
+    r"(?P<name>[\u4e00-\u9fffA-Za-z]{2,20})[（(][^）)]{0,100}"
     r"(?:\d+(?:\.\d+)?%|权重|PE|同比|归母|亿元)"
     r"[^）)]{0,100}[）)]"
 )
+_ETF_LEVEL_DETAIL_NAME_RE = re.compile(
+    r"(?:ETF|基金|组合|仓位|配置|敞口|目标权重|基准配置)", re.IGNORECASE
+)
 _CONSTITUENT_TRADE_ACTION_RE = re.compile(
-    r"(?:应|建议|优先|直接|全部|进一步|剩余|保留|减至|降至|压至|清仓|减持|卖出|持有)"
-    r"[^。！？!?；;]{0,80}"
-    r"(?:清仓|减持|卖出|保留|持有|减至|降至|压至|剩余权重)"
+    r"(?:应|建议|优先|直接|全部|进一步|剩余)?[^。！？!?；;]{0,40}"
+    r"(?:清仓|减持|卖出|保留|持有|减至|压至|剩余权重)"
+)
+_CONSTITUENT_ACTION_CLAUSE_RE = re.compile(
+    r"(?:优先|直接|全部|进一步|建议)?[^，,；;：:\n]{0,40}"
+    r"(?:清仓|减持|卖出|保留|持有|减至|剩余权重)"
 )
 _ETF_ALLOCATION_SCOPE_SENTENCE = (
     "成分股层面的估值、盈利和权重信息仅作为ETF仓位调整依据，实际执行对象仍是ETF整体仓位，不对成分股给出直接交易指令。"
@@ -2382,6 +2390,8 @@ _ETF_ALLOCATION_SCOPE_SENTENCE = (
 def strip_constituent_trade_instructions(text: str) -> str:
     """Remove direct constituent-stock trade instructions from ETF allocation prose."""
     content = text or ""
+    # English prompts and schema descriptions carry the same ETF-only constraint.
+    # Keep this regex sanitizer Chinese-only to avoid brittle English name parsing.
     if not content or not _is_chinese_output():
         return content.strip()
 
@@ -2398,18 +2408,13 @@ def strip_constituent_trade_instructions(text: str) -> str:
             cleaned_parts.append(segment + punctuation)
             continue
 
-        if not (
-            _CONSTITUENT_DETAIL_RE.search(segment)
-            and _CONSTITUENT_TRADE_ACTION_RE.search(segment)
-        ):
+        if not _has_constituent_trade_instruction(segment):
             cleaned_parts.append(segment + punctuation)
             continue
 
         prefix = _preserve_etf_allocation_prefix(segment)
         if prefix:
-            suffix = (
-                "，" if prefix.endswith(("，", "、", "；", "：", ",", ";", ":")) else "，"
-            )
+            suffix = "" if prefix.endswith(("，", "、", "；", "：", ",", ";", ":")) else "，"
             cleaned_parts.append(f"{prefix}{suffix}{_ETF_ALLOCATION_SCOPE_SENTENCE}")
             inserted_scope_note = True
             continue
@@ -2422,17 +2427,33 @@ def strip_constituent_trade_instructions(text: str) -> str:
     return cleaned.strip()
 
 
+def _has_constituent_trade_instruction(segment: str) -> bool:
+    if not _CONSTITUENT_TRADE_ACTION_RE.search(segment):
+        return False
+    return any(_is_constituent_detail_match(match) for match in _CONSTITUENT_DETAIL_RE.finditer(segment))
+
+
+def _is_constituent_detail_match(match: re.Match) -> bool:
+    name = (match.group("name") or "").strip()
+    return bool(name) and not _ETF_LEVEL_DETAIL_NAME_RE.search(name)
+
+
 def _preserve_etf_allocation_prefix(segment: str) -> str:
-    first_detail = _CONSTITUENT_DETAIL_RE.search(segment)
+    first_detail = next(
+        (
+            match
+            for match in _CONSTITUENT_DETAIL_RE.finditer(segment)
+            if _is_constituent_detail_match(match)
+        ),
+        None,
+    )
     if not first_detail:
         return ""
     prefix = segment[: first_detail.start()]
-    cut_points = [
-        match.start()
-        for match in re.finditer(r"(?:优先|直接|全部|进一步)?(?:减持|清仓|卖出|保留|持有)", prefix)
-    ]
-    if cut_points:
-        prefix = prefix[: max(cut_points)]
+    clauses = re.split(r"[，,；;：:\n]+", prefix)
+    while clauses and _CONSTITUENT_ACTION_CLAUSE_RE.search(clauses[-1]):
+        clauses.pop()
+    prefix = "，".join(clause.strip() for clause in clauses if clause.strip())
     prefix = prefix.rstrip("，,；;：: ")
     if not re.search(r"(?:ETF|仓位|目标权重|配置|敞口)", prefix):
         return ""
