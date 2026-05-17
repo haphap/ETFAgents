@@ -132,6 +132,8 @@ class CliRoundFormattingTests(unittest.TestCase):
         )
 
         self.assertNotIn("**", formatted)
+        # Visible report headings are renumbered from the first emitted top-level
+        # section, so a lone "二、" becomes the rendered first section.
         self.assertIn("# 一、交易计划", formatted)
         self.assertNotIn("价格与量能联动条件", formatted)
         self.assertIn("## （一）分步执行节奏", formatted)

@@ -12,7 +12,7 @@ from etfagents.agents.utils.rating import (
     detect_english_rating as _shared_detect_english_rating,
     parse_rating,
 )
-from etfagents.content_utils import extract_text_content
+from etfagents.content_utils import contains_cjk, extract_text_content
 
 # Re-export data tools for backward compatibility (analysts import them from here)
 from etfagents.agents.utils.core_stock_tools import get_stock_data
@@ -2134,7 +2134,9 @@ _NUMERIC_BOLD_RE = re.compile(
     re.IGNORECASE,
 )
 _EMPTY_MARKDOWN_DECORATION_RE = re.compile(r"^\s*[*_]{1,4}\s*$")
-_CJK_TEXT_RE = re.compile(r"[\u4e00-\u9fff]")
+_VISIBLE_DEBATE_SOFT_JOIN_BLOCKER_RE = re.compile(
+    r"^\s*(?:[-*+]\s+\S|\d+[.．、)]\s+\S|[|>]|```)"
+)
 
 
 def _strip_bold_if_not_numeric(match: re.Match) -> str:
@@ -2147,12 +2149,31 @@ def _strip_bold_if_not_numeric(match: re.Match) -> str:
 def _join_visible_debate_segment(lines: list[str]) -> str:
     if not lines:
         return ""
-    if len(lines) == 1 or not any(_CJK_TEXT_RE.search(line) for line in lines):
+    if len(lines) == 1 or not any(contains_cjk(line) for line in lines):
         return "\n".join(lines)
     joined = lines[0]
     for line in lines[1:]:
+        if not (
+            _is_visible_debate_soft_join_candidate(joined)
+            and _is_visible_debate_soft_join_candidate(line)
+            and (contains_cjk(joined) or contains_cjk(line))
+        ):
+            joined = f"{joined}\n{line}"
+            continue
         joined = f"{joined.rstrip()}{line.strip()}"
     return joined
+
+
+def _is_visible_debate_soft_join_candidate(line: str) -> bool:
+    stripped = (line or "").strip()
+    if not stripped:
+        return False
+    if _VISIBLE_SECTION_HEADING_LINE_RE.match(stripped):
+        return False
+    return not (
+        _VISIBLE_DEBATE_LIST_RE.match(stripped)
+        or _VISIBLE_DEBATE_SOFT_JOIN_BLOCKER_RE.match(stripped)
+    )
 
 
 def normalize_visible_debate_body(text: str) -> str:

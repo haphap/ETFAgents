@@ -1,7 +1,14 @@
+import re
 from typing import Any
 
 
 _TEXT_BLOCK_TYPES = {"text", "output_text"}
+_CJK_TEXT_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def contains_cjk(text: str) -> bool:
+    """Return True when text contains Chinese/Japanese/Korean ideographs."""
+    return bool(_CJK_TEXT_RE.search(text or ""))
 
 
 def _clean_text(value: Any) -> str:

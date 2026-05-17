@@ -35,6 +35,7 @@ from cli.models import AnalystType
 from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
+from etfagents.content_utils import contains_cjk
 from etfagents.agents.utils.agent_utils import (
     collapse_blank_lines,
     extract_analyst_decision_summary,
@@ -349,7 +350,6 @@ _EMPTY_MARKDOWN_DECORATION_LINE_PATTERN = re.compile(r"^\s*[*_]{1,4}\s*$")
 _MARKDOWN_LIST_OR_TABLE_LINE_PATTERN = re.compile(
     r"^\s*(?:[-*+]\s+\S|\d+[.．、)]\s+\S|[|>]|```)"
 )
-_CJK_TEXT_RE = re.compile(r"[\u4e00-\u9fff]")
 
 
 def _is_report_heading_line(line: str) -> bool:
@@ -445,6 +445,8 @@ def _is_empty_subsection_candidate(line: str) -> bool:
     match = re.match(r"^\s*#{1,6}\s+(.+?)\s*$", line or "")
     if not match:
         return False
+    # Only drop empty subsection shells. Top-level headings are structural anchors
+    # and should remain even when their first child subsection carries the body.
     return bool(re.match(r"^（[一二三四五六七八九十\d]+）", match.group(1).strip()))
 
 
@@ -473,6 +475,8 @@ def _strip_empty_report_headings(content: str) -> str:
             and _is_empty_subsection_candidate(previous_line)
             for previous_line in lines[:index]
         )
+        # Remove empty sibling subsection headings created by the model, while
+        # keeping a lone trailing subsection as a visible structural cue.
         if (next_level is not None and next_level <= level) or (
             next_index >= len(lines) and previous_same_level
         ):
@@ -506,7 +510,7 @@ def _join_chinese_soft_line_breaks(content: str) -> str:
             joined
             and _is_soft_join_candidate(joined[-1])
             and _is_soft_join_candidate(stripped)
-            and (_CJK_TEXT_RE.search(joined[-1]) or _CJK_TEXT_RE.search(stripped))
+            and (contains_cjk(joined[-1]) or contains_cjk(stripped))
         ):
             joined[-1] = f"{joined[-1].rstrip()}{stripped}"
             continue

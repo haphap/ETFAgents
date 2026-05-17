@@ -425,6 +425,15 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
         self.assertNotIn("直接反映。\n当前电力需求", body)
 
+    def test_visible_debate_body_keeps_list_like_lines_after_soft_join(self):
+        body = normalize_visible_debate_body(
+            "当前电力需求仍在改善。\n"
+            "- 但火电利润仍受煤价压制。"
+        )
+
+        self.assertIn("当前电力需求仍在改善。\n- 但火电利润仍受煤价压制。", body)
+        self.assertNotIn("当前电力需求仍在改善。- 但火电利润", body)
+
     def test_portfolio_manager_prompt_respects_output_language(self):
         llm = _CapturingLLM()
         node = create_portfolio_manager(llm, _EmptyMemory())
