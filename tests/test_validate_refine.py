@@ -356,6 +356,18 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertNotIn("以下基于2026年5月15日", cleaned)
         self.assertTrue(cleaned.startswith("一、核心矛盾与主线判断"))
 
+    def test_pre_judge_clean_strips_data_complete_now_write_report_preamble(self):
+        raw = (
+            "数据已全部获取完毕，现在撰写完整报告。\n\n"
+            "一、核心持仓共识与分歧\n"
+            "上游油气现金流仍是头部持仓的主要支撑。"
+        )
+
+        cleaned = pre_judge_clean(raw)
+
+        self.assertNotIn("数据已全部获取完毕", cleaned)
+        self.assertTrue(cleaned.startswith("一、核心持仓共识与分歧"))
+
     def test_artifact_only_separator_lines_are_removed_anywhere(self):
         raw = (
             "宏观结论偏中性。\n"

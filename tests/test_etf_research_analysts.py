@@ -300,6 +300,11 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
                 + valid_report
             )
         )
+        self.assertFalse(
+            _looks_like_complete_top_holdings_report(
+                "数据已全部获取完毕，现在撰写完整报告。\n\n" + valid_report
+            )
+        )
 
     def test_recovers_when_model_describes_top_holdings_tool_call_without_executing_it(self):
         llm = _IntentThenFinalLLM(
@@ -632,6 +637,21 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         cleaned = strip_report_title(report)
         self.assertNotIn("# 舆情与事件影响分析", cleaned)
         self.assertTrue(cleaned.startswith("导语内容。"))
+
+    def test_top_holdings_cleaning_removes_delivery_preamble_and_bold_title(self):
+        report = (
+            "数据已全部获取完毕，现在撰写完整报告。\n\n"
+            "**ETF头部持仓分析报告：561360.SH 石油ETF国泰**\n\n"
+            "券商个股研究显示上游现金流与炼化亏损形成分歧。\n\n"
+            "一、核心持仓共识与分歧\n"
+            "正文内容。"
+        )
+
+        cleaned = clean_generated_report(report)
+
+        self.assertNotIn("数据已全部获取完毕", cleaned)
+        self.assertNotIn("ETF头部持仓分析报告", cleaned)
+        self.assertTrue(cleaned.startswith("券商个股研究显示"))
 
     def test_strip_refine_preamble_removes_prompt_echo_and_box_lines(self):
         report = (

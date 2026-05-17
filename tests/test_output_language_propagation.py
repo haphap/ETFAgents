@@ -463,6 +463,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("## 持仓建议", prompt)
         self.assertIn("关键约束", prompt)
         self.assertIn("所有执行动作的对象必须是这只ETF的整体仓位", prompt)
+        self.assertIn("The analysis date is 2026-04-28", prompt)
+        self.assertIn("Treat dated macro / earnings / policy events as calendar-sensitive", prompt)
         self.assertNotIn("Lessons from past decisions", prompt)
         self.assertIn("催化节奏", prompt)
         self.assertNotIn("catalyst timing", prompt)
@@ -945,7 +947,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
 
         self.assertIn("当前将ETF目标仓位降至25%", normalized)
-        self.assertIn("实际执行对象仍是ETF整体仓位", normalized)
+        self.assertNotIn("实际执行对象仍是ETF整体仓位", normalized)
         self.assertNotIn("永泰能源", normalized)
         self.assertNotIn("中国核电", normalized)
         self.assertNotIn("应全部清仓", normalized)
