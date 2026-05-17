@@ -250,6 +250,11 @@ class ToolReportUtilsTests(unittest.TestCase):
                 "现在我已获取全部所需数据，下面撰写最终交叉分析报告。"
             )
         )
+        self.assertTrue(
+            _is_process_only_report_text(
+                "现在我已掌握所有必要数据，可以撰写完整的配置报告。"
+            )
+        )
         self.assertFalse(
             _is_process_only_report_text(
                 "一、市场结构与量价诊断\n已获取的数据说明趋势偏强，报告正文继续展开。"
