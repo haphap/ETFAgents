@@ -411,6 +411,29 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("共振 （一）", body)
         self.assertNotIn("##", body)
 
+    def test_visible_debate_body_strips_empty_markdown_and_joins_soft_breaks(self):
+        body = normalize_visible_debate_body(
+            "**  \n"
+            "第一，焦煤的库存堆积是钢铁产业链内部的产能调整，而非全社会用电需求的直接反映。\n"
+            "当前电力需求的核心增长引擎早已切换至第三产业和居民端。"
+        )
+
+        self.assertNotIn("**", body)
+        self.assertIn(
+            "第一，焦煤的库存堆积是钢铁产业链内部的产能调整，而非全社会用电需求的直接反映。当前电力需求的核心增长引擎早已切换至第三产业和居民端。",
+            body,
+        )
+        self.assertNotIn("直接反映。\n当前电力需求", body)
+
+    def test_visible_debate_body_keeps_list_like_lines_after_soft_join(self):
+        body = normalize_visible_debate_body(
+            "当前电力需求仍在改善。\n"
+            "- 但火电利润仍受煤价压制。"
+        )
+
+        self.assertIn("当前电力需求仍在改善。\n- 但火电利润仍受煤价压制。", body)
+        self.assertNotIn("当前电力需求仍在改善。- 但火电利润", body)
+
     def test_portfolio_manager_prompt_respects_output_language(self):
         llm = _CapturingLLM()
         node = create_portfolio_manager(llm, _EmptyMemory())

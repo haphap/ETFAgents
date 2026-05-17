@@ -12,7 +12,7 @@ from etfagents.agents.utils.rating import (
     detect_english_rating as _shared_detect_english_rating,
     parse_rating,
 )
-from etfagents.content_utils import extract_text_content
+from etfagents.content_utils import contains_cjk, extract_text_content
 
 # Re-export data tools for backward compatibility (analysts import them from here)
 from etfagents.agents.utils.core_stock_tools import get_stock_data
@@ -2133,6 +2133,10 @@ _NUMERIC_BOLD_RE = re.compile(
     r"[\d\s.,%＋+\-—~≈≤≥<>=元美元港元点bpbps亿万千百倍x]*$",
     re.IGNORECASE,
 )
+_EMPTY_MARKDOWN_DECORATION_RE = re.compile(r"^\s*[*_]{1,4}\s*$")
+_VISIBLE_DEBATE_SOFT_JOIN_BLOCKER_RE = re.compile(
+    r"^\s*(?:[-*+]\s+\S|\d+[.．、)]\s+\S|[|>]|```)"
+)
 
 
 def _strip_bold_if_not_numeric(match: re.Match) -> str:
@@ -2140,6 +2144,36 @@ def _strip_bold_if_not_numeric(match: re.Match) -> str:
     if _NUMERIC_BOLD_RE.match(inner.strip()):
         return match.group(0)
     return inner
+
+
+def _join_visible_debate_segment(lines: list[str]) -> str:
+    if not lines:
+        return ""
+    if len(lines) == 1 or not any(contains_cjk(line) for line in lines):
+        return "\n".join(lines)
+    joined = lines[0]
+    for line in lines[1:]:
+        if not (
+            _is_visible_debate_soft_join_candidate(joined)
+            and _is_visible_debate_soft_join_candidate(line)
+            and (contains_cjk(joined) or contains_cjk(line))
+        ):
+            joined = f"{joined}\n{line}"
+            continue
+        joined = f"{joined.rstrip()}{line.strip()}"
+    return joined
+
+
+def _is_visible_debate_soft_join_candidate(line: str) -> bool:
+    stripped = (line or "").strip()
+    if not stripped:
+        return False
+    if _VISIBLE_SECTION_HEADING_LINE_RE.match(stripped):
+        return False
+    return not (
+        _VISIBLE_DEBATE_LIST_RE.match(stripped)
+        or _VISIBLE_DEBATE_SOFT_JOIN_BLOCKER_RE.match(stripped)
+    )
 
 
 def normalize_visible_debate_body(text: str) -> str:
@@ -2165,7 +2199,7 @@ def normalize_visible_debate_body(text: str) -> str:
                 line = re.sub(r"(?<!_)__(.+?)__(?!_)", r"\1", line)
                 line = re.sub(r"^\s*>+\s*", "", line)
                 line = line.strip()
-                if not line:
+                if not line or _EMPTY_MARKDOWN_DECORATION_RE.match(line):
                     continue
                 lines.append(line)
                 if _VISIBLE_DEBATE_LIST_RE.match(line):
@@ -2190,13 +2224,13 @@ def normalize_visible_debate_body(text: str) -> str:
         for line in lines:
             if _VISIBLE_SECTION_HEADING_LINE_RE.match(line):
                 if segment:
-                    normalized_blocks.append("\n".join(segment))
+                    normalized_blocks.append(_join_visible_debate_segment(segment))
                     segment = []
                 normalized_blocks.append(line)
                 continue
             segment.append(line)
         if segment:
-            normalized_blocks.append("\n".join(segment))
+            normalized_blocks.append(_join_visible_debate_segment(segment))
 
     return collapse_blank_lines("\n\n".join(normalized_blocks).strip())
 
