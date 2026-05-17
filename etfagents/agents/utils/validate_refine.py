@@ -28,9 +28,11 @@ from pydantic import BaseModel, Field
 from etfagents.content_utils import extract_text_content
 from etfagents.tool_report_utils import TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX
 from etfagents.agents.utils.report_leads import (
+    collect_top_section_marks,
     contains_meta_openers,
     contains_qa_label_artifacts,
     contains_self_referential_meta_leads,
+    starts_without_overview_paragraph,
 )
 from etfagents.agents.utils.structured import (
     bind_structured,
@@ -197,28 +199,8 @@ def validate_and_refine(
 # ---------------------------------------------------------------------------
 
 
-_TOP_SECTION_RE = re.compile(r"(?m)^\s*([一二三四五六七八九十])、")
 _MARKDOWN_H2_RE = re.compile(r"(?m)^\s*##\s+\S")
 _MARKDOWN_H1_RE = re.compile(r"(?m)^\s*#\s+\S")
-_OPENING_STRUCTURE_RE = re.compile(
-    r"^\s*(?:"
-    r"#{1,6}\s+\S|"
-    r"[一二三四五六七八九十]+、|"
-    r"（[一二三四五六七八九十\d]+）|"
-    r"(?:[-*•]|\d+[.．、)])\s+\S|"
-    r"\|"
-    r")"
-)
-
-
-def _starts_without_overview_paragraph(report: str) -> bool:
-    """Detect reports that skip the required opening cap paragraph."""
-    for line in report.replace("\r\n", "\n").replace("\r", "\n").splitlines():
-        first_line = line.strip()
-        if not first_line:
-            continue
-        return bool(_OPENING_STRUCTURE_RE.match(first_line))
-    return False
 
 
 def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
@@ -229,7 +211,7 @@ def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
     issues: list[str] = []
     missing: list[str] = []
 
-    section_marks = set(_TOP_SECTION_RE.findall(report))
+    section_marks = collect_top_section_marks(report)
     for need in spec.required_top_sections:
         if need not in section_marks:
             missing.append(f"缺少一级章节『{need}、…』")
@@ -238,7 +220,7 @@ def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
         issues.append("出现 markdown # H1 标题（应改为正文或中文一级编号）")
     if _MARKDOWN_H2_RE.search(report):
         issues.append("出现 markdown ## 二级标题（应使用 中文『（一）』格式）")
-    if _starts_without_overview_paragraph(report):
+    if starts_without_overview_paragraph(report):
         issues.append("缺少开篇概述帽段，报告直接以标题、章节、列表或表格开头")
 
     lowered = report.lower()

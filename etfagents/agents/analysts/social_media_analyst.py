@@ -16,9 +16,12 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_role_terms,
 )
 from etfagents.agents.utils.report_leads import (
+    collect_top_section_marks,
+    contains_markdown_table,
     get_concise_heading_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
+    has_invalid_opening_cap,
     post_judge_clean,
     pre_judge_clean,
 )
@@ -45,6 +48,25 @@ _REPORT_SPEC = AnalystReportSpec(
 )
 
 _HOLDING_NAME_COLUMNS = ("name", "stk_name", "sec_name")
+_CATALYST_SENTIMENT_REQUIRED_TOP_SECTIONS = {"一", "二", "三", "四"}
+# Anchors must match the section names emitted by the prompt template below.
+_CATALYST_SENTIMENT_REQUIRED_MARKERS = ("真实支撑", "跟踪表")
+
+
+def _looks_like_complete_catalyst_sentiment_report(report: str) -> bool:
+    """Positive contract for accepting catalyst-sentiment output into graph state."""
+    content = report or ""
+    if not content.strip() or has_invalid_opening_cap(content):
+        return False
+
+    section_marks = collect_top_section_marks(content)
+    if not _CATALYST_SENTIMENT_REQUIRED_TOP_SECTIONS.issubset(section_marks):
+        return False
+
+    return (
+        all(marker in content for marker in _CATALYST_SENTIMENT_REQUIRED_MARKERS)
+        and contains_markdown_table(content)
+    )
 
 
 def _extract_holding_names(holdings_csv: str, max_names: int = 3) -> list[str]:
@@ -208,6 +230,11 @@ def create_social_media_analyst(llm):
         # Phase 6: Post-process
         report = normalize_chinese_role_terms(result.content) if result.content else ""
         report = pre_judge_clean(report) if report else report
+        report = (
+            report
+            if report and _looks_like_complete_catalyst_sentiment_report(report)
+            else ""
+        )
         report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
         report = post_judge_clean(report) if report else report
         if report:

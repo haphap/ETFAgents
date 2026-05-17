@@ -156,13 +156,21 @@ def _strip_process_only_report_prefix(text: str) -> str:
     return "\n".join(lines).strip() if changed else (text or "").strip()
 
 
-def _extract_report_text(result) -> str:
+def _extract_report_text(result, report_acceptance_check=None) -> str:
     report = _strip_process_only_report_prefix(
         extract_text_content(getattr(result, "content", None))
     )
     if not report or _is_tool_call_text(report) or _is_process_only_report_text(report):
         return ""
+    if report_acceptance_check is not None and not report_acceptance_check(report):
+        return ""
     return report
+
+
+def _report_is_accepted(report: str, report_acceptance_check=None) -> bool:
+    if not report:
+        return False
+    return report_acceptance_check is None or report_acceptance_check(report)
 
 
 def _looks_like_unexecuted_tool_intent(text: str, tool_name: str) -> bool:
@@ -214,6 +222,7 @@ def _recover_unexecuted_tool_intent(
     prompt_kwargs: dict,
     recovery_config: dict | None,
     report: str,
+    report_acceptance_check=None,
 ):
     if not recovery_config:
         return None, ""
@@ -271,7 +280,7 @@ def _recover_unexecuted_tool_intent(
             HumanMessage(content=recovery_context),
         ]
     )
-    recovered_report = _extract_report_text(result)
+    recovered_report = _extract_report_text(result, report_acceptance_check)
     return result, recovered_report
 
 
@@ -282,9 +291,14 @@ def run_tool_report_chain(
     messages,
     *,
     unexecuted_tool_recovery: dict | None = None,
+    report_acceptance_check=None,
     **prompt_kwargs,
 ):
-    """Run a tool-enabled analyst chain and recover from empty final responses."""
+    """Run a tool-enabled analyst chain and recover from empty final responses.
+
+    If every non-tool attempt fails the optional acceptance check, returns the
+    first result and an empty report so callers do not persist rejected content.
+    """
     base_prompt = prompt_template.partial(**prompt_kwargs)
     result = (base_prompt | llm.bind_tools(tools)).invoke(messages)
 
@@ -300,10 +314,12 @@ def run_tool_report_chain(
             prompt_kwargs=prompt_kwargs,
             recovery_config=unexecuted_tool_recovery,
             report=report,
+            report_acceptance_check=report_acceptance_check,
         )
         if recovered_report:
             return recovered_result or result, recovered_report
-        return result, report
+        if _report_is_accepted(report, report_acceptance_check):
+            return result, report
 
     fallback_kwargs = dict(prompt_kwargs)
     system_message = prompt_kwargs.get("system_message", "")
@@ -312,7 +328,7 @@ def run_tool_report_chain(
     )
     fallback_prompt = prompt_template.partial(**fallback_kwargs)
     fallback_result = (fallback_prompt | llm).invoke(messages)
-    fallback_report = _extract_report_text(fallback_result)
+    fallback_report = _extract_report_text(fallback_result, report_acceptance_check)
 
     if fallback_report:
         return fallback_result, fallback_report
@@ -323,7 +339,10 @@ def run_tool_report_chain(
             HumanMessage(content=_build_final_report_user_nudge(system_message)),
         ]
     )
-    second_fallback_report = _extract_report_text(second_fallback_result)
+    second_fallback_report = _extract_report_text(
+        second_fallback_result,
+        report_acceptance_check,
+    )
 
     if second_fallback_report:
         return second_fallback_result, second_fallback_report
