@@ -21,11 +21,20 @@ TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX = "[tool-recovery:data-unavailable]"
 _XML_TOOL_CALL_RE = re.compile(
     r"<tool_call>|<function[=\s]|</?function_call>", re.IGNORECASE
 )
+_DATA_READY_RE = (
+    r"(?:(?:已|已经).{0,40}?(?:获取|收集|拿到|完成).{0,40}?(?:数据|资料|信息)"
+    r"|(?:数据|资料|信息).{0,40}?(?:已|已经).{0,40}?(?:获取|收集|拿到|完成))"
+)
 _PROCESS_ONLY_REPORT_RE = re.compile(
-    r"(?:现在|好的|接下来|下一步|我|数据|资料|信息|已获取|已经获取)[\s\S]{0,80}?"
-    r"(?:已|已经).{0,40}?(?:获取|收集|拿到|完成).{0,40}?(?:数据|资料|信息)"
-    r"[\s\S]{0,120}?"
-    r"(?:开始|将|马上|准备).{0,40}?(?:撰写|生成|输出|写).{0,40}?报告",
+    r"(?:现在|好的|接下来|下一步|我|所有|数据|资料|信息|已获取|已经获取)[\s\S]{0,80}?"
+    + _DATA_READY_RE
+    + r"[\s\S]{0,120}?"
+    r"(?:开始|将|马上|准备|现在|下面|接下来|随后|继续|直接|正式).{0,40}?"
+    r"(?:撰写|生成|输出|写).{0,40}?报告",
+    re.IGNORECASE,
+)
+_PROCESS_ONLY_REPORT_PREFIX_RE = re.compile(
+    _PROCESS_ONLY_REPORT_RE.pattern + r"[。.!！]?\s*",
     re.IGNORECASE,
 )
 _UNEXECUTED_TOOL_INTENT_TEMPLATE = (
@@ -55,8 +64,35 @@ def _is_process_only_report_text(text: str) -> bool:
     return bool(_PROCESS_ONLY_REPORT_RE.match(stripped[:240]))
 
 
+def _strip_process_only_report_prefix(text: str) -> str:
+    """Remove leading process-only status lines from otherwise valid reports."""
+    lines = (text or "").strip().splitlines()
+    changed = False
+    while lines:
+        first_line = lines[0].strip()
+        if not first_line:
+            lines.pop(0)
+            changed = True
+            continue
+        if not _PROCESS_ONLY_REPORT_RE.match(first_line[:240]):
+            break
+        prefix_match = _PROCESS_ONLY_REPORT_PREFIX_RE.match(first_line)
+        if not prefix_match:
+            break
+        remainder = first_line[prefix_match.end():].strip()
+        if remainder:
+            lines[0] = remainder
+            changed = True
+            break
+        lines.pop(0)
+        changed = True
+    return "\n".join(lines).strip() if changed else (text or "").strip()
+
+
 def _extract_report_text(result) -> str:
-    report = extract_text_content(getattr(result, "content", None))
+    report = _strip_process_only_report_prefix(
+        extract_text_content(getattr(result, "content", None))
+    )
     if not report or _is_tool_call_text(report) or _is_process_only_report_text(report):
         return ""
     return report
