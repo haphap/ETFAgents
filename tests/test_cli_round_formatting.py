@@ -136,7 +136,8 @@ class CliRoundFormattingTests(unittest.TestCase):
         # section, so a lone "二、" becomes the rendered first section.
         self.assertIn("# 一、交易计划", formatted)
         self.assertNotIn("价格与量能联动条件", formatted)
-        self.assertIn("## （一）分步执行节奏", formatted)
+        self.assertIn("## 分步执行节奏", formatted)
+        self.assertNotIn("## （一）分步执行节奏", formatted)
         self.assertIn("首轮减持窗口内优先压降估值极端敞口。", formatted)
         self.assertNotIn("加仓恢复条件", formatted)
 

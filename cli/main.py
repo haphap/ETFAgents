@@ -450,10 +450,15 @@ def _is_empty_subsection_candidate(line: str) -> bool:
     return bool(re.match(r"^（[一二三四五六七八九十\d]+）", match.group(1).strip()))
 
 
-def _strip_empty_report_headings(content: str) -> str:
+def _extract_markdown_heading_title(line: str) -> str:
+    match = re.match(r"^\s*#{1,6}\s+(.+?)\s*$", line or "")
+    return match.group(1).strip() if match else ""
+
+
+def _strip_empty_report_headings(content: str) -> tuple[str, set[tuple[int, str]]]:
     lines = (content or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
     if not lines:
-        return ""
+        return "", set()
 
     remove_indices: set[int] = set()
     for index, line in enumerate(lines):
@@ -483,9 +488,79 @@ def _strip_empty_report_headings(content: str) -> str:
             remove_indices.add(index)
             remove_indices.update(range(index + 1, next_index))
 
+    unnumber_singletons: set[tuple[int, str]] = set()
+    for index, line in enumerate(lines):
+        level = _markdown_heading_level(line)
+        if (
+            index in remove_indices
+            or level is None
+            or not _is_empty_subsection_candidate(line)
+        ):
+            continue
+
+        parent_start = -1
+        parent_level = 0
+        for previous_index in range(index - 1, -1, -1):
+            previous_level = _markdown_heading_level(lines[previous_index])
+            if previous_level is not None and previous_level < level:
+                parent_start = previous_index
+                parent_level = previous_level
+                break
+        if parent_start == -1:
+            continue
+
+        parent_end = len(lines)
+        for next_index in range(parent_start + 1, len(lines)):
+            next_level = _markdown_heading_level(lines[next_index])
+            if next_level is not None and next_level <= parent_level:
+                parent_end = next_index
+                break
+
+        sibling_indices = [
+            sibling_index
+            for sibling_index in range(parent_start + 1, parent_end)
+            if _markdown_heading_level(lines[sibling_index]) == level
+            and _is_empty_subsection_candidate(lines[sibling_index])
+        ]
+        kept_siblings = [
+            sibling_index for sibling_index in sibling_indices if sibling_index not in remove_indices
+        ]
+        removed_siblings = [
+            sibling_index for sibling_index in sibling_indices if sibling_index in remove_indices
+        ]
+        if len(kept_siblings) == 1 and removed_siblings:
+            clean_title = _strip_heading_number_prefix(_extract_markdown_heading_title(line))
+            unnumber_singletons.add((level, clean_title))
+
     return "\n".join(
         line for index, line in enumerate(lines) if index not in remove_indices
-    )
+    ), unnumber_singletons
+
+
+def _strip_single_child_subsection_numbering(
+    content: str, singleton_keys: set[tuple[int, str]]
+) -> str:
+    if not singleton_keys:
+        return content
+
+    lines = (content or "").splitlines()
+    normalized: list[str] = []
+    for line in lines:
+        match = re.match(r"^(\s*#{1,6})(\s+)(.+?)\s*$", line)
+        if not match:
+            normalized.append(line)
+            continue
+
+        level = len(match.group(1).lstrip())
+        title = match.group(3).strip()
+        clean_title = _strip_heading_number_prefix(title)
+        if (level, clean_title) in singleton_keys and re.match(
+            r"^（[一二三四五六七八九十\d]+）", title
+        ):
+            normalized.append(f"{match.group(1)}{match.group(2)}{clean_title}")
+            continue
+        normalized.append(line)
+    return "\n".join(normalized)
 
 
 def _is_soft_join_candidate(line: str) -> bool:
@@ -555,8 +630,9 @@ def _prepare_report_markdown(content: str, target_min_level: Optional[int] = Non
     text = _normalize_orphan_section_marker_lines(text)
     text = _split_inline_section_headings(text)
     text = _convert_plain_headings_to_markdown(text)
-    text = _strip_empty_report_headings(text)
+    text, singleton_keys = _strip_empty_report_headings(text)
     text = _normalize_report_heading_numbering(text)
+    text = _strip_single_child_subsection_numbering(text, singleton_keys)
     text = _join_chinese_soft_line_breaks(text)
     text = _ensure_report_heading_spacing(text)
     if target_min_level is not None:
