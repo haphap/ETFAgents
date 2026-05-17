@@ -708,6 +708,7 @@ def _has_unnegated_keyword(content: str, keyword_pattern: str) -> bool:
     text = content or ""
     if not re.search(keyword_pattern, text):
         return False
+    # Negation is intentionally matched only in the local phrase around the action verb.
     negated_pattern = re.compile(rf"{_TRADER_NEGATION_PREFIX}\s*(?:再|去|做)?\s*(?:{keyword_pattern})")
     return not negated_pattern.search(text)
 
@@ -825,6 +826,9 @@ def _split_trader_heading_and_body(text: str) -> tuple[str, str]:
     first_sentence = _strip_numbered_heading_prefix(sentences[0]).strip()
     heading = first_sentence.rstrip("。！？!?；;：:")
     body = "\n".join(sentences[1:]).strip()
+    # Short single-sentence theses (<=16 compact chars) can stand alone as headings.
+    # Longer single-sentence theses fall back to a static heading so the full sentence stays in the body.
+    # Dynamic headings beyond 24 chars are truncated to keep CLI/markdown rendering readable.
     if not body and len(_compact_text(heading)) > 16:
         return "配置逻辑", first_sentence
     if len(_compact_text(heading)) > 24:

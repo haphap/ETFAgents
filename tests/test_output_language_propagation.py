@@ -693,7 +693,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("资金流仍需确认，执行上不能追高。", rendered)
         self.assertNotIn("一、当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整。资金流", rendered)
 
-    def test_split_trader_heading_and_body_avoids_heading_only_section_for_short_single_sentence_thesis(self):
+    def test_split_trader_heading_and_body_keeps_short_single_sentence_thesis_as_heading_only(self):
         heading, body = _split_trader_heading_and_body("维持持有，等待确认。")
 
         self.assertEqual(heading, "维持持有，等待确认")
