@@ -700,13 +700,25 @@ def _has_numbered_blocks(text: str) -> bool:
     return bool(re.search(r"(?m)^\s*(?:\d+[.．、)]|[一二三四五六七八九十]+、)\s*\S", text or ""))
 
 
+_TRADER_BUCKET_ORDER = {"initial": 0, "add": 1, "reduce": 2, "monitor": 3}
+_TRADER_NEGATION_PREFIX = r"(?:不|未|无|勿|别|避免|不要|不能|无需|暂不)"
+
+
+def _has_unnegated_keyword(content: str, keyword_pattern: str) -> bool:
+    text = content or ""
+    if not re.search(keyword_pattern, text):
+        return False
+    negated_pattern = re.compile(rf"{_TRADER_NEGATION_PREFIX}\s*(?:再|去|做)?\s*(?:{keyword_pattern})")
+    return not negated_pattern.search(text)
+
+
 def _trader_block_key(sentence: str) -> str:
     content = sentence or ""
-    if re.search(r"(减仓|减持|降低|退出|止损|清仓|失守|跌破|破位|转弱|回撤)", content):
+    if _has_unnegated_keyword(content, r"减仓|减持|降低|退出|止损|清仓|失守|跌破|破位|转弱|回撤"):
         return "reduce"
-    if re.search(r"(加仓|增配|上调|回补|提高|扩大|买入)", content):
+    if _has_unnegated_keyword(content, r"加仓|增配|上调|回补|提高|扩大|买入"):
         return "add"
-    if re.search(r"(跟踪|监控|复核|观察|验证|再平衡|确认|关注)", content):
+    if _has_unnegated_keyword(content, r"跟踪|监控|复核|观察|验证|再平衡|确认|关注"):
         return "monitor"
     return "initial"
 
@@ -750,6 +762,8 @@ def _format_trader_numbered_blocks(text: str, section_kind: str = "execution") -
 
     if len(buckets) < 2:
         return content
+
+    buckets.sort(key=lambda bucket: _TRADER_BUCKET_ORDER.get(bucket[0], 99))
 
     blocks = []
     for index, (key, grouped_sentences) in enumerate(buckets, start=1):
@@ -808,8 +822,20 @@ def _split_trader_heading_and_body(text: str) -> tuple[str, str]:
     sentences = _split_sentences(content)
     if not sentences:
         return "", content
-    heading = _strip_numbered_heading_prefix(sentences[0]).rstrip("。！？!?；;：:")
+    first_sentence = _strip_numbered_heading_prefix(sentences[0]).strip()
+    heading = first_sentence.rstrip("。！？!?；;：:")
     body = "\n".join(sentences[1:]).strip()
+    if not body and len(_compact_text(heading)) > 16:
+        return "配置逻辑", first_sentence
+    if len(_compact_text(heading)) > 24:
+        overflow = heading[24:].lstrip("，、；：: ")
+        heading = heading[:24].rstrip("，、；：: ")
+        body_parts = []
+        if overflow:
+            body_parts.append(f"{overflow}。")
+        if body:
+            body_parts.append(body)
+        body = "\n".join(part for part in body_parts if part).strip()
     return heading or "配置逻辑", body
 
 

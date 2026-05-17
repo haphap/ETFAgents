@@ -8,6 +8,8 @@ from etfagents.agents.schemas import (
     PortfolioRating,
     ResearchPlan,
     TraderProposal,
+    _format_trader_numbered_blocks,
+    _split_trader_heading_and_body,
     render_portfolio_decision,
     render_research_plan,
     render_trader_proposal,
@@ -673,7 +675,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("执行倾向: **持有**", rendered)
         self.assertIn("维持当前仓位，不主动追涨或杀跌", rendered)
 
-    def test_trader_rendering_uses_substantive_thesis_heading(self):
+    def test_trader_rendering_uses_capped_substantive_thesis_heading(self):
         rendered = render_trader_proposal(
             TraderProposal(
                 thesis=(
@@ -686,12 +688,16 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn(
-            "一、当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整\n",
-            rendered,
-        )
-        self.assertIn("\n资金流仍需确认，执行上不能追高。", rendered)
+        self.assertIn("一、当前宏观压制边际缓和、行业盈利改善信号同步出现\n", rendered)
+        self.assertIn("偏多逻辑更完整。", rendered)
+        self.assertIn("资金流仍需确认，执行上不能追高。", rendered)
         self.assertNotIn("一、当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整。资金流", rendered)
+
+    def test_split_trader_heading_and_body_avoids_heading_only_section_for_short_single_sentence_thesis(self):
+        heading, body = _split_trader_heading_and_body("维持持有，等待确认。")
+
+        self.assertEqual(heading, "维持持有，等待确认")
+        self.assertEqual(body, "")
 
     def test_trader_rendering_splits_long_execution_paragraph_into_numbered_points(self):
         rendered = render_trader_proposal(
@@ -709,8 +715,33 @@ class OutputLanguagePropagationTests(unittest.TestCase):
 
         self.assertIn("1. 初始仓位与执行节奏", rendered)
         self.assertIn("2. 加仓触发条件", rendered)
-        self.assertIn("3. 跟踪验证与再平衡", rendered)
+        self.assertIn("跟踪验证与再平衡", rendered)
         self.assertIn("减仓触发的核心条件", rendered)
+
+    def test_trader_numbered_blocks_reorder_buckets_into_canonical_execution_flow(self):
+        rendered = _format_trader_numbered_blocks(
+            "继续跟踪ETF份额、溢折价和资金流变化。"
+            "若价格站稳50日均线且成交量回到20日均量上方，则加仓。"
+            "若价格跌破关键支撑，则减仓。"
+            "先保留底仓并分两批执行新增仓位。",
+            "execution",
+        )
+
+        self.assertLess(rendered.index("1. 初始仓位与执行节奏"), rendered.index("2. 加仓触发条件"))
+        self.assertLess(rendered.index("2. 加仓触发条件"), rendered.index("3. 减仓触发的核心条件"))
+        self.assertLess(rendered.index("3. 减仓触发的核心条件"), rendered.index("4. 跟踪验证与再平衡"))
+
+    def test_trader_rendering_preserves_single_bucket_content_when_only_initial_bucket_exists(self):
+        rendered = render_trader_proposal(
+            TraderProposal(
+                thesis="当前主线仍占优，但执行必须等待确认。",
+                execution_plan="先维持现仓，再按既定节奏逐步执行。",
+                risk_management="若价格连续两天跌破关键支撑，则降低仓位。",
+                rating=PortfolioRating.HOLD,
+            )
+        )
+
+        self.assertIn("先维持现仓，再按既定节奏逐步执行。", rendered)
 
     def test_trader_rendering_expands_execution_plan_missing_price_anchor(self):
         rendered = render_trader_proposal(

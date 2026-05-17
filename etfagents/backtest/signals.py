@@ -590,28 +590,26 @@ def _iter_sentences(text: str) -> list[str]:
     return [piece.strip(" -\t") for piece in pieces if piece.strip(" -\t")]
 
 
+def _slice_until_next_heading(remainder: str, boundary_pattern: re.Pattern[str]) -> str:
+    next_heading = boundary_pattern.search(remainder)
+    end = next_heading.start() if next_heading else len(remainder)
+    return _normalize_text(remainder[:end])
+
+
 def _extract_markdown_section(text: str, headings: Sequence[str]) -> str:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     for heading in headings:
         label = re.escape(heading.lstrip("#").strip())
-        pattern = re.compile(rf"(?m)^(?P<marks>#+)\s+{label}\s*$")
-        match = pattern.search(normalized)
-        if not match:
-            pattern = re.compile(
-                rf"(?m)^(?P<marks>[一二三四五六七八九十]+)、{label}\s*$"
-            )
-            match = pattern.search(normalized)
-            if not match:
-                continue
-            remainder = normalized[match.end():]
-            next_heading = re.search(r"(?m)^[一二三四五六七八九十]+、\S", remainder)
-            section = remainder[: next_heading.start() if next_heading else len(remainder)]
-            return _normalize_text(section)
-        level = len(match.group("marks"))
-        remainder = normalized[match.end():]
-        next_heading = re.search(rf"(?m)^#{{1,{level}}}\s+\S", remainder)
-        section = remainder[: next_heading.start() if next_heading else len(remainder)]
-        return _normalize_text(section)
+        markdown_match = re.search(rf"(?m)^(#+)\s+{label}\s*$", normalized)
+        if markdown_match:
+            level = len(markdown_match.group(1))
+            remainder = normalized[markdown_match.end():]
+            return _slice_until_next_heading(remainder, re.compile(rf"(?m)^#{{1,{level}}}\s+\S"))
+
+        chinese_match = re.search(rf"(?m)^[一二三四五六七八九十]+、{label}\s*$", normalized)
+        if chinese_match:
+            remainder = normalized[chinese_match.end():]
+            return _slice_until_next_heading(remainder, re.compile(r"(?m)^[一二三四五六七八九十]+、\S"))
     return ""
 
 
