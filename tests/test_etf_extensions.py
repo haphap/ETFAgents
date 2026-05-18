@@ -10,6 +10,7 @@ import pandas as pd
 from langgraph.prebuilt import ToolNode
 
 from etfagents.agents.utils.etf_data_tools import (
+    _build_constituent_frame,
     _match_commodity_proxy_basket,
     _related_broker_industry_keywords,
     get_etf_holdings,
@@ -374,6 +375,50 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertEqual(mock_get_broker_reports.call_count, 1)
 
     @patch("etfagents.agents.utils.etf_data_tools.get_stock_reports")
+    @patch("etfagents.agents.utils.etf_data_tools._lookup_a_share_metadata")
+    @patch("etfagents.agents.utils.etf_data_tools._load_latest_etf_holdings_frame")
+    def test_etf_top_holdings_research_keeps_a_share_heading_for_disclosed_holdings(
+        self,
+        mock_holdings_frame,
+        mock_lookup_metadata,
+        mock_get_stock_reports,
+    ):
+        mock_holdings_frame.return_value = (
+            "510300.SH",
+            pd.DataFrame(
+                [
+                    {
+                        "symbol": "600519.SH",
+                        "stk_code": "600519",
+                        "holding_weight": 8.5,
+                        "stk_mkv_ratio": 8.5,
+                        "end_date": "20260331",
+                    },
+                    {
+                        "symbol": "300750.SZ",
+                        "stk_code": "300750",
+                        "holding_weight": 7.2,
+                        "stk_mkv_ratio": 7.2,
+                        "end_date": "20260331",
+                    },
+                ]
+            ),
+        )
+        mock_lookup_metadata.side_effect = [
+            {"ts_code": "600519.SH", "name": "贵州茅台", "industry": "食品饮料"},
+            {"ts_code": "300750.SZ", "name": "宁德时代", "industry": "电力设备"},
+        ]
+        mock_get_stock_reports.return_value = "# Stock Research Reports"
+
+        result = get_etf_top_holdings_research.invoke(
+            {"ticker": "510300.SH", "curr_date": "2026-04-30", "top_n": 2}
+        )
+
+        self.assertIn("## Top disclosed A-share holdings", result)
+        self.assertNotIn("## Top disclosed holdings", result)
+        self.assertEqual(mock_get_stock_reports.call_count, 2)
+
+    @patch("etfagents.agents.utils.etf_data_tools.get_stock_reports")
     @patch("etfagents.agents.utils.etf_data_tools._load_latest_etf_holdings_frame")
     @patch("etfagents.agents.utils.etf_data_tools._query_pro")
     def test_etf_top_holdings_research_falls_back_to_commodity_producer_proxy_when_holdings_missing(
@@ -506,6 +551,256 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertIsNotNone(basket)
         self.assertEqual(basket["label"], "工业金属")
         self.assertEqual(basket["display_label"], "工业金属（铜偏重代理）")
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_hk_cross_border_etf_uses_hk_proxy_when_holdings_missing(self, mock_query):
+        def _fake_query(api_name, **params):
+            if api_name == "fund_portfolio":
+                return pd.DataFrame()
+            if api_name == "fund_basic":
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "513130.SH",
+                            "name": "恒生科技ETF华泰柏瑞",
+                            "market": "SH",
+                            "fund_type": "ETF",
+                            "invest_type": "QDII",
+                            "benchmark": "恒生科技指数",
+                        }
+                    ]
+                )
+            if api_name == "hk_basic":
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": params["ts_code"],
+                            "name": {"00700.HK": "腾讯控股", "09988.HK": "阿里巴巴-W"}.get(
+                                params["ts_code"],
+                                params["ts_code"],
+                            ),
+                            "market": "主板",
+                        }
+                    ]
+                )
+            if api_name == "hk_daily":
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": params["ts_code"],
+                            "trade_date": "20260514" if params["ts_code"] == "00700.HK" else "20260515",
+                            "close": 400.0,
+                            "pct_chg": 1.2,
+                        }
+                    ]
+                )
+            raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        mock_query.side_effect = _fake_query
+
+        ts_code, latest_date, frame = _build_constituent_frame("513130.SH", "2026-05-15", 3)
+
+        self.assertEqual(ts_code, "513130.SH")
+        self.assertEqual(latest_date, "20260515")
+        self.assertEqual(frame.attrs["source"], "hk_benchmark_proxy")
+        self.assertIn("normalized to 100% of the representative proxy basket", frame.attrs["source_note"])
+        self.assertAlmostEqual(frame["weight"].sum(), 46.03, places=2)
+        self.assertIn("00700.HK", set(frame["ts_code"]))
+        self.assertIn("latest_close", frame.columns)
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    @patch("etfagents.agents.utils.etf_data_tools.route_to_vendor")
+    def test_get_etf_holdings_returns_hk_proxy_after_tushare_holdings_miss(
+        self,
+        mock_route,
+        mock_query,
+    ):
+        mock_route.side_effect = MissingEtfHoldings(
+            "No ETF holdings data found for '513130.SH' up to 2026-05-15."
+        )
+
+        def _fake_query(api_name, **params):
+            if api_name == "fund_portfolio":
+                return pd.DataFrame()
+            if api_name == "fund_basic":
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "513130.SH",
+                            "name": "恒生科技ETF华泰柏瑞",
+                            "market": "SH",
+                            "fund_type": "ETF",
+                            "invest_type": "QDII",
+                            "benchmark": "恒生科技指数",
+                        }
+                    ]
+                )
+            if api_name == "hk_basic":
+                return pd.DataFrame([{"ts_code": params["ts_code"], "name": params["ts_code"]}])
+            if api_name == "hk_daily":
+                return pd.DataFrame([{"trade_date": "20260515", "close": 100.0, "pct_chg": 0.5}])
+            raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        mock_query.side_effect = _fake_query
+
+        result = get_etf_holdings.invoke(
+            {"ticker": "513130.SH", "curr_date": "2026-05-15"}
+        )
+
+        self.assertIn("Hong Kong 恒生科技 constituents", result)
+        self.assertIn("00700.HK", result)
+        self.assertIn("latest_hk_close", result)
+        self.assertIn("proxy_basket_weight_pct", result)
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_hk_etf_research_tools_use_proxy_without_a_share_reports(self, mock_query):
+        def _fake_query(api_name, **params):
+            if api_name == "fund_portfolio":
+                return pd.DataFrame()
+            if api_name == "fund_basic":
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "513130.SH",
+                            "name": "恒生科技ETF华泰柏瑞",
+                            "market": "SH",
+                            "fund_type": "ETF",
+                            "invest_type": "QDII",
+                            "benchmark": "恒生科技指数",
+                        }
+                    ]
+                )
+            if api_name == "hk_basic":
+                return pd.DataFrame([{"ts_code": params["ts_code"], "name": params["ts_code"]}])
+            if api_name == "hk_daily":
+                return pd.DataFrame([{"trade_date": "20260515", "close": 100.0, "pct_chg": 0.5}])
+            raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        mock_query.side_effect = _fake_query
+
+        industry = get_etf_industry_research.invoke(
+            {"ticker": "513130.SH", "curr_date": "2026-05-15", "top_n": 2}
+        )
+        top_holdings = get_etf_top_holdings_research.invoke(
+            {"ticker": "513130.SH", "curr_date": "2026-05-15", "top_n": 2}
+        )
+
+        self.assertIn("Dominant Hong Kong proxy industries", industry)
+        self.assertIn("Tushare broker-report industry search is A-share only", industry)
+        self.assertIn("Proxy Hong Kong benchmark basket", top_holdings)
+        self.assertIn("Proxy basket weight", industry)
+        self.assertIn("Proxy basket weight", top_holdings)
+        self.assertIn("Tushare HK daily snapshot", top_holdings)
+        self.assertNotIn("No eligible A-share", industry + top_holdings)
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_hk_proxy_uses_fallback_metadata_when_hk_basic_is_empty(self, mock_query):
+        def _fake_query(api_name, **params):
+            if api_name == "fund_portfolio":
+                return pd.DataFrame()
+            if api_name == "fund_basic":
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "513130.SH",
+                            "name": "恒生科技ETF华泰柏瑞",
+                            "market": "SH",
+                            "fund_type": "ETF",
+                            "invest_type": "QDII",
+                            "benchmark": "恒生科技指数",
+                        }
+                    ]
+                )
+            if api_name == "hk_basic":
+                return pd.DataFrame()
+            if api_name == "hk_daily":
+                return pd.DataFrame([{"trade_date": "20260515", "close": 100.0, "pct_chg": 0.5}])
+            raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        mock_query.side_effect = _fake_query
+
+        _, latest_date, frame = _build_constituent_frame("513130.SH", "2026-05-15", 2)
+
+        self.assertEqual(latest_date, "20260515")
+        self.assertEqual(frame.iloc[0]["name"], "腾讯控股")
+        self.assertEqual(frame.iloc[0]["industry"], "互联网平台")
+        self.assertAlmostEqual(frame.iloc[0]["weight"], 15.87, places=2)
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    @patch("etfagents.agents.utils.etf_data_tools.route_to_vendor")
+    def test_get_etf_holdings_keeps_hk_proxy_when_hk_daily_fails(
+        self,
+        mock_route,
+        mock_query,
+    ):
+        mock_route.side_effect = MissingEtfHoldings(
+            "No ETF holdings data found for '513130.SH' up to 2026-05-15."
+        )
+
+        def _fake_query(api_name, **params):
+            if api_name == "fund_portfolio":
+                return pd.DataFrame()
+            if api_name == "fund_basic":
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "513130.SH",
+                            "name": "恒生科技ETF华泰柏瑞",
+                            "market": "SH",
+                            "fund_type": "ETF",
+                            "invest_type": "QDII",
+                            "benchmark": "恒生科技指数",
+                        }
+                    ]
+                )
+            if api_name == "hk_basic":
+                return pd.DataFrame([{"ts_code": params["ts_code"], "name": params["ts_code"]}])
+            if api_name == "hk_daily":
+                raise DataVendorUnavailable("502")
+            raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        mock_query.side_effect = _fake_query
+
+        _, latest_date, frame = _build_constituent_frame("513130.SH", "2026-05-15", 2)
+        result = get_etf_holdings.invoke(
+            {"ticker": "513130.SH", "curr_date": "2026-05-15"}
+        )
+
+        self.assertEqual(latest_date, "20260515")
+        self.assertFalse(frame.empty)
+        self.assertIn("00700.HK", result)
+        self.assertNotIn("latest_hk_close", result)
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_hk_proxy_prefers_broad_hong_kong_basket_without_tech_keyword(self, mock_query):
+        def _fake_query(api_name, **params):
+            if api_name == "fund_portfolio":
+                return pd.DataFrame()
+            if api_name == "fund_basic":
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "513900.SH",
+                            "name": "恒生中国企业ETF",
+                            "market": "SH",
+                            "fund_type": "ETF",
+                            "invest_type": "QDII",
+                            "benchmark": "恒生中国企业指数",
+                        }
+                    ]
+                )
+            if api_name == "hk_basic":
+                return pd.DataFrame([{"ts_code": params["ts_code"], "name": params["ts_code"]}])
+            if api_name == "hk_daily":
+                return pd.DataFrame([{"trade_date": "20260515", "close": 100.0, "pct_chg": 0.5}])
+            raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        mock_query.side_effect = _fake_query
+
+        _, _, frame = _build_constituent_frame("513900.SH", "2026-05-15", 3)
+
+        self.assertEqual(frame.attrs["proxy_label"], "港股宽基")
+        self.assertIn("00005.HK", set(frame["ts_code"]))
 
     @patch("etfagents.dataflows.tushare._query_pro")
     def test_etf_universe_includes_enriched_factor_columns(self, mock_query):
