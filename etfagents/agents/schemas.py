@@ -826,7 +826,7 @@ def _split_trader_heading_and_body(text: str) -> tuple[str, str]:
         return "", content
     first_sentence = _strip_numbered_heading_prefix(sentences[0]).strip()
     heading = first_sentence.rstrip("。！？!?；;：:")
-    body = "\n".join(sentences[1:]).strip()
+    body = "\n\n".join(sentences[1:]).strip()
     # Short single-sentence theses (<=16 compact chars) can stand alone as headings.
     # Longer single-sentence theses fall back to a static heading so the full sentence stays in the body.
     # Dynamic headings beyond 24 chars are truncated to keep CLI/markdown rendering readable.
@@ -840,7 +840,7 @@ def _split_trader_heading_and_body(text: str) -> tuple[str, str]:
             body_parts.append(f"{overflow}。")
         if body:
             body_parts.append(body)
-        body = "\n".join(part for part in body_parts if part).strip()
+        body = "\n\n".join(part for part in body_parts if part).strip()
     return heading or "配置逻辑", body
 
 

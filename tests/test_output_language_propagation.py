@@ -437,6 +437,16 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("一、成本传导断裂叙事忽略了ETF独有的对冲结构", body)
         self.assertNotIn("一、你的成本传导断裂叙事", body)
 
+    def test_visible_debate_body_strips_plural_second_person_heading_prefix(self):
+        body = normalize_visible_debate_body(
+            "一、你们的资金流确认框架忽略了份额连续净流出的压力。"
+            "成交额放大并不等于主动承接。"
+        )
+
+        self.assertIn("一、资金流确认框架忽略了份额连续净流出的压力", body)
+        self.assertNotIn("一、你们的资金流确认框架", body)
+        self.assertNotIn("一、们的资金流确认框架", body)
+
     def test_visible_debate_body_strips_empty_markdown_and_joins_soft_breaks(self):
         body = normalize_visible_debate_body(
             "**  \n"
@@ -716,6 +726,25 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("偏多逻辑更完整。", rendered)
         self.assertIn("资金流仍需确认，执行上不能追高。", rendered)
         self.assertNotIn("一、当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整。资金流", rendered)
+
+    def test_trader_rendering_splits_thesis_body_into_paragraphs(self):
+        rendered = render_trader_proposal(
+            TraderProposal(
+                thesis=(
+                    "ETF配置论据显示主线仍未被证伪。"
+                    "第一，价格仍处在关键均线附近，说明趋势尚未完全破坏。"
+                    "第二，资金流虽然反复，但份额没有出现连续失速。"
+                    "第三，催化兑现前不宜把执行计划和论据写成同一整段。"
+                ),
+                execution_plan="先维持现仓，等待50日均线确认后再加仓。若跌破支撑则减仓。",
+                risk_management="若成交量放大跌破支撑，则降低仓位。继续跟踪份额变化。",
+                rating=PortfolioRating.HOLD,
+            )
+        )
+
+        self.assertIn("第一，价格仍处在关键均线附近", rendered)
+        self.assertIn("附近，说明趋势尚未完全破坏。\n\n第二，资金流", rendered)
+        self.assertIn("连续失速。\n\n第三，催化兑现前", rendered)
 
     def test_split_trader_heading_and_body_keeps_short_single_sentence_thesis_as_heading_only(self):
         heading, body = _split_trader_heading_and_body("维持持有，等待确认。")
