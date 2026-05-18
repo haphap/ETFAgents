@@ -31,6 +31,7 @@ dependencies = [
     "typing-extensions>=4.14.0",
     "yfinance>=0.2.63",
     "tushare>=1.4.21",
+    "akshare>=1.16.0",
     "python-dotenv>=1.0.0",
 ]
 
