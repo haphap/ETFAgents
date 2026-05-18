@@ -27,6 +27,7 @@ from etfagents.agents.utils.agent_utils import (
     normalize_chinese_manager_terms,
     normalize_chinese_role_terms,
     normalize_visible_debate_body,
+    strip_constituent_trade_instructions,
 )
 from etfagents.dataflows.config import get_config, set_config
 from etfagents.default_config import DEFAULT_CONFIG
@@ -414,6 +415,27 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
         self.assertNotIn("共振 （一）", body)
         self.assertNotIn("##", body)
+
+    def test_visible_debate_body_promotes_inline_numbered_sentence_to_heading(self):
+        body = normalize_visible_debate_body(
+            "一、石油ETF看似拥有供给端支撑，实则正在被成本传导断裂反噬。"
+            "你重点强调原油持仓增幅116.67%，但聚乙烯仓单暴增79.93%。"
+        )
+
+        self.assertIn(
+            "一、石油ETF看似拥有供给端支撑，实则正在被成本传导断裂反噬\n\n"
+            "你重点强调原油持仓增幅116.67%",
+            body,
+        )
+
+    def test_visible_debate_body_strips_second_person_heading_prefix(self):
+        body = normalize_visible_debate_body(
+            "一、你的成本传导断裂叙事忽略了ETF独有的对冲结构。"
+            "空头分析师反复强调聚乙烯仓单暴增。"
+        )
+
+        self.assertIn("一、成本传导断裂叙事忽略了ETF独有的对冲结构", body)
+        self.assertNotIn("一、你的成本传导断裂叙事", body)
 
     def test_visible_debate_body_strips_empty_markdown_and_joins_soft_breaks(self):
         body = normalize_visible_debate_body(
@@ -911,6 +933,20 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("国投电力", rendered)
         self.assertNotIn("应全部清仓", rendered)
         self.assertNotIn("应减持至剩余权重", rendered)
+
+    def test_constituent_instruction_stripping_default_keeps_scope_note(self):
+        sanitized = strip_constituent_trade_instructions(
+            "当前将ETF目标仓位降至25%，优先减持极端估值标的："
+            "永泰能源（4.17%权重，PE 40至75倍）应全部清仓。"
+        )
+        without_note = strip_constituent_trade_instructions(
+            "当前将ETF目标仓位降至25%，优先减持极端估值标的："
+            "永泰能源（4.17%权重，PE 40至75倍）应全部清仓。",
+            insert_scope_note=False,
+        )
+
+        self.assertIn("实际执行对象仍是ETF整体仓位", sanitized)
+        self.assertNotIn("实际执行对象仍是ETF整体仓位", without_note)
 
     def test_portfolio_decision_keeps_legitimate_etf_parenthetical(self):
         rendered = render_portfolio_decision(

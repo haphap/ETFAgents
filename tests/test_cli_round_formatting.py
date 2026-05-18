@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 
 from cli.main import (
     MessageBuffer,
+    _format_manager_decision,
     _prepare_report_markdown,
     _normalize_ticker_list,
     format_research_team_history,
@@ -397,6 +398,14 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertEqual(formatted.count("反馈快照:"), 0)
         self.assertEqual(formatted.count("#### 反馈快照摘要"), 0)
 
+    def test_manager_decision_does_not_fall_back_to_orphan_snapshot_item(self):
+        formatted = _format_manager_decision(
+            "- 本轮新增与反驳: 新增了对仓位节奏与风险预算的约束。",
+            show_snapshot_summary=False,
+        )
+
+        self.assertEqual(formatted, "")
+
     def test_research_manager_normalizes_judicial_wording_to_debate_conclusion(self):
         debate_state = {
             "bull_history": "",
@@ -415,6 +424,30 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("综合结论：整场辩论中双方论据势均力敌。", formatted)
         self.assertNotIn("判决结果", formatted)
         self.assertNotIn("本轮双方论点势均力敌", formatted)
+
+    def test_research_manager_splits_dense_conclusion_points(self):
+        debate_state = {
+            "bull_history": "",
+            "bear_history": "",
+            "judge_decision": (
+                "## 辩论结论\n"
+                "空头最强支撑在于：第一，成本传导已结构性断裂，上游原油上涨但聚乙烯价格停滞且仓单暴增；"
+                "第二，内部对冲存在2-3个月操作滞后窗口，油运盈利崩塌快于炼化修复启动。"
+                "这些因素共同指向ETF在当前位置的风险收益比已不对称，下行压力大于上行空间。\n\n"
+                "## 行为逻辑\n"
+                "触发减持条件的具体阈值包括：布伦特原油跌破78美元/桶；"
+                "原油期货持仓量在连续3个交易日萎缩超10%；"
+                "聚乙烯仓单在2周内继续增长且价格跌破8000元/吨；"
+                "VLCC TCE回落至15万美元/天以下。"
+            ),
+        }
+
+        formatted = format_research_team_history(debate_state)
+
+        self.assertIn("空头最强支撑在于：\n\n1. 第一，成本传导已结构性断裂", formatted)
+        self.assertIn("2. 第二，内部对冲存在2-3个月操作滞后窗口", formatted)
+        self.assertIn("触发减持条件的具体阈值包括：\n\n1. 布伦特原油跌破78美元/桶", formatted)
+        self.assertIn("4. VLCC TCE回落至15万美元/天以下", formatted)
 
     def test_research_team_history_shows_decision_summary_outside_argument_body(self):
         debate_state = {
@@ -645,6 +678,170 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("#### 三、持仓建议", formatted)
         self.assertNotIn("#### 三、持仓建议 维持两成仓位", formatted)
         self.assertNotIn("反馈快照", formatted)
+
+    def test_portfolio_manager_joins_wrapped_ordinal_round_phrase(self):
+        risk_state = {
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": (
+                "## 辩论结论\n"
+                "此外，中性风险分析师在第\n"
+                "\n"
+                "二、三轮中放宽验证条件，但该方案缺乏行动承诺。\n\n"
+                "## 行为逻辑\n"
+                "维持减持。"
+            ),
+        }
+
+        formatted = format_risk_management_history(risk_state)
+
+        self.assertIn("中性风险分析师在第二、三轮中放宽验证条件", formatted)
+        self.assertNotIn("在第\n\n#### 二、三轮", formatted)
+        self.assertNotIn("#### 二、三轮", formatted)
+
+    def test_portfolio_manager_strips_orphan_snapshot_items_and_scope_note(self):
+        risk_state = {
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": (
+                "## 持仓建议\n"
+                "### （一）评级\n"
+                "研究结论: **减持**\n"
+                "### （二）建议\n"
+                "目标仓位维持在4%以下，等待成本传导修复后再评估回补。\n\n"
+                "成分股层面的估值、盈利和权重信息仅作为ETF仓位调整依据，实际执行对象仍是ETF整体仓位，不对成分股给出直接交易指令。当前最关键的风险因素是5月18日工业增加值数据若低于4.5%将确认需求放缓。\n"
+                "- 本轮新增与反驳: 本轮首次用聚乙烯仓单暴增79.93%反驳激进观点。\n"
+                "- 待验证:\n"
+                "1. 聚乙烯仓单能否去化。2. 原油期货持仓能否萎缩。"
+            ),
+        }
+
+        formatted = format_risk_management_history(risk_state)
+
+        self.assertIn("目标仓位维持在4%以下", formatted)
+        self.assertNotIn("实际执行对象仍是ETF整体仓位", formatted)
+        self.assertNotIn("本轮新增与反驳", formatted)
+        self.assertNotIn("待验证", formatted)
+        self.assertNotIn("5月18日工业增加值", formatted)
+
+    def test_portfolio_manager_preserves_legitimate_most_critical_prose(self):
+        risk_state = {
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": (
+                "## 行为逻辑\n"
+                "当前最关键的支撑位在2.05元，若收盘价连续3日守住该位置，则维持观察仓位。\n\n"
+                "## 持仓建议\n"
+                "维持持有。"
+            ),
+        }
+
+        formatted = format_risk_management_history(risk_state)
+
+        self.assertIn("当前最关键的支撑位在2.05元", formatted)
+
+    def test_portfolio_manager_keeps_most_critical_sentence_before_orphan_snapshot_item(self):
+        risk_state = {
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": (
+                "## 行为逻辑\n"
+                "最关键的事件是下月CPI数据，若高于预期则先降低风险预算。\n"
+                "- 立场: 持有\n"
+                "- 本轮新增与反驳: 临时快照泄漏。"
+            ),
+        }
+
+        formatted = format_risk_management_history(risk_state)
+
+        self.assertIn("最关键的事件是下月CPI数据", formatted)
+        self.assertNotIn("- 立场", formatted)
+        self.assertNotIn("本轮新增与反驳", formatted)
+
+    def test_portfolio_manager_splits_dense_conclusion_and_action_logic(self):
+        risk_state = {
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": (
+                "## 辩论结论\n"
+                "保守风险分析师最强的证据链是：第一，成本传导已结构性断裂；第二，内部对冲存在2-3个月操作滞后窗口。\n\n"
+                "## 行为逻辑\n"
+                "触发减持条件的具体阈值包括：布伦特原油跌破78美元/桶；原油期货持仓量连续3日萎缩超10%；聚乙烯仓单继续增长且价格跌破8000元/吨。"
+            ),
+        }
+
+        formatted = format_risk_management_history(risk_state)
+
+        self.assertIn("保守风险分析师最强的证据链是：\n\n1. 第一，成本传导已结构性断裂", formatted)
+        self.assertIn("2. 第二，内部对冲存在2-3个月操作滞后窗口", formatted)
+        self.assertIn("触发减持条件的具体阈值包括：\n\n1. 布伦特原油跌破78美元/桶", formatted)
+
+    def test_portfolio_manager_splits_long_sentence_dense_paragraphs(self):
+        risk_state = {
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": (
+                "## 行为逻辑\n"
+                "当前组合仍需降低石油ETF风险预算，因为油价上行已经从供给冲击转向资金拥挤驱动。"
+                "聚乙烯仓单继续高位堆积，说明下游并未顺利承接上游成本。"
+                "油运利润虽然处于高位，但运价回落时盈利弹性会快速反向释放。"
+                "中国石化炼化利润修复需要库存消化周期，无法立刻抵消上游和油运回撤。"
+                "因此后续执行应先保留观察仓位，再等待量价和库存信号共同修复。"
+                "如果ETF折溢价连续扩大，说明产品层承接能力也在下降，不能只看油价方向。"
+                "若风险预算被连续触发，组合应优先降低波动来源，而不是继续解释单个成分股的短期弹性。"
+            ),
+        }
+
+        formatted = format_risk_management_history(risk_state)
+
+        self.assertIn(
+            "资金拥挤驱动。聚乙烯仓单继续高位堆积",
+            formatted,
+        )
+        self.assertIn(
+            "上游成本。\n\n油运利润虽然处于高位",
+            formatted,
+        )
+
+    def test_portfolio_manager_full_readability_pipeline_handles_combined_failures(self):
+        risk_state = {
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": (
+                "## 辩论结论\n"
+                "保守风险分析师最强的证据链是：第一，成本传导已结构性断裂；第二，内部对冲存在2-3个月操作滞后窗口。此外，中性风险分析师在第\n\n"
+                "二、三轮中放宽验证条件，但该方案缺乏行动承诺。\n\n"
+                "## 行为逻辑\n"
+                "当前最关键的支撑位在2.05元。触发减持条件的具体阈值包括：布伦特原油跌破78美元/桶；原油期货持仓量连续3日萎缩超10%；聚乙烯仓单继续增长且价格跌破8000元/吨。\n\n"
+                "## 持仓建议\n"
+                "### （一）评级\n"
+                "研究结论: **减持**\n"
+                "### （二）建议\n"
+                "目标仓位维持在4%以下。\n"
+                "成分股层面的估值、盈利和权重信息仅作为ETF仓位调整依据，实际执行对象仍是ETF整体仓位，不对成分股给出直接交易指令。当前最关键的风险因素是5月18日工业增加值数据。\n"
+                "- 本轮新增与反驳: 快照泄漏。\n"
+                "- 待验证: 继续跟踪。"
+            ),
+        }
+
+        formatted = format_risk_management_history(risk_state)
+
+        self.assertIn("保守风险分析师最强的证据链是：\n\n1. 第一，成本传导已结构性断裂", formatted)
+        self.assertIn("中性风险分析师在第二、三轮中放宽验证条件", formatted)
+        self.assertIn("当前最关键的支撑位在2.05元", formatted)
+        self.assertIn("触发减持条件的具体阈值包括：\n\n1. 布伦特原油跌破78美元/桶", formatted)
+        self.assertIn("目标仓位维持在4%以下", formatted)
+        self.assertNotIn("实际执行对象仍是ETF整体仓位", formatted)
+        self.assertNotIn("本轮新增与反驳", formatted)
+        self.assertNotIn("待验证", formatted)
+        self.assertNotIn("5月18日工业增加值", formatted)
 
     def test_message_buffer_localizes_etf_structure_section_title_in_chinese(self):
         buffer = MessageBuffer()
