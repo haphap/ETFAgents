@@ -17,6 +17,7 @@ from etfagents.agents.utils.report_leads import (
     post_judge_clean,
     pre_judge_clean,
     strip_artifact_only_lines,
+    strip_refine_preamble,
     strip_standalone_term_definition_blocks,
 )
 from etfagents.agents.utils.validate_refine import (
@@ -367,6 +368,31 @@ class CleaningOrderingTests(unittest.TestCase):
 
         self.assertNotIn("数据已全部获取完毕", cleaned)
         self.assertTrue(cleaned.startswith("一、核心持仓共识与分歧"))
+
+    def test_strip_refine_preamble_strips_data_ready_now_integrate_analysis_preamble(self):
+        raw = (
+            "数据已全部到位，现在整合分析。\n\n"
+            "一、宏观框架分析\n"
+            "美元利率与港股风险偏好仍是主要变量。"
+        )
+
+        cleaned = strip_refine_preamble(raw)
+
+        self.assertNotIn("数据已全部到位", cleaned)
+        self.assertTrue(cleaned.startswith("一、宏观框架分析"))
+
+    def test_strip_refine_preamble_strips_report_ready_delivery_preamble(self):
+        raw = (
+            "报告已就绪。下面进入正文：\n\n"
+            "一、宏观框架分析\n"
+            "美元利率与港股风险偏好仍是主要变量。"
+        )
+
+        cleaned = strip_refine_preamble(raw)
+
+        self.assertNotIn("报告已就绪", cleaned)
+        self.assertNotIn("下面进入正文", cleaned)
+        self.assertTrue(cleaned.startswith("一、宏观框架分析"))
 
     def test_pre_judge_clean_strips_data_complete_followed_by_analysis_preamble(self):
         raw = (

@@ -232,6 +232,24 @@ class ToolReportUtilsTests(unittest.TestCase):
         self.assertEqual("Real final report", report)
         self.assertEqual("Real final report", result.content)
 
+    def test_generic_process_only_analysis_text_triggers_fallback(self):
+        prompt = _FakePrompt()
+        llm = _FakeLLM(
+            [_FakeResponse(content="数据已全部到位，现在整合分析。")],
+            [_FakeResponse(content="真实宏观报告正文")],
+        )
+
+        result, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+        )
+
+        self.assertEqual("真实宏观报告正文", report)
+        self.assertEqual("真实宏观报告正文", result.content)
+
     def test_process_only_prefix_is_removed_from_real_report(self):
         prompt = _FakePrompt()
         llm = _FakeLLM(
@@ -254,6 +272,52 @@ class ToolReportUtilsTests(unittest.TestCase):
         )
 
         self.assertEqual("一、市场结构与量价诊断\n趋势偏多。", report)
+
+    def test_generic_process_only_prefix_is_removed_from_real_report(self):
+        prompt = _FakePrompt()
+        llm = _FakeLLM(
+            [
+                _FakeResponse(
+                    content=(
+                        "资料已经齐备，下面给出宏观框架判断。\n\n"
+                        "一、宏观框架分析\n流动性仍是核心变量。"
+                    )
+                )
+            ]
+        )
+
+        _, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+        )
+
+        self.assertEqual("一、宏观框架分析\n流动性仍是核心变量。", report)
+
+    def test_process_only_prefix_without_salutation_is_removed_from_real_report(self):
+        prompt = _FakePrompt()
+        llm = _FakeLLM(
+            [
+                _FakeResponse(
+                    content=(
+                        "已获取所有必要数据，可以撰写完整的配置报告。\n\n"
+                        "一、配置框架\n目标仓位维持中性。"
+                    )
+                )
+            ]
+        )
+
+        _, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+        )
+
+        self.assertEqual("一、配置框架\n目标仓位维持中性。", report)
 
     def test_process_only_inline_prefix_keeps_report_body(self):
         prompt = _FakePrompt()
@@ -389,6 +453,16 @@ class ToolReportUtilsTests(unittest.TestCase):
         self.assertTrue(
             _is_process_only_report_text(
                 "现在我已掌握所有必要数据，可以撰写完整的配置报告。"
+            )
+        )
+        self.assertTrue(
+            _is_process_only_report_text(
+                "数据已全部到位，现在整合分析。"
+            )
+        )
+        self.assertTrue(
+            _is_process_only_report_text(
+                "资料已经齐备，下面给出宏观框架判断。"
             )
         )
         self.assertTrue(

@@ -4,6 +4,10 @@ from etfagents.agents.utils.agent_utils import (
     collapse_blank_lines,
     normalize_chinese_role_terms,
 )
+from etfagents.process_narration import (
+    OPENING_DELIVERY_PREAMBLE_RE,
+    looks_like_process_narration,
+)
 from etfagents.report_prompt_utils import get_no_process_narration_instruction
 
 _H1_TITLE_PATTERN = re.compile(r"^#\s+\S")
@@ -53,15 +57,6 @@ OPENING_STRUCTURE_RE = re.compile(
     r")"
 )
 OPENING_LABEL_RE = re.compile(r"^\s*(?:概述|结论|核心结论|导语)\s*[:：]")
-OPENING_DELIVERY_PREAMBLE_RE = re.compile(
-    r"^\s*(?:"
-    r"(?:报告|分析|内容).{0,12}(?:已|已经)?(?:就绪|完成|生成|整理好|准备好)[。！!；;，,]?\s*"
-    r"(?:以下|下面|现在)"
-    r"|(?:数据|资料|信息).{0,12}?(?:已经|已)?(?:全部)?(?:获取|收集|拿到|完成)(?:完毕)?[。！!；;，,]?\s*"
-    r"(?:以下|下面|现在).{0,80}?(?:撰写|生成|输出|写).{0,60}?报告"
-    r"|以下(?:是|为).{0,60}(?:报告|分析)"
-    r")"
-)
 
 
 def first_nonempty_line(text: str) -> str:
@@ -96,7 +91,7 @@ def has_invalid_opening_cap(
         return True
     if reject_labels and OPENING_LABEL_RE.match(first_line):
         return True
-    if OPENING_DELIVERY_PREAMBLE_RE.match(first_line):
+    if looks_like_process_narration(first_line):
         return True
     if reject_meta and contains_meta_openers(first_line):
         return True
@@ -560,14 +555,7 @@ _REFINE_PREAMBLE_RE = re.compile(
     r"[^\n]*\n?"
 )
 _REPORT_PROCESS_PREAMBLE_RE = re.compile(
-    r"(?m)^\s*"
-    r"(?:数据|资料|信息).{0,12}?(?:已经|已)?(?:全部)?(?:获取|收集|拿到|完成)(?:完毕)?[。！!；;，,]?\s*"
-    r"(?:"
-    r"(?:以下|下面|现在).{0,80}?(?:撰写|生成|输出|写).{0,60}?"
-    r"(?:分析报告|研究报告|诊断报告|研究分析|报告|分析|诊断|研究)"
-    r"|(?:以下|下面)(?:是|为).{0,100}?"
-    r"(?:分析报告|研究报告|诊断报告|研究分析|报告|分析|诊断|研究)"
-    r")[。！!；;，,:：]?\s*"
+    r"(?m)" + OPENING_DELIVERY_PREAMBLE_RE.pattern + r"[。！!；;，,:：]?\s*"
 )
 _PROMPT_INSTRUCTION_LEAK_RE = re.compile(
     r"(?m)^\s*(?:直接进入正文|Start directly with (?:your )?(?:argument|body|report))"

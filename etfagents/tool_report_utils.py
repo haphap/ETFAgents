@@ -4,6 +4,12 @@ from datetime import datetime, timedelta
 from langchain_core.messages import HumanMessage
 
 from etfagents.content_utils import contains_cjk, extract_text_content
+from etfagents.process_narration import (
+    PROCESS_DATA_READY_FRAGMENT,
+    PROCESS_PRESENTATION_FRAGMENT,
+    PROCESS_REPORT_ACTION_FRAGMENT,
+    looks_like_process_narration,
+)
 from etfagents.report_prompt_utils import get_no_process_narration_instruction
 
 
@@ -12,9 +18,13 @@ TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX = "[tool-recovery:data-unavailable]"
 _XML_TOOL_CALL_RE = re.compile(
     r"<tool_call>|<function[=\s]|</?function_call>", re.IGNORECASE
 )
-_DATA_READY_RE = (
-    r"(?:(?:已|已经).{0,40}?(?:获取|收集|拿到|完成|掌握).{0,40}?(?:数据|资料|信息)"
-    r"|(?:数据|资料|信息).{0,40}?(?:已|已经).{0,40}?(?:获取|收集|拿到|完成|掌握))"
+_DATA_READY_RE = PROCESS_DATA_READY_FRAGMENT
+_CN_REPORT_ACTION_RE = (
+    r"(?:"
+    + PROCESS_REPORT_ACTION_FRAGMENT
+    + r"|"
+    + PROCESS_PRESENTATION_FRAGMENT
+    + r")"
 )
 _EN_DATA_READY_RE = (
     r"(?:"
@@ -31,11 +41,10 @@ _EN_REPORT_ACTION_RE = (
     r"(?:\s+cross-analysis)?(?:\s+analysis)?\s+report"
 )
 _PROCESS_ONLY_REPORT_RE = re.compile(
-    r"(?:现在|好的|接下来|下一步|我|所有|数据|资料|信息|已获取|已经获取)[\s\S]{0,80}?"
+    r"(?:(?:现在|好的|接下来|下一步|我|所有|数据|资料|信息|已获取|已经获取)[\s\S]{0,80}?)?"
     + _DATA_READY_RE
     + r"[\s\S]{0,120}?"
-    r"(?:开始|将|马上|准备|现在|下面|接下来|随后|继续|直接|正式|可以|能够).{0,40}?"
-    r"(?:撰写|生成|输出|写).{0,40}?报告",
+    + _CN_REPORT_ACTION_RE,
     re.IGNORECASE,
 )
 _EN_PROCESS_ONLY_REPORT_RE = re.compile(
@@ -121,7 +130,8 @@ def _is_process_only_report_text(text: str) -> bool:
         return False
     short = stripped[:240]
     return bool(
-        _PROCESS_ONLY_REPORT_RE.match(short)
+        looks_like_process_narration(short)
+        or _PROCESS_ONLY_REPORT_RE.match(short)
         or _EN_PROCESS_ONLY_REPORT_RE.match(short)
     )
 
@@ -137,7 +147,8 @@ def _strip_process_only_report_prefix(text: str) -> str:
             changed = True
             continue
         if not (
-            _PROCESS_ONLY_REPORT_RE.match(first_line[:240])
+            looks_like_process_narration(first_line)
+            or _PROCESS_ONLY_REPORT_RE.match(first_line[:240])
             or _EN_PROCESS_ONLY_REPORT_RE.match(first_line[:240])
         ):
             break
