@@ -1109,7 +1109,7 @@ def _format_manager_decision(
         )
         parts.append(f"#### {snapshot_title}\n{snapshot_summary}")
 
-    return collapse_blank_lines("\n\n".join(parts)) or content
+    return collapse_blank_lines("\n\n".join(parts))
 
 
 def format_research_team_history(debate_state: dict) -> str:

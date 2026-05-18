@@ -2465,7 +2465,7 @@ _ETF_ALLOCATION_SCOPE_SENTENCE = (
 )
 
 
-def strip_constituent_trade_instructions(text: str, *, insert_scope_note: bool = False) -> str:
+def strip_constituent_trade_instructions(text: str, *, insert_scope_note: bool = True) -> str:
     """Remove direct constituent-stock trade instructions from ETF allocation prose."""
     content = text or ""
     # English prompts and schema descriptions carry the same ETF-only constraint.
@@ -3045,10 +3045,14 @@ def normalize_chinese_manager_terms(text: str) -> str:
 
     has_explicit_snapshot = any(marker in normalized for marker in SNAPSHOT_MARKERS)
     body = strip_constituent_trade_instructions(
-        strip_manager_instruction_leakage(strip_all_feedback_snapshots(normalized))
+        strip_manager_instruction_leakage(strip_all_feedback_snapshots(normalized)),
+        insert_scope_note=False,
     )
     snapshot = (
-        strip_constituent_trade_instructions(extract_feedback_snapshot(normalized))
+        strip_constituent_trade_instructions(
+            extract_feedback_snapshot(normalized),
+            insert_scope_note=False,
+        )
         if has_explicit_snapshot
         else ""
     )

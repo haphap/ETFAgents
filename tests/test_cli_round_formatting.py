@@ -5,6 +5,7 @@ from tempfile import TemporaryDirectory
 
 from cli.main import (
     MessageBuffer,
+    _format_manager_decision,
     _prepare_report_markdown,
     _normalize_ticker_list,
     format_research_team_history,
@@ -396,6 +397,14 @@ class CliRoundFormattingTests(unittest.TestCase):
 
         self.assertEqual(formatted.count("反馈快照:"), 0)
         self.assertEqual(formatted.count("#### 反馈快照摘要"), 0)
+
+    def test_manager_decision_does_not_fall_back_to_orphan_snapshot_item(self):
+        formatted = _format_manager_decision(
+            "- 本轮新增与反驳: 新增了对仓位节奏与风险预算的约束。",
+            show_snapshot_summary=False,
+        )
+
+        self.assertEqual(formatted, "")
 
     def test_research_manager_normalizes_judicial_wording_to_debate_conclusion(self):
         debate_state = {
