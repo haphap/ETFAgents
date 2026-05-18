@@ -57,21 +57,30 @@ ETF_DEFAULT_CONFIG["tool_vendors"].update(
 )
 
 _CANDIDATE_PAYLOAD_TEXT_SUFFIXES = ("_report", "_plan", "_decision")
-_SELECTED_ANALYST_REPORT_KEYS = {
+_CANONICAL_ANALYST_REPORT_KEYS = {
     "market_flow": "market_flow_report",
     "catalyst_sentiment": "catalyst_sentiment_report",
     "macro_regime": "macro_regime_report",
     "meso_commodity": "meso_commodity_report",
     "holdings_industry": "holdings_industry_report",
     "top_holdings": "top_holdings_report",
-    "market": "market_flow_report",
-    "social": "catalyst_sentiment_report",
-    "news": "macro_regime_report",
-    "etf_structure": "meso_commodity_report",
-    "broker_research": "holdings_industry_report",
-    "stock_research": "top_holdings_report",
-    "etf_flow": "market_flow_report",
-    "etf_macro": "holdings_industry_report",
+}
+_ANALYST_ALIASES = {
+    "market": "market_flow",
+    "social": "catalyst_sentiment",
+    "news": "macro_regime",
+    "etf_structure": "meso_commodity",
+    "broker_research": "holdings_industry",
+    "stock_research": "top_holdings",
+    "etf_flow": "market_flow",
+    "etf_macro": "holdings_industry",
+}
+_SELECTED_ANALYST_REPORT_KEYS = {
+    **_CANONICAL_ANALYST_REPORT_KEYS,
+    **{
+        alias: _CANONICAL_ANALYST_REPORT_KEYS[canonical]
+        for alias, canonical in _ANALYST_ALIASES.items()
+    },
 }
 _LEADING_CANDIDATE_PROCESS_RE = re.compile(
     r"^\s*(?:"
@@ -97,6 +106,8 @@ def _sanitize_candidate_payload_text(text: str) -> str:
     normalized_original = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
     original_paragraphs = re.split(r"\n\s*\n", normalized_original, maxsplit=1)
     if len(original_paragraphs) == 2 and _looks_like_candidate_process_opening(original_paragraphs[0].strip()):
+        # Some process openings partially overlap strip_refine_preamble(), which
+        # can leave a short orphan phrase such as "团队配置观点。" as paragraph one.
         return strip_refine_preamble(original_paragraphs[1]).strip()
 
     cleaned = strip_refine_preamble(text).strip()
@@ -146,18 +157,10 @@ def _has_missing_selected_reports(
     return False
 
 
-def _cacheable_candidate_payload(
-    payload: dict[str, object],
-    expected_report_keys: tuple[str, ...],
-) -> dict[str, object]:
+def _cacheable_candidate_payload(payload: dict[str, object]) -> dict[str, object]:
     cacheable = dict(payload)
-    report_keys = {
-        key for key in cacheable if key.endswith("_report")
-    }
-    report_keys.update(expected_report_keys)
-    for key in tuple(report_keys):
-        value = cacheable.get(key)
-        if isinstance(value, str) and not value.strip():
+    for key, value in tuple(cacheable.items()):
+        if key.endswith("_report") and isinstance(value, str) and not value.strip():
             cacheable.pop(key, None)
     return cacheable
 
@@ -183,17 +186,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
         selected_analysts: list[str],
         ticker: str,
     ) -> tuple[list[str], list[str]]:
-        aliases = {
-            "market": "market_flow",
-            "social": "catalyst_sentiment",
-            "news": "macro_regime",
-            "etf_structure": "meso_commodity",
-            "broker_research": "holdings_industry",
-            "stock_research": "top_holdings",
-            "etf_flow": "market_flow",
-            "etf_macro": "holdings_industry",
-        }
-        normalized = [aliases.get(analyst, analyst) for analyst in selected_analysts]
+        normalized = [_ANALYST_ALIASES.get(analyst, analyst) for analyst in selected_analysts]
         return list(dict.fromkeys(normalized)), []
 
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:
@@ -303,7 +296,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
             cache.put(
                 ticker,
                 trade_date,
-                _cacheable_candidate_payload(result, selected_report_keys),
+                _cacheable_candidate_payload(result),
             )
             results.append(result)
         ranked = sorted(

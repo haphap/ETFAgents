@@ -30,7 +30,7 @@ from etfagents.agents.utils.report_leads import (
     pre_judge_clean,
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
-from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
+from etfagents.agents.utils.validate_refine import AnalystReportSpec, static_validate, validate_and_refine
 from etfagents.tool_report_utils import date_days_before, run_tool_report_chain
 
 logger = logging.getLogger(__name__)
@@ -315,6 +315,13 @@ def create_etf_market_analyst(llm):
             logger.warning(
                 "Market & flow report failed strict acceptance after retries; keeping last cleaned draft."
             )
+        if report:
+            verdict = static_validate(report, _REPORT_SPEC)
+            if verdict.missing_elements:
+                logger.warning(
+                    "Market & flow report still missing expected elements after validation/refine: %s",
+                    "; ".join(verdict.missing_elements),
+                )
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

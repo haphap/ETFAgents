@@ -28,6 +28,7 @@ from etfagents.graph.etf_graph import (
     ETF_DEFAULT_CONFIG,
     EtfAgentsGraph,
     _sanitize_candidate_payload_text,
+    _selected_analyst_report_keys,
 )
 from etfagents.graph.etf_setup import ETFGraphSetup
 
@@ -82,6 +83,20 @@ class ETFExtensionTests(unittest.TestCase):
             ["market_flow", "macro_regime", "meso_commodity", "holdings_industry", "top_holdings"],
         )
         self.assertEqual(skipped, [])
+        self.assertEqual(
+            _selected_analyst_report_keys(analysts),
+            (
+                "market_flow_report",
+                "macro_regime_report",
+                "meso_commodity_report",
+                "holdings_industry_report",
+                "top_holdings_report",
+            ),
+        )
+        self.assertEqual(
+            _selected_analyst_report_keys(["market", "news", "etf_structure", "broker_research", "stock_research"]),
+            _selected_analyst_report_keys(analysts),
+        )
 
     def test_conditional_logic_supports_new_etf_analysts(self):
         logic = ConditionalLogic()
@@ -834,6 +849,11 @@ class ETFExtensionTests(unittest.TestCase):
     def test_candidate_payload_text_keeps_legitimate_short_overview(self):
         text = "本ETF分析显示趋势同步向上，资金确认偏多，建议保持配置。\n\n一、市场结构与量价诊断\n趋势延续。"
         self.assertEqual(text, _sanitize_candidate_payload_text(text))
+
+    def test_candidate_payload_text_strips_process_opening_before_partial_preamble_match(self):
+        text = "数据已获取完毕，以下为研究团队配置观点。\n\n研究观点正文"
+
+        self.assertEqual("研究观点正文", _sanitize_candidate_payload_text(text))
 
     def test_candidate_pool_cache_hits_are_sanitized_before_returning(self):
         graph = object.__new__(EtfAgentsGraph)

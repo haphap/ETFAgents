@@ -658,6 +658,41 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("\n指标总览\n\n| 指标 |", result["market_flow_report"])
         self.assertIn("\n综合结论\n\n偏多配置，等待回踩确认。", result["market_flow_report"])
 
+    def test_market_flow_node_warns_when_tail_elements_remain_missing(self):
+        llm = _CapturingLLM()
+        node = create_etf_market_analyst(llm)
+        incomplete_report = (
+            "趋势和资金流同步改善，MACD与RSI均显示动能仍偏强，当前交易含义是等待回踩确认后分批加仓。\n\n"
+            "一、市场结构与量价诊断\n"
+            "趋势导语。\n\n"
+            "二、交易确认与执行计划\n"
+            "执行导语。\n\n"
+            "三、关键价位与条件情景推演\n"
+            "情景导语。"
+        )
+
+        with patch(
+            "etfagents.agents.analysts.etf_market_analyst.run_tool_report_chain",
+            return_value=(AIMessage(content=incomplete_report), incomplete_report),
+        ), patch(
+            "etfagents.agents.analysts.etf_market_analyst.validate_and_refine",
+            side_effect=lambda report, *_args, **_kwargs: report,
+        ), self.assertLogs(
+            "etfagents.agents.analysts.etf_market_analyst",
+            level="WARNING",
+        ) as logs:
+            result = node(
+                {
+                    "company_of_interest": "159949.SZ",
+                    "trade_date": "2026-04-30",
+                    "messages": [HumanMessage(content="Analyze 159949.SZ")],
+                }
+            )
+
+        self.assertEqual(incomplete_report, result["market_flow_report"])
+        self.assertTrue(any("指标总览" in line for line in logs.output))
+        self.assertTrue(any("综合结论" in line for line in logs.output))
+
 
 class ReportTitleNormalizationTests(unittest.TestCase):
     def test_build_report_title_drops_suffix_only_ticker(self):
