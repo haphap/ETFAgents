@@ -789,7 +789,8 @@ def _convert_plain_headings_to_markdown(content: str) -> str:
 
 
 def _prepare_report_markdown(content: str, target_min_level: Optional[int] = None) -> str:
-    text = strip_exchange_only_pseudo_titles(content)
+    text = strip_refine_preamble(content)
+    text = strip_exchange_only_pseudo_titles(text)
     text = _strip_empty_markdown_decoration_lines(text)
     text = _normalize_loose_arabic_list_markers(text)
     text = _strip_sentence_like_section_prefixes_in_lists(text)
