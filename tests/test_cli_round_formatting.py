@@ -268,6 +268,34 @@ class CliRoundFormattingTests(unittest.TestCase):
 
         self.assertEqual(formatted, "科创芯片ETF嘉实")
 
+    def test_prepare_report_markdown_joins_wrapped_etf_name_and_ticker(self):
+        formatted = _prepare_report_markdown(
+            "恒生科技ETF华泰柏瑞\n\n"
+            "（513130）跟踪恒生科技指数，重点观察互联网平台和成长股风险偏好。"
+        )
+
+        self.assertIn(
+            "恒生科技ETF华泰柏瑞（513130）跟踪恒生科技指数",
+            formatted,
+        )
+        self.assertNotIn("恒生科技ETF华泰柏瑞\n\n（513130）", formatted)
+
+    def test_prepare_report_markdown_joins_single_newline_etf_name_and_ticker(self):
+        formatted = _prepare_report_markdown(
+            "恒生科技ETF华泰柏瑞\n"
+            "（513130）跟踪恒生科技指数。"
+        )
+
+        self.assertEqual(formatted, "恒生科技ETF华泰柏瑞（513130）跟踪恒生科技指数。")
+
+    def test_prepare_report_markdown_does_not_join_non_etf_name_before_ticker(self):
+        formatted = _prepare_report_markdown(
+            "宏观框架分析\n\n"
+            "（513130）跟踪恒生科技指数。"
+        )
+
+        self.assertIn("宏观框架分析\n\n（513130）", formatted)
+
     def test_prepare_report_markdown_leaves_english_prose_numbering_unchanged(self):
         cfg = DEFAULT_CONFIG.copy()
         cfg["output_language"] = "English"
