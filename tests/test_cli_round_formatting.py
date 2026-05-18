@@ -1021,6 +1021,27 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertEqual(accumulated["meso_commodity_report"], "中观大宗商品分析内容")
         self.assertNotIn("meso_commodity", accumulated)
 
+    def test_stream_state_merge_ignores_messages_without_deepcopy(self):
+        class UnsafeMessage:
+            def __deepcopy__(self, memo):
+                raise AssertionError("messages should not be deep-copied into final state")
+
+        accumulated = {"market_flow_report": "市场与资金流分析内容"}
+
+        _merge_stream_state(
+            accumulated,
+            {
+                "messages": [UnsafeMessage()],
+                "market_flow": {"messages": [UnsafeMessage()]},
+                "trader_allocation_plan": "交易计划内容",
+            },
+        )
+
+        self.assertEqual(accumulated["market_flow_report"], "市场与资金流分析内容")
+        self.assertEqual(accumulated["trader_allocation_plan"], "交易计划内容")
+        self.assertNotIn("messages", accumulated)
+        self.assertNotIn("market_flow", accumulated)
+
     def test_analyst_statuses_capture_nested_meso_commodity_report(self):
         buffer = MessageBuffer()
         buffer.init_for_analysis(["meso_commodity"])

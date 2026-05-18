@@ -201,7 +201,6 @@ _STREAM_STATE_KEYS = {
         for legacy_keys in CANONICAL_TO_LEGACY_STATE_KEYS.values()
         for legacy in legacy_keys
     ),
-    "messages",
     "investment_debate_state",
     "risk_debate_state",
     "trader_backtest_signal",
