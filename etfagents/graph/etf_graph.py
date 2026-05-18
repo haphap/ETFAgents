@@ -56,13 +56,17 @@ ETF_DEFAULT_CONFIG["tool_vendors"].update(
     }
 )
 
-_CANDIDATE_CACHE_TEXT_SUFFIXES = ("_report", "_plan", "_decision")
+_CANDIDATE_PAYLOAD_TEXT_SUFFIXES = ("_report", "_plan", "_decision")
 _LEADING_CANDIDATE_PROCESS_RE = re.compile(
-    r"(?:数据|资料|信息|报告|分析|获取|收集|整理|就绪|完毕|撰写|生成|输出|以下为|以下是|开始|接下来|下一步|现在)"
+    r"^\s*(?:"
+    r"(?:报告|内容).{0,12}(?:已|已经)?(?:就绪|完成|生成|整理好|准备好)[。！!；;，,]?\s*(?:以下|下面|现在|接下来|下一步)"
+    r"|(?:数据|资料|信息).{0,12}?(?:已经|已)?(?:全部)?(?:获取|收集|整理|拿到|完成)(?:完毕)?[。！!；;，,]?\s*(?:以下|下面|现在|接下来|下一步)"
+    r"|以下(?:是|为)"
+    r")"
 )
 
 
-def _sanitize_candidate_cache_text(text: str) -> str:
+def _sanitize_candidate_payload_text(text: str) -> str:
     cleaned = strip_refine_preamble(text).strip()
     if not cleaned:
         return ""
@@ -76,24 +80,24 @@ def _sanitize_candidate_cache_text(text: str) -> str:
         and len(opening.splitlines()) <= 2
         and not re.search(r"(?m)^\s*(?:#|\||[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)", opening)
         and not re.search(r"\d|[%％]", opening)
-        and _LEADING_CANDIDATE_PROCESS_RE.search(opening)
+        and _LEADING_CANDIDATE_PROCESS_RE.match(opening)
         and len(paragraphs) == 2
     ):
         return paragraphs[1].strip()
     return cleaned
 
 
-def _sanitize_candidate_cache_payload(payload: dict[str, object]) -> dict[str, object]:
+def _sanitize_candidate_payload(payload: dict[str, object]) -> dict[str, object]:
     sanitized = dict(payload)
     for key, value in tuple(sanitized.items()):
-        if isinstance(value, str) and key.endswith(_CANDIDATE_CACHE_TEXT_SUFFIXES):
-            sanitized[key] = _sanitize_candidate_cache_text(value)
+        if isinstance(value, str) and key.endswith(_CANDIDATE_PAYLOAD_TEXT_SUFFIXES):
+            sanitized[key] = _sanitize_candidate_payload_text(value)
     signal = sanitized.get("backtest_signal")
     if isinstance(signal, dict):
         snapshot = signal.get("signal_text_snapshot")
         if isinstance(snapshot, str):
             signal = dict(signal)
-            signal["signal_text_snapshot"] = _sanitize_candidate_cache_text(snapshot)
+            signal["signal_text_snapshot"] = _sanitize_candidate_payload_text(snapshot)
             sanitized["backtest_signal"] = signal
     return sanitized
 
@@ -172,7 +176,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
             )
             cached = cache.get(ticker, trade_date)
             if cached is not None:
-                results.append(dict(cached))
+                results.append(_sanitize_candidate_payload(dict(cached)))
                 continue
             final_state, rating = self.propagate(ticker, trade_date)
             result = {
@@ -200,7 +204,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
                     default_trade_date=trade_date,
                 ),
             }
-            result = _sanitize_candidate_cache_payload(result)
+            result = _sanitize_candidate_payload(result)
             cache.put(ticker, trade_date, result)
             results.append(result)
         ranked = sorted(

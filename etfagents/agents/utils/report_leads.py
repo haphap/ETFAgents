@@ -114,6 +114,8 @@ def get_no_title_instruction() -> str:
         "For Chinese reports, write that overview before the first '一、' section; never start directly with '一、', '（一）', a bullet list, or a table. "
         "Do NOT repeat the report subject as a standalone title-like line anywhere in the body, and never construct pseudo-titles from only SH / SZ / HK / BJ or similar exchange suffixes."
     )
+
+
 def get_topic_and_term_style_instruction() -> str:
     return (
         " Make the opening sentence concise and thesis-led, with the same sharpness a strong title would have, rather than using generic scene-setting. "

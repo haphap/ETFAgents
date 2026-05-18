@@ -156,13 +156,11 @@ def _strip_process_only_report_prefix(text: str) -> str:
     return "\n".join(lines).strip() if changed else (text or "").strip()
 
 
-def _extract_report_text(result, report_acceptance_check=None) -> str:
+def _extract_report_text(result) -> str:
     report = _strip_process_only_report_prefix(
         extract_text_content(getattr(result, "content", None))
     )
     if not report or _is_tool_call_text(report) or _is_process_only_report_text(report):
-        return ""
-    if report_acceptance_check is not None and not report_acceptance_check(report):
         return ""
     return report
 
@@ -222,7 +220,6 @@ def _recover_unexecuted_tool_intent(
     prompt_kwargs: dict,
     recovery_config: dict | None,
     report: str,
-    report_acceptance_check=None,
 ):
     if not recovery_config:
         return None, ""
@@ -317,7 +314,6 @@ def run_tool_report_chain(
             prompt_kwargs=prompt_kwargs,
             recovery_config=unexecuted_tool_recovery,
             report=report,
-            report_acceptance_check=report_acceptance_check,
         )
         if recovered_report:
             last_report_result = recovered_result or result
