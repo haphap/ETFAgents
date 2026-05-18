@@ -143,6 +143,7 @@ class ETFExtensionTests(unittest.TestCase):
             rating = ratings[ticker]
             return (
                 {
+                    "market_flow_report": f"market-flow-{ticker}",
                     "research_allocation_plan": f"research-{ticker}",
                     "trader_allocation_plan": f"trader-{ticker}",
                     "final_allocation_decision": f"decision-{ticker}",
@@ -163,6 +164,7 @@ class ETFExtensionTests(unittest.TestCase):
             [item["ticker"] for item in ranked],
             ["159915.SZ", "510300.SH", "513100.SH"],
         )
+        self.assertEqual(ranked[0]["market_flow_report"], "market-flow-159915.SZ")
         self.assertEqual(ranked[0]["final_allocation_decision"], "decision-159915.SZ")
         self.assertEqual(
             [item["suggested_weight_pct"] for item in ranked],

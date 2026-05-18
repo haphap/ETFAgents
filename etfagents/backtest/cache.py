@@ -9,7 +9,7 @@ from typing import Any, Mapping, Sequence
 from etfagents.dataflows.config import get_backtest_context
 
 
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 
 
 def _safe_path_token(value: str) -> str:

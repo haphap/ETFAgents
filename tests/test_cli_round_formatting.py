@@ -8,6 +8,7 @@ from cli.main import (
     _format_manager_decision,
     _merge_stream_state,
     _prepare_report_markdown,
+    display_candidate_pool_report,
     _normalize_ticker_list,
     format_research_team_history,
     format_risk_management_history,
@@ -177,6 +178,17 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertNotIn("一、SH 工业有色ETF万家：舆情与事件影响分析", formatted)
         self.assertIn("## 一、总体研判", formatted)
         self.assertIn("正文内容。", formatted)
+
+    def test_prepare_report_markdown_strips_data_ready_analysis_preamble(self):
+        formatted = _prepare_report_markdown(
+            "数据已获取完毕，以下为ETF持仓行业研究分析。\n\n"
+            "一、行业主线与分歧焦点\n"
+            "正文内容。"
+        )
+
+        self.assertNotIn("数据已获取完毕", formatted)
+        self.assertNotIn("以下为ETF持仓行业研究分析", formatted)
+        self.assertIn("# 一、行业主线与分歧焦点", formatted)
 
     def test_prepare_report_markdown_keeps_sentence_like_numbering_inside_list_body(self):
         formatted = _prepare_report_markdown(
@@ -1073,6 +1085,7 @@ class CliRoundFormattingTests(unittest.TestCase):
                 "rating": "BUY",
                 "score": "5",
                 "suggested_weight_pct": 50.0,
+                "market_flow_report": "市场与资金流分析内容A",
                 "research_allocation_plan": "研究观点A",
                 "trader_allocation_plan": "交易计划A",
                 "final_allocation_decision": "## 辩论结论\n最终配置建议: **买入**",
@@ -1102,6 +1115,39 @@ class CliRoundFormattingTests(unittest.TestCase):
             self.assertIn("| 排名 | 代码 | 评级 | 分数 | 建议权重 |", report_text)
             self.assertIn("159915.SZ", report_text)
             self.assertIn("50.0%", report_text)
+            self.assertIn("### 市场与资金流分析", report_text)
+            self.assertIn("市场与资金流分析内容A", report_text)
+            candidate_text = (Path(tmpdir) / "ranked_candidates" / "01_159915_SZ.md").read_text()
+            self.assertIn("## 市场与资金流分析", candidate_text)
+            self.assertIn("市场与资金流分析内容A", candidate_text)
+
+    def test_display_candidate_pool_report_includes_final_decision_heading(self):
+        candidates = [
+            {
+                "ticker": "159915.SZ",
+                "rating": "BUY",
+                "score": "5",
+                "suggested_weight_pct": 50.0,
+                "market_flow_report": "市场与资金流分析内容A",
+                "final_allocation_decision": "## 辩论结论\n最终配置建议: **买入**",
+            }
+        ]
+
+        class RecordingConsole:
+            def __init__(self):
+                self.calls = []
+
+            def print(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+
+        recording_console = RecordingConsole()
+        with patch("cli.main.console", recording_console):
+            display_candidate_pool_report(candidates)
+
+        panel = recording_console.calls[3][0][0]
+        self.assertIn("## 市场与资金流分析", panel.renderable.markup)
+        self.assertIn("## 投资组合配置决策", panel.renderable.markup)
+        self.assertIn("最终配置建议: **买入**", panel.renderable.markup)
 
     def test_prepare_report_markdown_normalizes_official_hierarchy(self):
         text = (

@@ -368,6 +368,19 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertNotIn("数据已全部获取完毕", cleaned)
         self.assertTrue(cleaned.startswith("一、核心持仓共识与分歧"))
 
+    def test_pre_judge_clean_strips_data_complete_followed_by_analysis_preamble(self):
+        raw = (
+            "数据已获取完毕，以下为ETF持仓行业研究分析。\n\n"
+            "一、行业主线与分歧焦点\n"
+            "煤炭链条盈利预期仍受煤价下行压制。"
+        )
+
+        cleaned = pre_judge_clean(raw)
+
+        self.assertNotIn("数据已获取完毕", cleaned)
+        self.assertNotIn("以下为ETF持仓行业研究分析", cleaned)
+        self.assertTrue(cleaned.startswith("一、行业主线与分歧焦点"))
+
     def test_artifact_only_separator_lines_are_removed_anywhere(self):
         raw = (
             "宏观结论偏中性。\n"

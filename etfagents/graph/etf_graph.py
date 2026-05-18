@@ -183,6 +183,36 @@ class EtfAgentsGraph(TradingAgentsGraph):
                 "ticker": ticker,
                 "rating": rating,
                 "score": str(self._RATING_SCORE.get(rating, 0)),
+                "market_flow_report": get_state_value(
+                    final_state,
+                    "market_flow_report",
+                    "",
+                ),
+                "catalyst_sentiment_report": get_state_value(
+                    final_state,
+                    "catalyst_sentiment_report",
+                    "",
+                ),
+                "macro_regime_report": get_state_value(
+                    final_state,
+                    "macro_regime_report",
+                    "",
+                ),
+                "meso_commodity_report": get_state_value(
+                    final_state,
+                    "meso_commodity_report",
+                    "",
+                ),
+                "holdings_industry_report": get_state_value(
+                    final_state,
+                    "holdings_industry_report",
+                    "",
+                ),
+                "top_holdings_report": get_state_value(
+                    final_state,
+                    "top_holdings_report",
+                    "",
+                ),
                 "research_allocation_plan": get_state_value(
                     final_state,
                     "research_allocation_plan",
