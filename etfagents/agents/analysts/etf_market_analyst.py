@@ -1,4 +1,5 @@
 import logging
+import re
 
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -68,6 +69,8 @@ _ETF_MARKET_INDICATORS = {
     "vwma": "price-volume confirmation",
 }
 _MARKET_FLOW_REQUIRED_TOP_SECTIONS = {"一", "二", "三"}
+_MARKET_FLOW_TABLE_SEPARATOR_RE = re.compile(r"^\|(?:\s*:?-{3,}:?\s*\|)+\s*$")
+_MARKET_FLOW_CONCLUSION_LABEL_RE = re.compile(r"^\s*综合结论\s*[:：]\s*(.+)$")
 
 
 def _etf_indicator_catalog() -> str:
@@ -90,6 +93,67 @@ def _looks_like_complete_market_flow_report(report: str) -> bool:
         return False
 
     return True
+
+
+def _find_last_markdown_table(lines: list[str]) -> tuple[int, int] | None:
+    last_table: tuple[int, int] | None = None
+    index = 0
+    while index < len(lines) - 1:
+        header = lines[index].strip()
+        separator = lines[index + 1].strip()
+        if not (header.startswith("|") and "|" in header and _MARKET_FLOW_TABLE_SEPARATOR_RE.match(separator)):
+            index += 1
+            continue
+        end = index + 2
+        while end < len(lines) and lines[end].strip().startswith("|"):
+            end += 1
+        last_table = (index, end)
+        index = end
+    return last_table
+
+
+def _normalize_market_flow_tail_sections(report: str) -> str:
+    if not report:
+        return ""
+
+    lines = report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    table_span = _find_last_markdown_table(lines)
+    if table_span is not None:
+        table_start, table_end = table_span
+        before_idx = table_start - 1
+        while before_idx >= 0 and not lines[before_idx].strip():
+            before_idx -= 1
+        if before_idx < 0 or lines[before_idx].strip() != "指标总览":
+            insertion = ["指标总览", ""]
+            if table_start > 0 and lines[table_start - 1].strip():
+                insertion.insert(0, "")
+            lines[table_start:table_start] = insertion
+            delta = len(insertion)
+            table_start += delta
+            table_end += delta
+
+        conclusion_idx = table_end
+        while conclusion_idx < len(lines) and not lines[conclusion_idx].strip():
+            conclusion_idx += 1
+        if conclusion_idx < len(lines):
+            match = _MARKET_FLOW_CONCLUSION_LABEL_RE.match(lines[conclusion_idx])
+            if match:
+                lines[conclusion_idx] = "综合结论"
+                lines.insert(conclusion_idx + 1, "")
+                lines.insert(conclusion_idx + 2, match.group(1).strip())
+            elif lines[conclusion_idx].strip() != "综合结论":
+                lines[conclusion_idx:conclusion_idx] = ["综合结论", ""]
+    else:
+        for index, line in enumerate(lines):
+            match = _MARKET_FLOW_CONCLUSION_LABEL_RE.match(line)
+            if not match:
+                continue
+            lines[index] = "综合结论"
+            lines.insert(index + 1, "")
+            lines.insert(index + 2, match.group(1).strip())
+            break
+
+    return "\n".join(lines).strip()
 
 
 def create_etf_market_analyst(llm):
@@ -135,9 +199,9 @@ def create_etf_market_analyst(llm):
             "    用连贯段落而非清单，说明最重要的支撑/阻力/加仓/减仓/止损价位。\n"
             "  （二）条件情景推演\n"
             "    用连贯段落将价位与核心情景路径、确认或证伪条件、以及赋予该情景更高权重的理由联系起来。\n\n"
-            "在所有分析章节之后，报告最末附一个标题为'指标总览'的markdown表格，"
+            "在所有分析章节之后，报告最末必须先写一个独立标题行“指标总览”，再附对应的markdown表格，"
             "包含指标、数值、位置、交易含义和关键阈值五列，覆盖本报告讨论的所有主要技术指标与资金指标。"
-            "表格之后附一段综合结论，明确配置方向（偏多/偏空/中性）、关键价位区间和资金状态判断。\n\n"
+            "表格之后必须另起一个独立标题行“综合结论”，再附一段总结，明确配置方向（偏多/偏空/中性）、关键价位区间和资金状态判断。\n\n"
             "## 风格要求\n"
             '- 当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用"分别为"连接，例如"10日均线、20日均线、50日均线值分别为2.01元、2.02元、2.03元"，不得逐个单独陈述。\n'
             '- 若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出"数据缺失""数据不足"等提示。\n'
@@ -162,6 +226,7 @@ def create_etf_market_analyst(llm):
             "趋势、动量、波动率与资金流四维共振偏多，执行上以回踩支撑加仓为主、条件化风控为辅。若RSI进入超买区后出现死叉，应优先收缩仓位而非追高；若份额从净流入转为净流出，则说明资金在撤退，需重新评估偏多逻辑。当前建议维持偏多配置，仓位控制在5-6成，回踩448-450区间可加至7成，止损设在446元下方。\n\n"
             "三、关键价位与条件情景推演\n\n"
             "当前448-450一带既是20日均线与前期密集成交区重叠的支撑带，也是判断这轮偏多结构是否仍有效的第一道关口。若价格回踩后成交量没有明显失速、且VWMA继续向上抬升，说明资金承接并未破坏，基准情景仍是震荡后继续上攻462-465阻力带。操作上，若回踩448-450不破且量能未失速，可加仓至6-7成，止损446元下方；若放量跌破448则先减至3-4成，进一步跌破440则止损离场。最乐观情景下，若放量突破462元可追加至8成，目标470元以上。基于当前信号强度，基准情景权重约65%，最乐观情景约25%，转弱情景约10%。需警惕的风险包括：RSI进入超买区后死叉可能触发短期回调，份额从净流入转为净流出将否定偏多逻辑。\n\n"
+            "指标总览\n\n"
             "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
             "| --- | --- | --- | --- | --- |\n"
             "| 10/20/50/200 SMA | 452/448/443/425 | 上方 | 多头排列，趋势偏多 | 跌破448则短期转弱 |\n"
@@ -170,7 +235,8 @@ def create_etf_market_analyst(llm):
             "| 布林带 | 中轨449, 上轨462 | 中轨与上轨之间 | 波动率扩张，方向向上 | 跌破中轨则趋势减弱 |\n"
             "| 份额变化 | +2.3% | — | 资金净流入 | 连续下降则资金撤退 |\n"
             "| 换手率 | 1.3% | 正常 | 未见拥挤 | 超过3%则拥挤加剧 |\n\n"
-            "综合结论：偏多配置，回踩448-450加仓，止损446，目标462-465。资金状态：份额增长+溢价正常+换手率适中=资金积累中。\n\n"
+            "综合结论\n\n"
+            "偏多配置，回踩448-450加仓，止损446，目标462-465。资金状态：份额增长+溢价正常+换手率适中=资金积累中。\n\n"
             "## 语言\n"
             "分析文本使用中文。工具名称、指标ID与行情代码保持英文。\n"
             + get_language_instruction()
@@ -244,6 +310,7 @@ def create_etf_market_analyst(llm):
         report = pre_judge_clean(report) if report else report
         report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
         report = post_judge_clean(report) if report else report
+        report = _normalize_market_flow_tail_sections(report) if report else report
         if report and not _looks_like_complete_market_flow_report(report):
             logger.warning(
                 "Market & flow report failed strict acceptance after retries; keeping last cleaned draft."

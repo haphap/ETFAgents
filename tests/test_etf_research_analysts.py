@@ -12,6 +12,7 @@ from etfagents.agents.analysts.etf_market_analyst import (
     _REPORT_SPEC,
     create_etf_market_analyst,
     _looks_like_complete_market_flow_report,
+    _normalize_market_flow_tail_sections,
 )
 from etfagents.agents.analysts.macro_analyst import (
     create_macro_analyst,
@@ -604,7 +605,24 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertTrue(any("指标总览" in item for item in verdict.missing_elements))
         self.assertTrue(any("综合结论" in item for item in verdict.missing_elements))
 
-    def test_market_flow_keeps_last_cleaned_draft_when_tail_markers_are_still_missing(self):
+    def test_market_flow_tail_normalizer_inserts_missing_hard_headings(self):
+        report = (
+            "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
+            "一、市场结构与量价诊断\n趋势导语。\n\n"
+            "二、交易确认与执行计划\n执行导语。\n\n"
+            "三、关键价位与条件情景推演\n情景导语。\n\n"
+            "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| MACD | 1 | 上方 | 动能改善 | 下穿转弱 |\n\n"
+            "综合结论：偏多配置，等待回踩确认。"
+        )
+
+        normalized = _normalize_market_flow_tail_sections(report)
+
+        self.assertIn("\n指标总览\n\n| 指标 |", normalized)
+        self.assertIn("\n综合结论\n\n偏多配置，等待回踩确认。", normalized)
+
+    def test_market_flow_node_normalizes_tail_headings_when_content_exists(self):
         llm = _CapturingLLM()
         node = create_etf_market_analyst(llm)
         incomplete_report = (
@@ -615,6 +633,9 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
             "执行导语。\n\n"
             "三、关键价位与条件情景推演\n"
             "情景导语。\n\n"
+            "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| MACD | 1 | 上方 | 动能改善 | 下穿转弱 |\n\n"
             "综合结论：偏多配置，等待回踩确认。"
         )
 
@@ -634,7 +655,8 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
             )
 
         self.assertIn("趋势和资金流同步改善", result["market_flow_report"])
-        self.assertNotIn("指标总览", result["market_flow_report"])
+        self.assertIn("\n指标总览\n\n| 指标 |", result["market_flow_report"])
+        self.assertIn("\n综合结论\n\n偏多配置，等待回踩确认。", result["market_flow_report"])
 
 
 class ReportTitleNormalizationTests(unittest.TestCase):
