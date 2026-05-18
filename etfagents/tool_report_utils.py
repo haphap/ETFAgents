@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from langchain_core.messages import HumanMessage
 
 from etfagents.content_utils import contains_cjk, extract_text_content
+from etfagents.report_prompt_utils import get_no_process_narration_instruction
 
 
 TOOL_RECOVERY_DATA_UNAVAILABLE_PREFIX = "[tool-recovery:data-unavailable]"
@@ -77,16 +78,15 @@ def _build_final_report_fallback(system_message: str) -> str:
         return (
             " 你的上一条回复没有给出最终报告正文。"
             "下一条回复必须只输出面向用户的最终 Markdown 正文，并立刻以开篇概述段起笔。"
-            "不要提及工具、数据已获取/已检索、数据收集、正在撰写、正在整理、下一步或你的过程。"
-            "不要以“现在我来”“接下来”“下面”“我将”“我可以开始”等过程性话术开头。"
+            + get_no_process_narration_instruction()
+            + " 不要以“现在我来”“接下来”“下面”“我将”“我可以开始”等过程性话术开头。"
         )
     return (
         " Your previous reply did not contain the finished report body. "
         "The next reply must be the completed end-user markdown only. "
         "Begin immediately with the opening overview paragraph in the target language. "
-        "Do not mention tools, retrieved data, data collection, writing, drafting, compiling, "
-        "next steps, or your process. Do not begin with phrases like 'Now let me', 'I will', "
-        "'I can now', 'Next', or similar process narration."
+        + get_no_process_narration_instruction()
+        + " Do not begin with phrases like 'Now let me', 'I will', 'I can now', 'Next', or similar process narration."
     )
 
 
@@ -156,13 +156,11 @@ def _strip_process_only_report_prefix(text: str) -> str:
     return "\n".join(lines).strip() if changed else (text or "").strip()
 
 
-def _extract_report_text(result, report_acceptance_check=None) -> str:
+def _extract_report_text(result) -> str:
     report = _strip_process_only_report_prefix(
         extract_text_content(getattr(result, "content", None))
     )
     if not report or _is_tool_call_text(report) or _is_process_only_report_text(report):
-        return ""
-    if report_acceptance_check is not None and not report_acceptance_check(report):
         return ""
     return report
 
@@ -222,7 +220,6 @@ def _recover_unexecuted_tool_intent(
     prompt_kwargs: dict,
     recovery_config: dict | None,
     report: str,
-    report_acceptance_check=None,
 ):
     if not recovery_config:
         return None, ""
@@ -280,7 +277,7 @@ def _recover_unexecuted_tool_intent(
             HumanMessage(content=recovery_context),
         ]
     )
-    recovered_report = _extract_report_text(result, report_acceptance_check)
+    recovered_report = _extract_report_text(result)
     return result, recovered_report
 
 
@@ -292,6 +289,7 @@ def run_tool_report_chain(
     *,
     unexecuted_tool_recovery: dict | None = None,
     report_acceptance_check=None,
+    rejected_report_fallback: str = "empty",
     **prompt_kwargs,
 ):
     """Run a tool-enabled analyst chain and recover from empty final responses.
@@ -306,6 +304,8 @@ def run_tool_report_chain(
         return result, ""
 
     report = _extract_report_text(result)
+    last_report_result = result if report else None
+    last_report_text = report
     if report:
         recovered_result, recovered_report = _recover_unexecuted_tool_intent(
             prompt_template=prompt_template,
@@ -314,10 +314,12 @@ def run_tool_report_chain(
             prompt_kwargs=prompt_kwargs,
             recovery_config=unexecuted_tool_recovery,
             report=report,
-            report_acceptance_check=report_acceptance_check,
         )
         if recovered_report:
-            return recovered_result or result, recovered_report
+            last_report_result = recovered_result or result
+            last_report_text = recovered_report
+            if _report_is_accepted(recovered_report, report_acceptance_check):
+                return recovered_result or result, recovered_report
         if _report_is_accepted(report, report_acceptance_check):
             return result, report
 
@@ -328,9 +330,12 @@ def run_tool_report_chain(
     )
     fallback_prompt = prompt_template.partial(**fallback_kwargs)
     fallback_result = (fallback_prompt | llm).invoke(messages)
-    fallback_report = _extract_report_text(fallback_result, report_acceptance_check)
-
+    fallback_report = _extract_report_text(fallback_result)
     if fallback_report:
+        last_report_result = fallback_result
+        last_report_text = fallback_report
+
+    if _report_is_accepted(fallback_report, report_acceptance_check):
         return fallback_result, fallback_report
 
     second_fallback_result = (fallback_prompt | llm).invoke(
@@ -339,12 +344,15 @@ def run_tool_report_chain(
             HumanMessage(content=_build_final_report_user_nudge(system_message)),
         ]
     )
-    second_fallback_report = _extract_report_text(
-        second_fallback_result,
-        report_acceptance_check,
-    )
-
+    second_fallback_report = _extract_report_text(second_fallback_result)
     if second_fallback_report:
+        last_report_result = second_fallback_result
+        last_report_text = second_fallback_report
+
+    if _report_is_accepted(second_fallback_report, report_acceptance_check):
         return second_fallback_result, second_fallback_report
+
+    if rejected_report_fallback == "last_attempt" and last_report_text:
+        return last_report_result or result, last_report_text
 
     return result, ""

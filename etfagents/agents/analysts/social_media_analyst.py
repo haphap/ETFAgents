@@ -19,6 +19,7 @@ from etfagents.agents.utils.report_leads import (
     collect_top_section_marks,
     contains_markdown_table,
     get_concise_heading_instruction,
+    get_no_process_narration_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
     has_invalid_opening_cap,
@@ -118,20 +119,21 @@ def _build_system_message(
     return (
         "你是一名ETF催化剂与情绪分析师。你的工作不限于ETF产品本身："
         "必须分析公众讨论、近期新闻和宏观事件如何通过基准暴露、主导行业和高权重持仓影响ETF价格支撑或拖累。\n\n"
-        "## 数据来源（已获取，直接使用）\n\n"
+        "以下材料已提供，直接据此分析；不要复述取数、整理或下一步过程。\n\n"
         f"### ETF基本信息\n<etf_info>\n{etf_info}\n</etf_info>\n\n"
         f"### ETF持仓构成\n<etf_holdings>\n{etf_holdings}\n</etf_holdings>\n\n"
         f"### ETF相关新闻（过去7天）\n<ticker_news>\n{ticker_news}\n</ticker_news>\n\n"
         f"### 重仓股相关新闻（过去7天）\n<holdings_news>\n{holdings_news}\n</holdings_news>\n\n"
         f"### 宏观新闻与市场情绪\n<global_news>\n{global_news}\n</global_news>\n\n"
-        "## 分析指引\n"
-        "基于上述已获取的数据，完成以下分析：\n\n"
+        "分析要求：\n\n"
+        "基于上述已提供的数据，完成以下分析：\n\n"
         "1. 从ETF持仓构成中识别基准、主导行业和最高权重持仓。\n"
         "2. 分析新闻和情绪数据如何影响这些持仓和行业。\n"
         "3. 判断每个事件可能支撑、压制还是拖累ETF价格，解释传导路径：新闻/情绪/宏观事件 → 持仓/行业影响 → ETF价格含义。\n"
         "4. 跨数据源比对：如果某个事件在多个来源中出现，信号更强；如果不同源指向矛盾方向，需要明确指出分歧。\n"
         "5. 区分事实与观点：新闻标题是事实，社交媒体评论是观点，两者权重不同。\n"
         "6. 如果某个数据源返回为空或数据不足，在分析中明确标注该信号的置信度较低。\n\n"
+        + get_no_process_narration_instruction() + "\n"
         + get_no_title_instruction() + "\n"
         + get_topic_and_term_style_instruction() + "\n"
         + get_concise_heading_instruction() + "\n"

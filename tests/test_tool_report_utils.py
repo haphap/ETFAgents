@@ -319,6 +319,29 @@ class ToolReportUtilsTests(unittest.TestCase):
         self.assertEqual("", report)
         self.assertEqual("first draft", result.content)
 
+    def test_acceptance_check_can_keep_last_rejected_report(self):
+        prompt = _FakePrompt()
+        llm = _FakeLLM(
+            [_FakeResponse(content="first draft")],
+            [
+                _FakeResponse(content="fallback draft"),
+                _FakeResponse(content="second fallback draft"),
+            ],
+        )
+
+        result, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=["tool"],
+            messages=["state"],
+            system_message="sys",
+            report_acceptance_check=lambda _text: False,
+            rejected_report_fallback="last_attempt",
+        )
+
+        self.assertEqual("second fallback draft", report)
+        self.assertEqual("second fallback draft", result.content)
+
     def test_long_process_only_inline_prefix_keeps_report_body(self):
         prompt = _FakePrompt()
         overview = "行业景气修复但利润传导仍不均衡，" * 12
@@ -463,6 +486,38 @@ class ToolReportUtilsTests(unittest.TestCase):
 
         self.assertEqual("Recovered complete report", report)
         self.assertEqual("Recovered complete report", result.content)
+        self.assertEqual([{"ticker": "516650.SH"}], news_tool.calls)
+
+    def test_last_attempt_can_return_rejected_unexecuted_tool_recovery(self):
+        prompt = _FakePrompt()
+        news_tool = _FakeTool("get_news", "news data")
+        llm = _FakeLLM(
+            [_FakeResponse(content="好的，接下来我将调用 get_news 工具获取催化剂。")],
+            [
+                _FakeResponse(content="Recovered incomplete report"),
+                _FakeResponse(content=""),
+                _FakeResponse(content=""),
+            ],
+        )
+
+        result, report = run_tool_report_chain(
+            prompt,
+            llm,
+            tools=[news_tool],
+            messages=["state"],
+            system_message="sys",
+            report_acceptance_check=lambda _text: False,
+            rejected_report_fallback="last_attempt",
+            unexecuted_tool_recovery={
+                "trigger_tool_names": ["get_news"],
+                "tool_payloads": [
+                    {"tool": news_tool, "payload": {"ticker": "516650.SH"}},
+                ],
+            },
+        )
+
+        self.assertEqual("Recovered incomplete report", report)
+        self.assertEqual("Recovered incomplete report", result.content)
         self.assertEqual([{"ticker": "516650.SH"}], news_tool.calls)
 
     def test_recovery_only_runs_payloads_for_matched_tool_names(self):

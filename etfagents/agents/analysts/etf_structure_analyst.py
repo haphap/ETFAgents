@@ -12,6 +12,7 @@ from etfagents.agents.utils.report_leads import (
     collect_top_section_marks,
     contains_markdown_table,
     get_concise_heading_instruction,
+    get_no_process_narration_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
     has_invalid_opening_cap,
@@ -94,6 +95,7 @@ def create_etf_structure_analyst(llm):
             "- 工业品：工业硅 (SI)、尿素 (UR)、PVC (V)、纯碱 (SA)\n\n"
             "覆盖规则：所有发出异常信号的合约必须被提及。无异常信号的合约可省略以保持主线聚焦——不得为了填充内容而稀释叙述。\n\n"
             "## 报告结构\n"
+            + get_no_process_narration_instruction() + "\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
