@@ -50,6 +50,7 @@ from etfagents.agents.utils.agent_utils import (
     strip_all_feedback_snapshots,
     strip_feedback_snapshot,
     strip_role_prefix,
+    strip_second_person_heading_prefix,
 )
 from etfagents.agents.utils.report_leads import (
     strip_exchange_only_pseudo_titles,
@@ -189,33 +190,8 @@ def _strip_heading_number_prefix(text: str) -> str:
     return stripped.strip()
 
 
-def _strip_heading_address_prefix(text: str) -> str:
-    stripped = (text or "").strip()
-    for prefix in (
-        "你们的",
-        "你们对",
-        "你们在",
-        "你们把",
-        "你们用",
-        "你们拿",
-        "你们说",
-        "你们",
-        "你的",
-        "你对",
-        "你在",
-        "你把",
-        "你用",
-        "你拿",
-        "你说",
-        "你",
-    ):
-        if stripped.startswith(prefix) and len(stripped) > len(prefix) + 4:
-            return stripped[len(prefix):].lstrip("，,：: ")
-    return stripped
-
-
 def _clean_report_heading_text(text: str) -> str:
-    return _strip_heading_address_prefix(_strip_heading_number_prefix(text))
+    return strip_second_person_heading_prefix(_strip_heading_number_prefix(text))
 
 
 _STREAM_STATE_KEYS = {

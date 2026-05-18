@@ -2228,7 +2228,8 @@ def _is_visible_debate_soft_join_candidate(line: str) -> bool:
     )
 
 
-def _strip_second_person_heading_prefix(title: str) -> str:
+def strip_second_person_heading_prefix(title: str) -> str:
+    """Remove direct second-person address from visible Chinese headings."""
     stripped = (title or "").strip()
     for prefix in (
         "你们的",
@@ -2251,6 +2252,10 @@ def _strip_second_person_heading_prefix(title: str) -> str:
         if stripped.startswith(prefix) and len(stripped) > len(prefix) + 4:
             return stripped[len(prefix):].lstrip("，,：: ")
     return stripped
+
+
+def _strip_second_person_heading_prefix(title: str) -> str:
+    return strip_second_person_heading_prefix(title)
 
 
 def _split_inline_visible_section_sentence(line: str) -> list[str]:
