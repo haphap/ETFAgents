@@ -1706,12 +1706,25 @@ def save_candidate_pool_report(candidates: list[dict[str, str]], analysis_date: 
         "| --- | --- | --- | --- | --- |",
     ]
     sections: list[str] = []
+    analyst_sections = [
+        ("market_flow_report", _localize_cli_section_title("market_flow_report")),
+        ("catalyst_sentiment_report", _localize_cli_section_title("catalyst_sentiment_report")),
+        ("macro_regime_report", _localize_cli_section_title("macro_regime_report")),
+        ("meso_commodity_report", _localize_cli_section_title("meso_commodity_report")),
+        ("holdings_industry_report", _localize_cli_section_title("holdings_industry_report")),
+        ("top_holdings_report", _localize_cli_section_title("top_holdings_report")),
+    ]
 
     for index, candidate in enumerate(candidates, start=1):
         weight_text = f"{candidate.get('suggested_weight_pct', 0.0):.1f}%"
         summary_lines.append(
             f"| {index} | {candidate['ticker']} | {candidate['rating']} | {candidate['score']} | {weight_text} |"
         )
+        analyst_report_parts = [
+            f"## {title}\n{_prepare_report_markdown(candidate.get(key, ''), 3)}"
+            for key, title in analyst_sections
+            if candidate.get(key)
+        ]
 
         candidate_body = collapse_blank_lines(
             "\n\n".join(
@@ -1719,6 +1732,7 @@ def save_candidate_pool_report(candidates: list[dict[str, str]], analysis_date: 
                 f"# {candidate['ticker']}",
                 f"**{_localize_cli_label('Rating', '评级')}**: {candidate['rating']}",
                 f"**{_localize_cli_label('Suggested Weight', '建议权重')}**: {weight_text}",
+                *analyst_report_parts,
                 f"## {_localize_cli_label('Final Allocation Decision', '最终配置决策')}\n{_prepare_report_markdown(candidate.get('final_allocation_decision', ''), 3)}",
                 f"## {_localize_cli_label('Trader Allocation Plan', '交易员配置计划')}\n{_prepare_report_markdown(candidate.get('trader_allocation_plan', ''), 3)}",
                 f"## {_localize_cli_label('Research Allocation View', '研究团队配置观点')}\n{_prepare_report_markdown(candidate.get('research_allocation_plan', ''), 3)}",
@@ -1735,6 +1749,11 @@ def save_candidate_pool_report(candidates: list[dict[str, str]], analysis_date: 
                     f"## {index}. {candidate['ticker']}",
                     f"**{_localize_cli_label('Rating', '评级')}**: {candidate['rating']}",
                     f"**{_localize_cli_label('Suggested Weight', '建议权重')}**: {weight_text}",
+                    *[
+                        f"### {title}\n{_prepare_report_markdown(candidate.get(key, ''), 4)}"
+                        for key, title in analyst_sections
+                        if candidate.get(key)
+                    ],
                     f"### {_localize_cli_label('Final Allocation Decision', '最终配置决策')}",
                     _prepare_report_markdown(candidate.get("final_allocation_decision", ""), 4),
                 ]
@@ -2083,9 +2102,26 @@ def display_candidate_pool_report(candidates: list[dict[str, str]]):
     console.print(ranking)
 
     for candidate in candidates:
+        body_parts = [
+            f"## {_localize_cli_section_title(section)}\n{_prepare_report_markdown(candidate.get(section, ''), 3)}"
+            for section in (
+                "market_flow_report",
+                "catalyst_sentiment_report",
+                "macro_regime_report",
+                "meso_commodity_report",
+                "holdings_industry_report",
+                "top_holdings_report",
+            )
+            if candidate.get(section)
+        ]
+        if candidate.get("final_allocation_decision"):
+            body_parts.append(
+                f"## {_localize_cli_section_title('final_allocation_decision')}\n"
+                f"{_prepare_report_markdown(candidate.get('final_allocation_decision', ''), 3)}"
+            )
         console.print(
             Panel(
-                Markdown(candidate.get("final_allocation_decision", "")),
+                Markdown(collapse_blank_lines("\n\n".join(body_parts))),
                 title=f"{candidate['ticker']} · {candidate['rating']} · {candidate.get('suggested_weight_pct', 0.0):.1f}%",
                 border_style="blue",
                 padding=(1, 2),
