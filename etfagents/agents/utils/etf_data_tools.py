@@ -169,6 +169,34 @@ _GENERIC_COMMODITY_PRODUCER_PROXY_BASKET = {
         {"ts_code": "600938.SH", "name": "中国海油", "industry": "石油石化", "weight": 25.0},
     ),
 }
+_HK_BENCHMARK_PROXY_BASKETS = (
+    {
+        "label": "恒生科技",
+        "keywords": ("恒生科技", "hang seng tech", "hstech"),
+        "members": (
+            {"ts_code": "00700.HK", "name": "腾讯控股", "industry": "互联网平台", "weight": 10.0},
+            {"ts_code": "09988.HK", "name": "阿里巴巴-W", "industry": "互联网平台", "weight": 10.0},
+            {"ts_code": "03690.HK", "name": "美团-W", "industry": "本地生活", "weight": 9.0},
+            {"ts_code": "01810.HK", "name": "小米集团-W", "industry": "智能硬件", "weight": 8.0},
+            {"ts_code": "01024.HK", "name": "快手-W", "industry": "互联网内容", "weight": 7.0},
+            {"ts_code": "09618.HK", "name": "京东集团-SW", "industry": "电商", "weight": 7.0},
+            {"ts_code": "09999.HK", "name": "网易-S", "industry": "游戏娱乐", "weight": 6.0},
+            {"ts_code": "00981.HK", "name": "中芯国际", "industry": "半导体", "weight": 6.0},
+        ),
+    },
+    {
+        "label": "港股宽基",
+        "keywords": ("恒生", "港股", "香港", "hong kong", "hang seng"),
+        "members": (
+            {"ts_code": "00700.HK", "name": "腾讯控股", "industry": "互联网平台", "weight": 10.0},
+            {"ts_code": "09988.HK", "name": "阿里巴巴-W", "industry": "互联网平台", "weight": 9.0},
+            {"ts_code": "00005.HK", "name": "汇丰控股", "industry": "金融", "weight": 8.0},
+            {"ts_code": "03690.HK", "name": "美团-W", "industry": "本地生活", "weight": 7.0},
+            {"ts_code": "00939.HK", "name": "建设银行", "industry": "金融", "weight": 6.0},
+            {"ts_code": "01299.HK", "name": "友邦保险", "industry": "保险", "weight": 6.0},
+        ),
+    },
+)
 
 
 def _normalize_indicator_token(indicator: str) -> str:
@@ -265,6 +293,135 @@ def _render_commodity_producer_proxy_holdings(
     summary_lines = [
         f"Ticker: {ts_code}",
         f"Proxy basket: A-share {proxy_label} producers",
+    ]
+    if source_note:
+        summary_lines.append(f"Note: {source_note}")
+    return _to_csv_with_header(
+        output,
+        f"ETF holdings proxy basket for {ts_code}",
+        summary_lines,
+    )
+
+
+def _match_hk_benchmark_proxy_basket(profile_row: pd.Series) -> dict[str, object] | None:
+    if profile_row is None or getattr(profile_row, "empty", False):
+        return None
+    asset_scope = str(profile_row.get("asset_scope", "") or "").strip().lower()
+    text = " ".join(
+        str(profile_row.get(column, "") or "")
+        for column in ("name", "benchmark", "fund_type", "invest_type", "market", "asset_scope")
+    ).lower()
+    if asset_scope != "cross_border" and not any(token in text for token in ("港股", "香港", "恒生", "hong kong", "hang seng")):
+        return None
+    for basket in _HK_BENCHMARK_PROXY_BASKETS:
+        if any(keyword.lower() in text for keyword in basket["keywords"]):
+            return basket
+    return None
+
+
+def _lookup_hk_metadata(ts_code: str, fallback_name: str, fallback_industry: str) -> dict[str, str]:
+    try:
+        basic = _query_pro("hk_basic", ts_code=ts_code)
+    except Exception:
+        basic = pd.DataFrame()
+    if basic is None or basic.empty:
+        return {"ts_code": ts_code, "name": fallback_name or ts_code, "industry": fallback_industry or "Hong Kong equity"}
+    row = basic.iloc[0]
+    return {
+        "ts_code": str(row.get("ts_code", ts_code) or ts_code),
+        "name": str(row.get("name", fallback_name or ts_code) or fallback_name or ts_code),
+        "industry": fallback_industry or str(row.get("market", "Hong Kong equity") or "Hong Kong equity"),
+    }
+
+
+def _lookup_hk_latest_price(ts_code: str, curr_date: str) -> dict[str, object]:
+    end_dt = _parse_trade_date(curr_date)
+    start_api = (end_dt - timedelta(days=40)).strftime("%Y%m%d")
+    end_api = end_dt.strftime("%Y%m%d")
+    try:
+        daily = _query_pro("hk_daily", ts_code=ts_code, start_date=start_api, end_date=end_api)
+    except Exception:
+        daily = pd.DataFrame()
+    if daily is None or daily.empty:
+        return {}
+    if "trade_date" in daily.columns:
+        daily = daily[daily["trade_date"].astype(str) <= end_api].sort_values("trade_date", ascending=False)
+    if daily.empty:
+        return {}
+    row = daily.iloc[0]
+    return {
+        "latest_trade_date": row.get("trade_date"),
+        "latest_close": _safe_float(row.get("close")),
+        "latest_pct_chg": _safe_float(row.get("pct_chg")),
+    }
+
+
+def _build_hk_benchmark_proxy_frame(
+    ticker: str,
+    curr_date: str,
+    limit: int,
+) -> tuple[str, str, pd.DataFrame]:
+    ts_code, profile_row = _load_etf_profile_row(ticker)
+    basket = _match_hk_benchmark_proxy_basket(profile_row)
+    if not basket:
+        return ts_code, "", pd.DataFrame()
+
+    rows: list[dict[str, object]] = []
+    latest_trade_date = ""
+    for member in basket["members"][: max(1, int(limit))]:
+        member_code = _normalize_ts_code(str(member["ts_code"]))
+        metadata = _lookup_hk_metadata(
+            member_code,
+            str(member.get("name", "")),
+            str(member.get("industry", "")),
+        )
+        price = _lookup_hk_latest_price(member_code, curr_date)
+        if price.get("latest_trade_date") and not latest_trade_date:
+            latest_trade_date = str(price["latest_trade_date"])
+        rows.append(
+            {
+                "ts_code": metadata["ts_code"],
+                "name": metadata["name"],
+                "industry": metadata["industry"],
+                "weight": _safe_float(member.get("weight")) or 0.0,
+                **price,
+            }
+        )
+    frame = pd.DataFrame(rows)
+    if frame.empty:
+        return ts_code, "", frame
+    label = str(basket["label"])
+    frame.attrs["source"] = "hk_benchmark_proxy"
+    frame.attrs["proxy_label"] = label
+    frame.attrs["display_label"] = label
+    frame.attrs["source_note"] = (
+        f"No disclosed fund_portfolio holdings were available for {ts_code}. "
+        f"This fallback uses a representative Hong Kong equity basket for the {label} benchmark exposure, "
+        "enriched with Tushare hk_basic and hk_daily where available. "
+        "Weights are illustrative proxy weights, not official ETF holdings or index weights."
+    )
+    return ts_code, latest_trade_date or curr_date.replace("-", ""), frame
+
+
+def _render_hk_benchmark_proxy_holdings(
+    ts_code: str,
+    curr_date: str,
+    proxy_frame: pd.DataFrame,
+) -> str:
+    if proxy_frame is None or proxy_frame.empty:
+        return f"No ETF holdings data found for '{ts_code}' up to {curr_date}."
+    proxy_label = str(proxy_frame.attrs.get("display_label", proxy_frame.attrs.get("proxy_label", "港股")))
+    source_note = str(proxy_frame.attrs.get("source_note", "")).strip()
+    output = proxy_frame.rename(
+        columns={
+            "weight": "proxy_weight_illustrative_pct",
+            "latest_close": "latest_hk_close",
+            "latest_pct_chg": "latest_hk_pct_chg",
+        }
+    ).reset_index(drop=True)
+    summary_lines = [
+        f"Ticker: {ts_code}",
+        f"Proxy basket: Hong Kong {proxy_label} constituents",
     ]
     if source_note:
         summary_lines.append(f"Note: {source_note}")
@@ -1174,10 +1331,12 @@ def _normalize_constituent_code(raw_code: object) -> str | None:
         normalized = _normalize_ts_code(text)
     except DataVendorUnavailable:
         return None
-    return normalized if normalized.endswith((".SH", ".SZ", ".BJ")) else None
+    return normalized if normalized.endswith((".SH", ".SZ", ".BJ", ".HK")) else None
 
 
-def _lookup_a_share_metadata(ts_code: str) -> dict[str, str]:
+def _lookup_constituent_metadata(ts_code: str) -> dict[str, str]:
+    if ts_code.endswith(".HK"):
+        return _lookup_hk_metadata(ts_code, ts_code, "Hong Kong equity")
     try:
         basic = _get_pro_client().stock_basic(
             ts_code=ts_code,
@@ -1195,11 +1354,22 @@ def _lookup_a_share_metadata(ts_code: str) -> dict[str, str]:
     }
 
 
+def _lookup_a_share_metadata(ts_code: str) -> dict[str, str]:
+    return _lookup_constituent_metadata(ts_code)
+
+
 def _build_constituent_frame(ticker: str, curr_date: str, limit: int) -> tuple[str, str, pd.DataFrame]:
     ts_code = _normalize_ts_code(ticker)
     try:
         ts_code, holdings = _load_latest_etf_holdings_frame(ticker, curr_date)
     except MissingEtfHoldings:
+        hk_ts_code, latest_trade_date, hk_proxy_frame = _build_hk_benchmark_proxy_frame(
+            ticker,
+            curr_date,
+            limit,
+        )
+        if not hk_proxy_frame.empty:
+            return hk_ts_code, latest_trade_date, hk_proxy_frame
         proxy_ts_code, latest_end_date, proxy_frame = _build_commodity_producer_proxy_frame(
             ticker,
             curr_date,
@@ -1214,7 +1384,7 @@ def _build_constituent_frame(ticker: str, curr_date: str, limit: int) -> tuple[s
         constituent_code = _normalize_constituent_code(row.get("symbol") or row.get("stk_code"))
         if not constituent_code:
             continue
-        metadata = _lookup_a_share_metadata(constituent_code)
+        metadata = _lookup_constituent_metadata(constituent_code)
         enriched_rows.append(
             {
                 "ts_code": metadata["ts_code"],
@@ -1299,6 +1469,10 @@ def _format_holdings_summary(
     )
 
 
+def _is_hk_proxy_frame(constituents: pd.DataFrame) -> bool:
+    return str(getattr(constituents, "attrs", {}).get("source", "")) == "hk_benchmark_proxy"
+
+
 def _date_window(curr_date: str, look_back_days: int) -> tuple[str, str]:
     end_dt = _parse_trade_date(curr_date)
     start_dt = end_dt - timedelta(days=look_back_days)
@@ -1370,6 +1544,13 @@ def get_etf_holdings(
         result = route_to_vendor("get_etf_holdings", ticker, curr_date)
     except MissingEtfHoldings as exc:
         try:
+            ts_code, _, hk_proxy_frame = _build_hk_benchmark_proxy_frame(ticker, curr_date, limit=8)
+        except DataVendorUnavailable:
+            hk_proxy_frame = pd.DataFrame()
+            ts_code = ""
+        if not hk_proxy_frame.empty:
+            return _render_hk_benchmark_proxy_holdings(ts_code, curr_date, hk_proxy_frame)
+        try:
             ts_code, _, proxy_frame = _build_commodity_producer_proxy_frame(ticker, curr_date, limit=5)
         except DataVendorUnavailable:
             return str(exc)
@@ -1433,19 +1614,22 @@ def get_etf_industry_research(
             "so industry research could not be derived automatically."
         )
     start_date, end_date = _date_window(curr_date, look_back_days)
-    constituents = _enrich_constituents_with_broker_industry(constituents, start_date, end_date)
+    is_hk_proxy = _is_hk_proxy_frame(constituents)
+    if not is_hk_proxy:
+        constituents = _enrich_constituents_with_broker_industry(constituents, start_date, end_date)
+    industry_column = "industry" if is_hk_proxy else "research_industry"
     industry_view = (
-        constituents.groupby("research_industry", dropna=False)["weight"]
+        constituents.groupby(industry_column, dropna=False)["weight"]
         .sum()
         .reset_index()
-        .rename(columns={"research_industry": "industry", "weight": "industry_weight"})
+        .rename(columns={industry_column: "industry", "weight": "industry_weight"})
         .sort_values("industry_weight", ascending=False)
         .head(max(1, int(top_n)))
     )
     representatives = []
     for _, industry_row in industry_view.iterrows():
         industry_name = industry_row["industry"]
-        candidates = constituents[constituents["research_industry"] == industry_name].sort_values("weight", ascending=False)
+        candidates = constituents[constituents[industry_column] == industry_name].sort_values("weight", ascending=False)
         if candidates.empty:
             continue
         representative = candidates.iloc[0].to_dict()
@@ -1459,17 +1643,28 @@ def get_etf_industry_research(
     sections = [
         f"# ETF industry research for {ts_code}",
         f"Latest holdings disclosure date: {latest_end_date or 'N/A'}",
-        "## Dominant industries derived from top holdings and broker-report industry keywords",
+        (
+            "## Dominant Hong Kong proxy industries derived from benchmark exposure"
+            if is_hk_proxy
+            else "## Dominant industries derived from top holdings and broker-report industry keywords"
+        ),
         _format_holdings_summary(reps_df, "Industry", weight_header=weight_header),
     ]
     if source_note:
         sections.insert(2, source_note)
+    if is_hk_proxy:
+        sections.append(
+            "Tushare broker-report industry search is A-share only; for this Hong Kong ETF proxy, "
+            "use the hk_basic/hk_daily-enriched basket above as the holdings exposure reference."
+        )
     for idx, (_, row) in enumerate(reps_df.iterrows(), 1):
         base_industry = str(row.get("base_industry", "")).strip()
         industry_source = str(row.get("research_industry_source", "")).strip()
         sections.append(
             f"## Industry {idx}: {row['industry']} | {aggregated_weight_label} {_format_number(_safe_float(row.get('weight')), suffix='%')} | representative {row['name']} ({row['ts_code']})"
         )
+        if is_hk_proxy:
+            continue
         if industry_source:
             sections.append(f"Keyword source: {industry_source}")
         if base_industry and base_industry != str(row.get("industry", "")).strip():
@@ -1514,12 +1709,15 @@ def get_etf_top_holdings_research(
     top_holdings = constituents.sort_values("weight", ascending=False).head(max(1, int(top_n))).reset_index(drop=True)
     start_date, end_date = _date_window(curr_date, look_back_days)
     source_note = str(constituents.attrs.get("source_note", "")).strip()
+    is_hk_proxy = _is_hk_proxy_frame(constituents)
     weight_header = "Proxy weight (illustrative)" if source_note else "Weight"
     per_holding_weight_label = "proxy weight (illustrative)" if source_note else "portfolio weight"
     holdings_heading = (
-        "## Proxy A-share producer basket"
+        "## Proxy Hong Kong benchmark basket"
+        if is_hk_proxy
+        else "## Proxy A-share producer basket"
         if source_note
-        else "## Top disclosed A-share holdings"
+        else "## Top disclosed holdings"
     )
     sections = [
         f"# ETF top-holdings stock research for {ts_code}",
@@ -1529,10 +1727,24 @@ def get_etf_top_holdings_research(
     ]
     if source_note:
         sections.insert(2, source_note)
+    if is_hk_proxy:
+        sections.append(
+            "Tushare stock research reports are A-share only; for this Hong Kong ETF proxy, "
+            "use hk_basic/hk_daily fields in the proxy basket for constituent-level context."
+        )
     for idx, (_, row) in enumerate(top_holdings.iterrows(), 1):
         sections.append(
             f"## Holding {idx}: {row['name']} ({row['ts_code']}) | {per_holding_weight_label} {_format_number(_safe_float(row.get('weight')), suffix='%')} | industry {row['industry']}"
         )
+        if is_hk_proxy:
+            latest_close = _safe_float(row.get("latest_close"))
+            latest_pct = _safe_float(row.get("latest_pct_chg"))
+            latest_date = str(row.get("latest_trade_date", "") or "N/A")
+            sections.append(
+                "Tushare HK daily snapshot: "
+                f"latest trade date {latest_date}, close {_format_number(latest_close)}, pct_chg {_format_number(latest_pct, suffix='%')}."
+            )
+            continue
         try:
             sections.append(
                 get_stock_reports(
