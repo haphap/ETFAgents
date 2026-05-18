@@ -855,6 +855,11 @@ class ETFExtensionTests(unittest.TestCase):
 
         self.assertEqual("研究观点正文", _sanitize_candidate_payload_text(text))
 
+    def test_candidate_payload_text_uses_shared_process_narration_detection(self):
+        text = "资料已经齐备，下面给出宏观框架判断。\n\n宏观观点正文"
+
+        self.assertEqual("宏观观点正文", _sanitize_candidate_payload_text(text))
+
     def test_candidate_pool_cache_hits_are_sanitized_before_returning(self):
         graph = object.__new__(EtfAgentsGraph)
         graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE

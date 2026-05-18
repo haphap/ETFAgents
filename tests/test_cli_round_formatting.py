@@ -190,6 +190,28 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertNotIn("以下为ETF持仓行业研究分析", formatted)
         self.assertIn("# 一、行业主线与分歧焦点", formatted)
 
+    def test_prepare_report_markdown_strips_data_ready_integrate_analysis_preamble(self):
+        formatted = _prepare_report_markdown(
+            "数据已全部到位，现在整合分析。\n\n"
+            "一、宏观框架分析\n"
+            "正文内容。"
+        )
+
+        self.assertNotIn("数据已全部到位", formatted)
+        self.assertNotIn("现在整合分析", formatted)
+        self.assertIn("# 一、宏观框架分析", formatted)
+
+    def test_prepare_report_markdown_strips_report_ready_delivery_preamble(self):
+        formatted = _prepare_report_markdown(
+            "报告已就绪。下面进入正文：\n\n"
+            "一、宏观框架分析\n"
+            "正文内容。"
+        )
+
+        self.assertNotIn("报告已就绪", formatted)
+        self.assertNotIn("下面进入正文", formatted)
+        self.assertIn("# 一、宏观框架分析", formatted)
+
     def test_prepare_report_markdown_keeps_sentence_like_numbering_inside_list_body(self):
         formatted = _prepare_report_markdown(
             "一、情绪主线与权重影响\n\n"

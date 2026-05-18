@@ -20,7 +20,10 @@ from etfagents.agents.utils.agent_utils import (
     get_news,
 )
 from etfagents.agents.utils.state_keys import get_state_value
-from etfagents.agents.utils.report_leads import strip_refine_preamble
+from etfagents.agents.utils.report_leads import (
+    looks_like_process_narration,
+    strip_refine_preamble,
+)
 from etfagents.backtest.signals import (
     build_candidate_backtest_signal,
     build_state_backtest_signal,
@@ -82,15 +85,6 @@ _SELECTED_ANALYST_REPORT_KEYS = {
         for alias, canonical in _ANALYST_ALIASES.items()
     },
 }
-_LEADING_CANDIDATE_PROCESS_RE = re.compile(
-    r"^\s*(?:"
-    r"(?:报告|内容).{0,12}(?:已|已经)?(?:就绪|完成|生成|整理好|准备好)[。！!；;，,]?\s*(?:以下|下面|现在|接下来|下一步)"
-    r"|(?:数据|资料|信息).{0,12}?(?:已经|已)?(?:全部)?(?:获取|收集|整理|拿到|完成)(?:完毕)?[。！!；;，,]?\s*(?:以下|下面|现在|接下来|下一步)"
-    r"|以下(?:是|为)"
-    r")"
-)
-
-
 def _looks_like_candidate_process_opening(opening: str) -> bool:
     return bool(
         opening
@@ -98,7 +92,7 @@ def _looks_like_candidate_process_opening(opening: str) -> bool:
         and len(opening.splitlines()) <= 2
         and not re.search(r"(?m)^\s*(?:#|\||[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)", opening)
         and not re.search(r"\d|[%％]", opening)
-        and _LEADING_CANDIDATE_PROCESS_RE.match(opening)
+        and looks_like_process_narration(opening)
     )
 
 
