@@ -2230,7 +2230,24 @@ def _is_visible_debate_soft_join_candidate(line: str) -> bool:
 
 def _strip_second_person_heading_prefix(title: str) -> str:
     stripped = (title or "").strip()
-    for prefix in ("你的", "你对", "你在", "你把", "你用", "你拿", "你说", "你"):
+    for prefix in (
+        "你们的",
+        "你们对",
+        "你们在",
+        "你们把",
+        "你们用",
+        "你们拿",
+        "你们说",
+        "你们",
+        "你的",
+        "你对",
+        "你在",
+        "你把",
+        "你用",
+        "你拿",
+        "你说",
+        "你",
+    ):
         if stripped.startswith(prefix) and len(stripped) > len(prefix) + 4:
             return stripped[len(prefix):].lstrip("，,：: ")
     return stripped
@@ -2465,7 +2482,7 @@ _ETF_ALLOCATION_SCOPE_SENTENCE = (
 )
 
 
-def strip_constituent_trade_instructions(text: str, *, insert_scope_note: bool = False) -> str:
+def strip_constituent_trade_instructions(text: str, *, insert_scope_note: bool = True) -> str:
     """Remove direct constituent-stock trade instructions from ETF allocation prose."""
     content = text or ""
     # English prompts and schema descriptions carry the same ETF-only constraint.

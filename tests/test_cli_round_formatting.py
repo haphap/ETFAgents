@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 from cli.main import (
     MessageBuffer,
     _format_manager_decision,
+    _merge_stream_state,
     _prepare_report_markdown,
     _normalize_ticker_list,
     format_research_team_history,
@@ -13,6 +14,7 @@ from cli.main import (
     process_chunk_messages,
     save_candidate_pool_report,
     save_report_to_disk,
+    update_analyst_statuses,
 )
 from etfagents.dataflows.config import get_config, set_config
 from etfagents.default_config import DEFAULT_CONFIG
@@ -121,6 +123,16 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("# 二、盈利、估值与机构态度\n\n## （一）关键数据对比", formatted)
         self.assertNotIn("共识与分歧 （一）", formatted)
         self.assertNotIn("机构态度 （一）", formatted)
+
+    def test_prepare_report_markdown_strips_second_person_heading_prefixes(self):
+        formatted = _prepare_report_markdown(
+            "一、你们的资金流确认框架仍需修正\n"
+            "正文内容。"
+        )
+
+        self.assertIn("# 一、资金流确认框架仍需修正", formatted)
+        self.assertNotIn("你们的资金流", formatted)
+        self.assertNotIn("们的资金流", formatted)
 
     def test_prepare_report_markdown_strips_empty_subheadings_and_markdown_noise(self):
         formatted = _prepare_report_markdown(
@@ -448,6 +460,30 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("2. 第二，内部对冲存在2-3个月操作滞后窗口", formatted)
         self.assertIn("触发减持条件的具体阈值包括：\n\n1. 布伦特原油跌破78美元/桶", formatted)
         self.assertIn("4. VLCC TCE回落至15万美元/天以下", formatted)
+
+    def test_portfolio_manager_splits_dense_conclusion_and_action_paragraphs(self):
+        risk_state = {
+            "aggressive_history": "",
+            "conservative_history": "",
+            "neutral_history": "",
+            "judge_decision": (
+                "## 辩论结论\n"
+                "综合结论：激进观点强调反弹弹性，但保守观点指出量价确认不足。"
+                "当前ETF仍处在关键均线下方，资金流也没有形成连续净申购。"
+                "因此投资组合经理应先控制仓位，再等待价格、份额和溢折价共同修复。\n\n"
+                "## 行为逻辑\n"
+                "行动上先维持基础仓位，不把单日反弹视为加仓信号。"
+                "如果后续成交量回到20日均量上方且份额连续净申购，再考虑小幅上调。"
+                "若价格跌破前低且溢价率继续走阔，则优先减仓并复核风险预算。"
+            ),
+        }
+
+        formatted = format_risk_management_history(risk_state)
+
+        self.assertIn("#### 一、辩论结论", formatted)
+        self.assertIn("量价确认不足。\n\n当前ETF仍处在关键均线下方", formatted)
+        self.assertIn("#### 二、行为逻辑", formatted)
+        self.assertIn("加仓信号。\n\n如果后续成交量回到20日均量上方", formatted)
 
     def test_research_team_history_shows_decision_summary_outside_argument_body(self):
         debate_state = {
@@ -801,7 +837,7 @@ class CliRoundFormattingTests(unittest.TestCase):
         formatted = format_risk_management_history(risk_state)
 
         self.assertIn(
-            "资金拥挤驱动。聚乙烯仓单继续高位堆积",
+            "资金拥挤驱动。\n\n聚乙烯仓单继续高位堆积",
             formatted,
         )
         self.assertIn(
@@ -885,6 +921,35 @@ class CliRoundFormattingTests(unittest.TestCase):
             [("tool_a", {"symbol": "AAPL"})],
         )
 
+    def test_process_chunk_messages_sanitizes_nested_delivery_preamble(self):
+        class FakeMessage:
+            def __init__(self, message_id, content):
+                self.id = message_id
+                self.content = content
+                self.tool_calls = []
+
+        buffer = MessageBuffer()
+        chunk = {
+            "market_flow": {
+                "messages": [
+                    FakeMessage(
+                        "m1",
+                        "数据已全部获取完毕，现在撰写完整报告。\n\n"
+                        "市场与资金流正文内容。",
+                    )
+                ]
+            }
+        }
+
+        with patch("cli.main.classify_message_type", side_effect=lambda message: ("Agent", message.content)):
+            process_chunk_messages(chunk, buffer)
+
+        self.assertEqual(
+            [content for _, _, content in buffer.messages],
+            ["市场与资金流正文内容。"],
+        )
+        self.assertNotIn("数据已全部获取完毕", buffer.messages[0][2])
+
     def test_save_report_to_disk_persists_complete_report_locally(self):
         final_state = {
             "market_report": "# 宁德时代（300750.SZ）综合技术分析报告\n\n## 一、行情概览\n市场分析内容",
@@ -925,6 +990,55 @@ class CliRoundFormattingTests(unittest.TestCase):
             self.assertIn("### 市场与资金流分析师", report_text)
             self.assertIn("#### 宁德时代（300750.SZ）综合技术分析报告", report_text)
             self.assertIn("##### 一、行情概览", report_text)
+
+    def test_stream_state_merge_keeps_earlier_market_flow_report(self):
+        accumulated = {"market_flow_report": "市场与资金流分析内容"}
+
+        _merge_stream_state(
+            accumulated,
+            {
+                "trader_allocation_plan": "交易计划内容",
+                "risk_debate_state": {"judge_decision": "最终决策"},
+            },
+        )
+
+        self.assertEqual(accumulated["market_flow_report"], "市场与资金流分析内容")
+        self.assertEqual(accumulated["trader_allocation_plan"], "交易计划内容")
+        self.assertEqual(accumulated["risk_debate_state"]["judge_decision"], "最终决策")
+
+    def test_stream_state_merge_flattens_nested_meso_commodity_report(self):
+        accumulated = {}
+
+        _merge_stream_state(
+            accumulated,
+            {
+                "meso_commodity": {
+                    "meso_commodity_report": "中观大宗商品分析内容",
+                }
+            },
+        )
+
+        self.assertEqual(accumulated["meso_commodity_report"], "中观大宗商品分析内容")
+        self.assertNotIn("meso_commodity", accumulated)
+
+    def test_analyst_statuses_capture_nested_meso_commodity_report(self):
+        buffer = MessageBuffer()
+        buffer.init_for_analysis(["meso_commodity"])
+
+        update_analyst_statuses(
+            buffer,
+            {
+                "meso_commodity": {
+                    "meso_commodity_report": "中观大宗商品分析内容",
+                }
+            },
+        )
+
+        self.assertEqual(
+            buffer.report_sections["meso_commodity_report"],
+            "中观大宗商品分析内容",
+        )
+        self.assertEqual(buffer.agent_status["Meso Commodity Analyst"], "completed")
 
     def test_normalize_ticker_list_dedupes_candidate_pool_input(self):
         tickers = _normalize_ticker_list("510300.sh, 159915.sz,510300.SH\n513100.sh")

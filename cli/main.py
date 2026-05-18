@@ -51,8 +51,15 @@ from etfagents.agents.utils.agent_utils import (
     strip_feedback_snapshot,
     strip_role_prefix,
 )
-from etfagents.agents.utils.report_leads import strip_exchange_only_pseudo_titles
-from etfagents.agents.utils.state_keys import get_state_value
+from etfagents.agents.utils.report_leads import (
+    strip_exchange_only_pseudo_titles,
+    strip_refine_preamble,
+)
+from etfagents.agents.utils.state_keys import (
+    CANONICAL_TO_LEGACY_STATE_KEYS,
+    canonical_state_key,
+    get_state_value,
+)
 
 console = Console()
 
@@ -180,6 +187,99 @@ def _strip_heading_number_prefix(text: str) -> str:
     for pattern in patterns:
         stripped = re.sub(pattern, "", stripped)
     return stripped.strip()
+
+
+def _strip_heading_address_prefix(text: str) -> str:
+    stripped = (text or "").strip()
+    for prefix in (
+        "你们的",
+        "你们对",
+        "你们在",
+        "你们把",
+        "你们用",
+        "你们拿",
+        "你们说",
+        "你们",
+        "你的",
+        "你对",
+        "你在",
+        "你把",
+        "你用",
+        "你拿",
+        "你说",
+        "你",
+    ):
+        if stripped.startswith(prefix) and len(stripped) > len(prefix) + 4:
+            return stripped[len(prefix):].lstrip("，,：: ")
+    return stripped
+
+
+def _clean_report_heading_text(text: str) -> str:
+    return _strip_heading_address_prefix(_strip_heading_number_prefix(text))
+
+
+_STREAM_STATE_KEYS = {
+    *CANONICAL_TO_LEGACY_STATE_KEYS.keys(),
+    *(
+        legacy
+        for legacy_keys in CANONICAL_TO_LEGACY_STATE_KEYS.values()
+        for legacy in legacy_keys
+    ),
+    "messages",
+    "investment_debate_state",
+    "risk_debate_state",
+    "trader_backtest_signal",
+    "portfolio_backtest_signal",
+    "backtest_signal",
+    "analysis_memory_entry",
+}
+
+
+def _looks_like_state_delta(value: object) -> bool:
+    return isinstance(value, dict) and any(
+        canonical_state_key(str(key)) in _STREAM_STATE_KEYS or str(key) in _STREAM_STATE_KEYS
+        for key in value
+    )
+
+
+def _iter_stream_state_updates(update: dict):
+    if not isinstance(update, dict):
+        return
+    yield update
+    for value in update.values():
+        if _looks_like_state_delta(value):
+            yield value
+
+
+def _chunk_state_value(chunk: dict, key: str, default=None):
+    for update in _iter_stream_state_updates(chunk):
+        value = get_state_value(update, key, None)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _merge_stream_state(accumulated: dict, update: dict, *, filter_state_keys: bool = True) -> dict:
+    """Keep non-empty values from earlier stream chunks for final report output."""
+    if not isinstance(update, dict):
+        return accumulated
+
+    for state_update in _iter_stream_state_updates(update):
+        for raw_key, value in state_update.items():
+            key = canonical_state_key(raw_key)
+            if value in (None, ""):
+                continue
+            if filter_state_keys and key not in _STREAM_STATE_KEYS:
+                continue
+            if isinstance(value, dict) and isinstance(accumulated.get(key), dict):
+                _merge_stream_state(
+                    accumulated[key],
+                    value,
+                    filter_state_keys=False,
+                )
+                continue
+            accumulated[key] = copy.deepcopy(value)
+    return accumulated
 
 
 _PLAIN_TOP_LEVEL_HEADING_PATTERN = re.compile(
@@ -321,7 +421,7 @@ def _normalize_report_heading_numbering(content: str) -> str:
             counters[idx] = 0
 
         prefix = _format_heading_prefix(depth, counters[depth])
-        clean_heading = _strip_heading_number_prefix(heading_text)
+        clean_heading = _clean_report_heading_text(heading_text)
         return f"{match.group(1)}{spacing}{prefix}{clean_heading}"
 
     return heading_pattern.sub(_replace, text)
@@ -554,7 +654,7 @@ def _strip_empty_report_headings(content: str) -> tuple[str, set[tuple[int, str]
             sibling_index for sibling_index in sibling_indices if sibling_index in remove_indices
         ]
         if len(kept_siblings) == 1 and removed_siblings:
-            clean_title = _strip_heading_number_prefix(_extract_markdown_heading_title(line))
+            clean_title = _clean_report_heading_text(_extract_markdown_heading_title(line))
             unnumber_singletons.add((level, clean_title))
 
     return "\n".join(
@@ -578,7 +678,7 @@ def _strip_single_child_subsection_numbering(
 
         level = len(match.group(1).lstrip())
         title = match.group(3).strip()
-        clean_title = _strip_heading_number_prefix(title)
+        clean_title = _clean_report_heading_text(title)
         if (level, clean_title) in singleton_keys and re.match(
             r"^（[一二三四五六七八九十\d]+）", title
         ):
@@ -646,9 +746,8 @@ def _format_dense_chinese_manager_paragraph(paragraph: str) -> str:
             return "\n\n".join([prefix, *[f"{idx}. {chunk}" for idx, chunk in enumerate(chunks, 1)]])
 
     sentences = [match.group(0).strip() for match in _CHINESE_SENTENCE_RE.finditer(text) if match.group(0).strip()]
-    if len(text) >= 220 and len(sentences) >= 5:
-        grouped = ["".join(sentences[index:index + 2]) for index in range(0, len(sentences), 2)]
-        return "\n\n".join(grouped)
+    if len(text) >= 80 and len(sentences) >= 3:
+        return "\n\n".join(sentences)
     return paragraph
 
 
@@ -2075,8 +2174,9 @@ def update_analyst_statuses(message_buffer, chunk):
         report_key = ANALYST_REPORT_MAP[analyst_key]
 
         # Capture new report content from current chunk
-        if chunk.get(report_key):
-            message_buffer.update_report_section(report_key, chunk[report_key])
+        report_content = _chunk_state_value(chunk, report_key, "")
+        if report_content:
+            message_buffer.update_report_section(report_key, report_content)
 
         # Determine status from accumulated sections, not just current chunk
         has_report = bool(message_buffer.report_sections.get(report_key))
@@ -2170,9 +2270,24 @@ def format_tool_args(args, max_length=80) -> str:
     return result
 
 
+def _iter_chunk_messages(chunk: dict):
+    if not isinstance(chunk, dict):
+        return
+    for message in chunk.get("messages", []) or []:
+        yield message
+    for value in chunk.values():
+        if isinstance(value, dict):
+            for message in value.get("messages", []) or []:
+                yield message
+
+
+def _sanitize_stream_log_content(content: str) -> str:
+    return strip_refine_preamble(content or "").strip()
+
+
 def process_chunk_messages(chunk, buffer: MessageBuffer) -> None:
     """Record unique streamed messages and tool calls from a graph chunk."""
-    for message in chunk.get("messages", []):
+    for message in _iter_chunk_messages(chunk):
         msg_id = getattr(message, "id", None)
         if msg_id is not None:
             if msg_id in buffer._processed_message_ids:
@@ -2180,6 +2295,7 @@ def process_chunk_messages(chunk, buffer: MessageBuffer) -> None:
             buffer._processed_message_ids.add(msg_id)
 
         msg_type, content = classify_message_type(message)
+        content = _sanitize_stream_log_content(content)
         if content and content.strip():
             buffer.add_message(msg_type, content)
 
@@ -2500,7 +2616,9 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None):
 
             completed_successfully = False
             try:
+                accumulated_state = copy.deepcopy(init_agent_state)
                 for chunk in graph.graph.stream(init_agent_state, **args):
+                    _merge_stream_state(accumulated_state, chunk)
                     # Process all messages in each chunk so intermediate tool calls are not dropped.
                     process_chunk_messages(chunk, message_buffer)
 
@@ -2583,11 +2701,11 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None):
                 completed_successfully = True
             finally:
                 if completed_successfully and trace:
-                    graph.finalize_run(selections["analysis_date"], trace[-1])
+                    graph.finalize_run(selections["analysis_date"], accumulated_state)
                 graph.close_run()
 
             # Get final state and decision
-            final_state = trace[-1]
+            final_state = accumulated_state
             decision = graph.process_signal(get_state_value(final_state, "final_allocation_decision", ""))
 
             # Update all agent statuses to completed
