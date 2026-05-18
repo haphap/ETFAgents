@@ -686,6 +686,8 @@ class ETFExtensionTests(unittest.TestCase):
                 call_count["propagate"] += 1
                 return (
                     {
+                        "market_flow_report": f"market-flow-{ticker}",
+                        "macro_regime_report": f"macro-{ticker}",
                         "research_allocation_plan": f"research-{ticker}",
                         "trader_allocation_plan": f"trader-{ticker}",
                         "final_allocation_decision": f"decision-{ticker}",
@@ -787,6 +789,7 @@ class ETFExtensionTests(unittest.TestCase):
             def _fake_propagate(ticker, _trade_date):
                 return (
                     {
+                        "market_flow_report": "市场分析正文",
                         "research_allocation_plan": "数据已获取完毕，以下为研究团队配置观点。\n\n研究观点正文",
                         "trader_allocation_plan": "报告已就绪。以下为交易员配置计划。\n\n交易计划正文",
                         "final_allocation_decision": "数据已获取完毕，以下为投资组合配置决策。\n\n最终配置建议：买入",
@@ -848,6 +851,7 @@ class ETFExtensionTests(unittest.TestCase):
                 "ticker": "510300.SH",
                 "rating": "BUY",
                 "score": "5",
+                "market_flow_report": "市场分析正文",
                 "research_allocation_plan": "数据已获取完毕，以下为研究团队配置观点。\n\n研究观点正文",
                 "trader_allocation_plan": "报告已就绪。以下为交易员配置计划。\n\n交易计划正文",
                 "final_allocation_decision": "数据已获取完毕，以下为投资组合配置决策。\n\n最终配置建议：买入",
@@ -872,6 +876,9 @@ class ETFExtensionTests(unittest.TestCase):
                     "signal_text_snapshot": "数据已获取完毕，以下为投资组合配置决策。\n\n最终配置建议：买入",
                 },
             }
+            graph.propagate = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                AssertionError("cache should be used")
+            )
 
             with backtest_context("2026-01-15"):
                 cache.put("510300.SH", "2026-01-15", raw_payload)
@@ -881,6 +888,75 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertEqual("交易计划正文", ranked[0]["trader_allocation_plan"])
         self.assertEqual("最终配置建议：买入", ranked[0]["final_allocation_decision"])
         self.assertEqual("最终配置建议：买入", ranked[0]["backtest_signal"]["signal_text_snapshot"])
+
+    def test_candidate_pool_recomputes_when_selected_analyst_report_was_cached_empty(self):
+        graph = object.__new__(EtfAgentsGraph)
+        graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        graph.selected_analysts = ["market_flow"]
+        with TemporaryDirectory() as tmpdir:
+            graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            graph.config["results_dir"] = tmpdir
+            call_count = {"propagate": 0}
+
+            def _fake_propagate(ticker, _trade_date):
+                call_count["propagate"] += 1
+                report = "" if call_count["propagate"] == 1 else f"market-flow-{ticker}"
+                return (
+                    {
+                        "market_flow_report": report,
+                        "research_allocation_plan": f"research-{ticker}",
+                        "trader_allocation_plan": f"trader-{ticker}",
+                        "final_allocation_decision": f"decision-{ticker}",
+                    },
+                    "BUY",
+                )
+
+            graph.propagate = _fake_propagate
+
+            with backtest_context("2026-01-15"):
+                first = EtfAgentsGraph.analyze_candidate_pool(graph, ["510300.SH"], "2026-01-15")
+                cache_files = list(Path(tmpdir).rglob("2026-01-15.json"))
+                self.assertEqual(1, len(cache_files))
+                first_cached = json.loads(cache_files[0].read_text())
+                second = EtfAgentsGraph.analyze_candidate_pool(graph, ["510300.SH"], "2026-01-15")
+                second_cached = json.loads(cache_files[0].read_text())
+
+        self.assertEqual(call_count["propagate"], 2)
+        self.assertEqual("", first[0]["market_flow_report"])
+        self.assertEqual("market-flow-510300.SH", second[0]["market_flow_report"])
+        self.assertNotIn("market_flow_report", first_cached)
+        self.assertEqual("market-flow-510300.SH", second_cached["market_flow_report"])
+
+    def test_candidate_pool_uses_cache_when_unselected_analyst_report_is_missing(self):
+        graph = object.__new__(EtfAgentsGraph)
+        graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        graph.selected_analysts = ["macro_regime"]
+        with TemporaryDirectory() as tmpdir:
+            graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            graph.config["results_dir"] = tmpdir
+            call_count = {"propagate": 0}
+
+            def _fake_propagate(ticker, _trade_date):
+                call_count["propagate"] += 1
+                return (
+                    {
+                        "macro_regime_report": f"macro-{ticker}",
+                        "research_allocation_plan": f"research-{ticker}",
+                        "trader_allocation_plan": f"trader-{ticker}",
+                        "final_allocation_decision": f"decision-{ticker}",
+                    },
+                    "BUY",
+                )
+
+            graph.propagate = _fake_propagate
+
+            with backtest_context("2026-01-15"):
+                first = EtfAgentsGraph.analyze_candidate_pool(graph, ["510300.SH"], "2026-01-15")
+                second = EtfAgentsGraph.analyze_candidate_pool(graph, ["510300.SH"], "2026-01-15")
+
+        self.assertEqual(call_count["propagate"], 1)
+        self.assertEqual("macro-510300.SH", first[0]["macro_regime_report"])
+        self.assertEqual("macro-510300.SH", second[0]["macro_regime_report"])
 
     def test_candidate_pool_cache_misses_when_config_changes(self):
         first_graph = object.__new__(EtfAgentsGraph)

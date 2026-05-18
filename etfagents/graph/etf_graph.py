@@ -57,6 +57,22 @@ ETF_DEFAULT_CONFIG["tool_vendors"].update(
 )
 
 _CANDIDATE_PAYLOAD_TEXT_SUFFIXES = ("_report", "_plan", "_decision")
+_SELECTED_ANALYST_REPORT_KEYS = {
+    "market_flow": "market_flow_report",
+    "catalyst_sentiment": "catalyst_sentiment_report",
+    "macro_regime": "macro_regime_report",
+    "meso_commodity": "meso_commodity_report",
+    "holdings_industry": "holdings_industry_report",
+    "top_holdings": "top_holdings_report",
+    "market": "market_flow_report",
+    "social": "catalyst_sentiment_report",
+    "news": "macro_regime_report",
+    "etf_structure": "meso_commodity_report",
+    "broker_research": "holdings_industry_report",
+    "stock_research": "top_holdings_report",
+    "etf_flow": "market_flow_report",
+    "etf_macro": "holdings_industry_report",
+}
 _LEADING_CANDIDATE_PROCESS_RE = re.compile(
     r"^\s*(?:"
     r"(?:报告|内容).{0,12}(?:已|已经)?(?:就绪|完成|生成|整理好|准备好)[。！!；;，,]?\s*(?:以下|下面|现在|接下来|下一步)"
@@ -66,7 +82,23 @@ _LEADING_CANDIDATE_PROCESS_RE = re.compile(
 )
 
 
+def _looks_like_candidate_process_opening(opening: str) -> bool:
+    return bool(
+        opening
+        and len(opening) <= 200
+        and len(opening.splitlines()) <= 2
+        and not re.search(r"(?m)^\s*(?:#|\||[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)", opening)
+        and not re.search(r"\d|[%％]", opening)
+        and _LEADING_CANDIDATE_PROCESS_RE.match(opening)
+    )
+
+
 def _sanitize_candidate_payload_text(text: str) -> str:
+    normalized_original = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    original_paragraphs = re.split(r"\n\s*\n", normalized_original, maxsplit=1)
+    if len(original_paragraphs) == 2 and _looks_like_candidate_process_opening(original_paragraphs[0].strip()):
+        return strip_refine_preamble(original_paragraphs[1]).strip()
+
     cleaned = strip_refine_preamble(text).strip()
     if not cleaned:
         return ""
@@ -74,15 +106,7 @@ def _sanitize_candidate_payload_text(text: str) -> str:
     normalized = cleaned.replace("\r\n", "\n").replace("\r", "\n")
     paragraphs = re.split(r"\n\s*\n", normalized, maxsplit=1)
     opening = paragraphs[0].strip()
-    if (
-        opening
-        and len(opening) <= 200
-        and len(opening.splitlines()) <= 2
-        and not re.search(r"(?m)^\s*(?:#|\||[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)", opening)
-        and not re.search(r"\d|[%％]", opening)
-        and _LEADING_CANDIDATE_PROCESS_RE.match(opening)
-        and len(paragraphs) == 2
-    ):
+    if len(paragraphs) == 2 and _looks_like_candidate_process_opening(opening):
         return paragraphs[1].strip()
     return cleaned
 
@@ -100,6 +124,37 @@ def _sanitize_candidate_payload(payload: dict[str, object]) -> dict[str, object]
             signal["signal_text_snapshot"] = _sanitize_candidate_payload_text(snapshot)
             sanitized["backtest_signal"] = signal
     return sanitized
+
+
+def _selected_analyst_report_keys(selected_analysts: list[str] | tuple[str, ...]) -> tuple[str, ...]:
+    keys = [
+        _SELECTED_ANALYST_REPORT_KEYS[analyst]
+        for analyst in selected_analysts
+        if analyst in _SELECTED_ANALYST_REPORT_KEYS
+    ]
+    return tuple(dict.fromkeys(keys))
+
+
+def _has_missing_selected_reports(
+    payload: dict[str, object],
+    expected_report_keys: tuple[str, ...],
+) -> bool:
+    for key in expected_report_keys:
+        value = payload.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return True
+    return False
+
+
+def _cacheable_candidate_payload(
+    payload: dict[str, object],
+    expected_report_keys: tuple[str, ...],
+) -> dict[str, object]:
+    cacheable = dict(payload)
+    for key, value in tuple(cacheable.items()):
+        if key.endswith("_report") and isinstance(value, str) and not value.strip():
+            cacheable.pop(key, None)
+    return cacheable
 
 
 class EtfAgentsGraph(TradingAgentsGraph):
@@ -162,6 +217,9 @@ class EtfAgentsGraph(TradingAgentsGraph):
     ) -> list[dict[str, object]]:
         """Analyze a candidate pool sequentially and rank it by final allocation rating."""
         results: list[dict[str, object]] = []
+        selected_report_keys = _selected_analyst_report_keys(
+            getattr(self, "selected_analysts", self.DEFAULT_SELECTED_ANALYSTS)
+        )
         for ticker in tickers:
             memory_signature = None
             if getattr(self, "config", {}).get("memory_in_backtest"):
@@ -176,8 +234,10 @@ class EtfAgentsGraph(TradingAgentsGraph):
             )
             cached = cache.get(ticker, trade_date)
             if cached is not None:
-                results.append(_sanitize_candidate_payload(dict(cached)))
-                continue
+                cached_payload = _sanitize_candidate_payload(dict(cached))
+                if not _has_missing_selected_reports(cached_payload, selected_report_keys):
+                    results.append(cached_payload)
+                    continue
             final_state, rating = self.propagate(ticker, trade_date)
             result = {
                 "ticker": ticker,
@@ -235,7 +295,11 @@ class EtfAgentsGraph(TradingAgentsGraph):
                 ),
             }
             result = _sanitize_candidate_payload(result)
-            cache.put(ticker, trade_date, result)
+            cache.put(
+                ticker,
+                trade_date,
+                _cacheable_candidate_payload(result, selected_report_keys),
+            )
             results.append(result)
         ranked = sorted(
             results,

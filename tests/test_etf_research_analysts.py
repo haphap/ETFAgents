@@ -9,6 +9,7 @@ from etfagents.agents.analysts.etf_industry_research_analyst import (
     _looks_like_complete_holdings_industry_report,
 )
 from etfagents.agents.analysts.etf_market_analyst import (
+    _REPORT_SPEC,
     create_etf_market_analyst,
     _looks_like_complete_market_flow_report,
 )
@@ -35,6 +36,7 @@ from etfagents.agents.utils.report_leads import (
     strip_report_title,
     strip_refine_preamble,
 )
+from etfagents.agents.utils.validate_refine import static_validate
 
 
 class _CapturingLLM(RunnableLambda):
@@ -551,6 +553,14 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         )
 
         self.assertTrue(_looks_like_complete_market_flow_report(valid_report))
+        self.assertTrue(
+            _looks_like_complete_market_flow_report(
+                "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
+                "一、市场结构与量价诊断\n趋势导语。\n\n"
+                "二、交易确认与执行计划\n执行导语。\n\n"
+                "三、关键价位与条件情景推演\n情景导语。"
+            )
+        )
         self.assertFalse(
             _looks_like_complete_market_flow_report(
                 "数据已获取完毕，现在整合所有信息撰写报告。"
@@ -580,7 +590,21 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
             )
         )
 
-    def test_market_flow_keeps_last_cleaned_draft_with_warning_when_shape_stays_incomplete(self):
+    def test_market_flow_spec_marks_missing_tail_markers_without_failing_shape_gate(self):
+        report = (
+            "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
+            "一、市场结构与量价诊断\n趋势导语。\n\n"
+            "二、交易确认与执行计划\n执行导语。\n\n"
+            "三、关键价位与条件情景推演\n情景导语。"
+        )
+
+        verdict = static_validate(report, _REPORT_SPEC)
+
+        self.assertTrue(_looks_like_complete_market_flow_report(report))
+        self.assertTrue(any("指标总览" in item for item in verdict.missing_elements))
+        self.assertTrue(any("综合结论" in item for item in verdict.missing_elements))
+
+    def test_market_flow_keeps_last_cleaned_draft_when_tail_markers_are_still_missing(self):
         llm = _CapturingLLM()
         node = create_etf_market_analyst(llm)
         incomplete_report = (
@@ -600,7 +624,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         ), patch(
             "etfagents.agents.analysts.etf_market_analyst.validate_and_refine",
             side_effect=lambda report, *_args, **_kwargs: report,
-        ), self.assertLogs("etfagents.agents.analysts.etf_market_analyst", level="WARNING") as logs:
+        ):
             result = node(
                 {
                     "company_of_interest": "159949.SZ",
@@ -610,7 +634,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
             )
 
         self.assertIn("趋势和资金流同步改善", result["market_flow_report"])
-        self.assertIn("keeping last cleaned draft", "\n".join(logs.output))
+        self.assertNotIn("指标总览", result["market_flow_report"])
 
 
 class ReportTitleNormalizationTests(unittest.TestCase):

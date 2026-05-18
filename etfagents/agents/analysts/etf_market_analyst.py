@@ -39,6 +39,7 @@ _REPORT_SPEC = AnalystReportSpec(
     analyst_name="market_flow",
     required_top_sections=("一", "二", "三"),
     required_indicator_tokens=("MACD", "RSI"),
+    required_tail_tokens=("指标总览", "综合结论"),
     custom_rules_markdown=(
         "### 内容覆盖\n"
         "- 是否包含三个一级章节：一、市场结构与量价诊断；二、交易确认与执行计划；三、关键价位与条件情景推演？\n"
@@ -67,8 +68,6 @@ _ETF_MARKET_INDICATORS = {
     "vwma": "price-volume confirmation",
 }
 _MARKET_FLOW_REQUIRED_TOP_SECTIONS = {"一", "二", "三"}
-# Anchors must match the section names emitted by the prompt template below.
-_MARKET_FLOW_REQUIRED_MARKERS = ("指标总览", "综合结论")
 
 
 def _etf_indicator_catalog() -> str:
@@ -90,7 +89,7 @@ def _looks_like_complete_market_flow_report(report: str) -> bool:
     if not _MARKET_FLOW_REQUIRED_TOP_SECTIONS.issubset(section_marks):
         return False
 
-    return all(marker in content for marker in _MARKET_FLOW_REQUIRED_MARKERS)
+    return True
 
 
 def create_etf_market_analyst(llm):
