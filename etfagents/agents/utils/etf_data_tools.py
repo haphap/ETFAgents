@@ -169,6 +169,8 @@ _GENERIC_COMMODITY_PRODUCER_PROXY_BASKET = {
         {"ts_code": "600938.SH", "name": "中国海油", "industry": "石油石化", "weight": 25.0},
     ),
 }
+# Snapshot of representative constituents and approximate raw weights as of 2026-05.
+# Refresh quarterly to track Hang Seng family rebalances and weight drift.
 _HK_BENCHMARK_PROXY_BASKETS = (
     {
         "label": "恒生科技",
@@ -320,6 +322,11 @@ def _match_hk_benchmark_proxy_basket(profile_row: pd.Series) -> dict[str, object
 
 
 def _lookup_hk_metadata(ts_code: str, fallback_name: str, fallback_industry: str) -> dict[str, str]:
+    """Look up HK constituent metadata.
+
+    fallback_industry takes precedence over hk_basic.market; hk_basic is mainly used
+    to refresh the display name when that feed is available.
+    """
     try:
         basic = _query_pro("hk_basic", ts_code=ts_code)
     except Exception:
@@ -366,9 +373,16 @@ def _build_hk_benchmark_proxy_frame(
     if not basket:
         return ts_code, "", pd.DataFrame()
 
+    selected_members = basket["members"][: max(1, int(limit))]
+    raw_basket_weight = sum(
+        max(_safe_float(member.get("weight")) or 0.0, 0.0) for member in basket["members"]
+    )
+    selected_raw_weight = sum(
+        max(_safe_float(member.get("weight")) or 0.0, 0.0) for member in selected_members
+    )
     rows: list[dict[str, object]] = []
     latest_trade_date = ""
-    for member in basket["members"][: max(1, int(limit))]:
+    for member in selected_members:
         member_code = _normalize_ts_code(str(member["ts_code"]))
         metadata = _lookup_hk_metadata(
             member_code,
@@ -376,14 +390,16 @@ def _build_hk_benchmark_proxy_frame(
             str(member.get("industry", "")),
         )
         price = _lookup_hk_latest_price(member_code, curr_date)
-        if price.get("latest_trade_date") and not latest_trade_date:
-            latest_trade_date = str(price["latest_trade_date"])
+        trade_date = str(price.get("latest_trade_date") or "")
+        if trade_date:
+            latest_trade_date = max(latest_trade_date, trade_date) if latest_trade_date else trade_date
+        raw_member_weight = max(_safe_float(member.get("weight")) or 0.0, 0.0)
         rows.append(
             {
                 "ts_code": metadata["ts_code"],
                 "name": metadata["name"],
                 "industry": metadata["industry"],
-                "weight": _safe_float(member.get("weight")) or 0.0,
+                "weight": (raw_member_weight / raw_basket_weight * 100.0) if raw_basket_weight > 0 else 0.0,
                 **price,
             }
         )
@@ -391,6 +407,15 @@ def _build_hk_benchmark_proxy_frame(
     if frame.empty:
         return ts_code, "", frame
     label = str(basket["label"])
+    coverage_note = (
+        "This output covers the full representative proxy basket."
+        if raw_basket_weight <= 0 or selected_raw_weight >= raw_basket_weight
+        else (
+            "This output covers "
+            f"{_format_number(selected_raw_weight / raw_basket_weight * 100.0, suffix='%')} "
+            "of that representative proxy basket by normalized weight."
+        )
+    )
     frame.attrs["source"] = "hk_benchmark_proxy"
     frame.attrs["proxy_label"] = label
     frame.attrs["display_label"] = label
@@ -398,7 +423,9 @@ def _build_hk_benchmark_proxy_frame(
         f"No disclosed fund_portfolio holdings were available for {ts_code}. "
         f"This fallback uses a representative Hong Kong equity basket for the {label} benchmark exposure, "
         "enriched with Tushare hk_basic and hk_daily where available. "
-        "Weights are illustrative proxy weights, not official ETF holdings or index weights."
+        "Weights are normalized to 100% of the representative proxy basket and are illustrative only, "
+        "not official ETF holdings or index weights. "
+        f"{coverage_note}"
     )
     return ts_code, latest_trade_date or curr_date.replace("-", ""), frame
 
@@ -414,7 +441,7 @@ def _render_hk_benchmark_proxy_holdings(
     source_note = str(proxy_frame.attrs.get("source_note", "")).strip()
     output = proxy_frame.rename(
         columns={
-            "weight": "proxy_weight_illustrative_pct",
+            "weight": "proxy_basket_weight_pct",
             "latest_close": "latest_hk_close",
             "latest_pct_chg": "latest_hk_pct_chg",
         }
@@ -1638,8 +1665,12 @@ def get_etf_industry_research(
         representatives.append(representative)
     reps_df = pd.DataFrame(representatives)
     source_note = str(constituents.attrs.get("source_note", "")).strip()
-    weight_header = "Proxy weight (illustrative)" if source_note else "Weight"
-    aggregated_weight_label = "aggregated proxy weight (illustrative)" if source_note else "aggregated weight"
+    if is_hk_proxy:
+        weight_header = "Proxy basket weight"
+        aggregated_weight_label = "aggregated proxy-basket weight"
+    else:
+        weight_header = "Proxy weight (illustrative)" if source_note else "Weight"
+        aggregated_weight_label = "aggregated proxy weight (illustrative)" if source_note else "aggregated weight"
     sections = [
         f"# ETF industry research for {ts_code}",
         f"Latest holdings disclosure date: {latest_end_date or 'N/A'}",
@@ -1710,14 +1741,18 @@ def get_etf_top_holdings_research(
     start_date, end_date = _date_window(curr_date, look_back_days)
     source_note = str(constituents.attrs.get("source_note", "")).strip()
     is_hk_proxy = _is_hk_proxy_frame(constituents)
-    weight_header = "Proxy weight (illustrative)" if source_note else "Weight"
-    per_holding_weight_label = "proxy weight (illustrative)" if source_note else "portfolio weight"
+    if is_hk_proxy:
+        weight_header = "Proxy basket weight"
+        per_holding_weight_label = "proxy-basket weight"
+    else:
+        weight_header = "Proxy weight (illustrative)" if source_note else "Weight"
+        per_holding_weight_label = "proxy weight (illustrative)" if source_note else "portfolio weight"
     holdings_heading = (
         "## Proxy Hong Kong benchmark basket"
         if is_hk_proxy
         else "## Proxy A-share producer basket"
         if source_note
-        else "## Top disclosed holdings"
+        else "## Top disclosed A-share holdings"
     )
     sections = [
         f"# ETF top-holdings stock research for {ts_code}",
