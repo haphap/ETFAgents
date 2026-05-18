@@ -269,6 +269,10 @@ _LOOSE_ARABIC_LIST_ITEM_PATTERN = re.compile(
     re.MULTILINE,
 )
 _ARABIC_LIST_ITEM_LINE_PATTERN = re.compile(r"^\s*\d+(?:[.)、．]|\s)\s+\S")
+_WRAPPED_ETF_NAME_CODE_PATTERN = re.compile(
+    r"(?m)^([^\n。！？!?；;：:]{2,80}(?:ETF|基金)[^\n。！？!?；;：:]{0,40})[ \t]*\n(?:[ \t]*\n)?[ \t]*"
+    r"([（(]\d{6}(?:\.(?:SH|SZ|BJ))?[）)]\S*)"
+)
 
 
 def _looks_like_plain_numbered_heading(line: str) -> bool:
@@ -291,6 +295,13 @@ def _normalize_loose_arabic_list_markers(content: str) -> str:
     if not text or not _is_chinese_output():
         return text
     return _LOOSE_ARABIC_LIST_ITEM_PATTERN.sub(r"\1\2. \3", text)
+
+
+def _join_wrapped_etf_name_code(content: str) -> str:
+    text = (content or "").replace("\r\n", "\n").replace("\r", "\n")
+    if not text or not _is_chinese_output():
+        return text
+    return _WRAPPED_ETF_NAME_CODE_PATTERN.sub(r"\1\2", text)
 
 
 def _strip_sentence_like_section_prefixes_in_lists(content: str) -> str:
@@ -793,6 +804,7 @@ def _prepare_report_markdown(content: str, target_min_level: Optional[int] = Non
     text = strip_exchange_only_pseudo_titles(text)
     text = _strip_empty_markdown_decoration_lines(text)
     text = _normalize_loose_arabic_list_markers(text)
+    text = _join_wrapped_etf_name_code(text)
     text = _strip_sentence_like_section_prefixes_in_lists(text)
     text = _normalize_orphan_section_marker_lines(text)
     text = _split_inline_section_headings(text)
