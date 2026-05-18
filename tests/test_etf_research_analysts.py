@@ -131,8 +131,8 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("逐份深度分析", system_msg)
-        self.assertIn("跨报告比较分析", system_msg)
+        self.assertIn("逐份提取并记录", system_msg)
+        self.assertIn("跨报告比较时", system_msg)
         self.assertIn("ETF Exposure Read-Through", system_msg)
         self.assertIn("Supply-Chain Implications", system_msg)
         self.assertIn("一、行业主线与分歧焦点", system_msg)
@@ -147,6 +147,8 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("数据源分类噪声", system_msg)
         self.assertIn("应完全排除", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
+        self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
+        self.assertNotIn("## 第一步：数据获取", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
         self.assertIs(
@@ -247,8 +249,8 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("逐份深度分析", system_msg)
-        self.assertIn("跨报告比较分析", system_msg)
+        self.assertIn("逐份提取并记录", system_msg)
+        self.assertIn("跨报告比较时", system_msg)
         self.assertIn("Earnings Estimate Consensus", system_msg)
         self.assertIn("Valuation Analysis", system_msg)
         self.assertIn("ETF Portfolio Impact", system_msg)
@@ -263,6 +265,8 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("每项论点必须引用", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
+        self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
+        self.assertNotIn("## 第一步：数据获取", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("If the structure does not provide a heading, write one that is brief, forceful, and immediately usable", system_msg)
@@ -418,6 +422,7 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
         self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("不要写'本节锁定'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
+        self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("Do NOT output code blocks", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
@@ -506,6 +511,8 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("反面示例（禁止）", system_msg)
         self.assertIn("正面示例（目标风格）", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
+        self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
+        self.assertNotIn("## 数据获取", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
@@ -572,6 +579,38 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
                 "一、市场结构与量价诊断\n趋势偏多。\n\n二、交易确认与执行计划\n执行。\n\n三、关键价位与条件情景推演\n情景。\n\n指标总览\n综合结论：偏多。"
             )
         )
+
+    def test_market_flow_keeps_last_cleaned_draft_with_warning_when_shape_stays_incomplete(self):
+        llm = _CapturingLLM()
+        node = create_etf_market_analyst(llm)
+        incomplete_report = (
+            "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
+            "一、市场结构与量价诊断\n"
+            "趋势导语。\n\n"
+            "二、交易确认与执行计划\n"
+            "执行导语。\n\n"
+            "三、关键价位与条件情景推演\n"
+            "情景导语。\n\n"
+            "综合结论：偏多配置，等待回踩确认。"
+        )
+
+        with patch(
+            "etfagents.agents.analysts.etf_market_analyst.run_tool_report_chain",
+            return_value=(AIMessage(content=incomplete_report), incomplete_report),
+        ), patch(
+            "etfagents.agents.analysts.etf_market_analyst.validate_and_refine",
+            side_effect=lambda report, *_args, **_kwargs: report,
+        ), self.assertLogs("etfagents.agents.analysts.etf_market_analyst", level="WARNING") as logs:
+            result = node(
+                {
+                    "company_of_interest": "159949.SZ",
+                    "trade_date": "2026-04-30",
+                    "messages": [HumanMessage(content="Analyze 159949.SZ")],
+                }
+            )
+
+        self.assertIn("趋势和资金流同步改善", result["market_flow_report"])
+        self.assertIn("keeping last cleaned draft", "\n".join(logs.output))
 
 
 class ReportTitleNormalizationTests(unittest.TestCase):
@@ -796,6 +835,7 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         system_msg = captured["system_message"]
         self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
+        self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、暴露与宏观主线", system_msg)
         self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
@@ -874,6 +914,9 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         system_msg = captured.get("prompt", "")
         self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
+        self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
+        self.assertNotIn("## 数据来源（已获取，直接使用）", system_msg)
+        self.assertNotIn("## 分析指引", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、情绪主线与权重影响", system_msg)
         self.assertNotIn("一、情绪主线与权重影响 (", system_msg)

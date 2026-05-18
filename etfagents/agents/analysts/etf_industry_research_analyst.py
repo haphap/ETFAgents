@@ -13,6 +13,7 @@ from etfagents.agents.utils.report_leads import (
     collect_top_section_marks,
     contains_markdown_table,
     get_concise_heading_instruction,
+    get_no_process_narration_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
     has_invalid_opening_cap,
@@ -77,21 +78,19 @@ def create_etf_industry_research_analyst(llm):
             "你是一名资深ETF行业研究分析师，专注于机构行业研究报告的深度交叉分析。"
             "你的任务是从ETF重仓股出发，追溯这些持仓在券商研究报告中实际使用的行业关键词，"
             "然后产出一份有证据支撑的ETF主导行业暴露交叉分析。\n\n"
-            + "## 第一步：数据获取\n"
+            "先完成以下取数动作并直接据此成文：\n"
             "1. 调用 get_etf_holdings(ticker, curr_date) 获取ETF前十大持仓与集中度结构。\n"
             "2. 调用 get_etf_industry_research(ticker, curr_date) 获取基于重仓股衍生的行业研究。"
             "该工具已尽可能从持仓级个股报告中解析出券商搜索关键词，视为本ETF的权威行业报告集。\n"
             "3. 逐份研读报告摘要全文——不得仅凭标题判断。\n\n"
-            "## 第二步：逐份深度分析\n"
-            "对每份行业报告，提取并记录：\n"
+            "对每份行业报告，逐份提取并记录：\n"
             "- 行业趋势论点与核心论据\n"
             "- 引用的具体数据：需求增速、产能、价格、库存、开工率、进出口、政策目标等\n"
             "- 产业链动态：上游成本压力、中游加工、下游需求与替代\n"
             "- 政策与监管影响：补贴、配额、关税、环保约束、整合指令\n"
             "- 行业层面的关键催化剂与风险\n"
             "- 哪些ETF持仓对该行业论点暴露最大\n\n"
-            "## 第三步：跨报告比较分析\n"
-            "不得简单罗列各报告。你的价值在于交叉分析。\n"
+            "跨报告比较时，不得简单罗列各报告。你的价值在于交叉分析。\n"
             "对比所有报告：\n"
             "- **共识观点 (Consensus View)**：多数券商对ETF主导行业持何共识？引用券商名称与证据。\n"
             "- **核心分歧 (Key Divergences)**：券商在行业方向、定价权、政策影响、供需平衡或节奏上有何分歧？\n"
@@ -102,7 +101,7 @@ def create_etf_industry_research_analyst(llm):
             "- **产业链影响 (Supply-Chain Implications)**：解释上下游传导及哪些持仓受益或受损。\n"
             "- **ETF暴露与配置含义 (ETF Exposure Read-Through)**：将每个主要行业结论与ETF权重集中度、周期性、政策敏感度和配置节奏挂钩。\n"
             "- **风险提示 (Risk Factors)**：按频次与严重程度排列行业风险，附券商引用。\n\n"
-            "## 第四步：结构化报告\n"
+            + get_no_process_narration_instruction() + "\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"

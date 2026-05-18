@@ -1,4 +1,5 @@
 import copy
+import re
 from typing import Any, Dict
 
 from langgraph.prebuilt import ToolNode
@@ -19,6 +20,7 @@ from etfagents.agents.utils.agent_utils import (
     get_news,
 )
 from etfagents.agents.utils.state_keys import get_state_value
+from etfagents.agents.utils.report_leads import strip_refine_preamble
 from etfagents.backtest.signals import (
     build_candidate_backtest_signal,
     build_state_backtest_signal,
@@ -53,6 +55,47 @@ ETF_DEFAULT_CONFIG["tool_vendors"].update(
         "get_etf_universe": "tushare",
     }
 )
+
+_CANDIDATE_CACHE_TEXT_SUFFIXES = ("_report", "_plan", "_decision")
+_LEADING_CANDIDATE_PROCESS_RE = re.compile(
+    r"(?:数据|资料|信息|报告|分析|获取|收集|整理|就绪|完毕|撰写|生成|输出|以下为|以下是|开始|接下来|下一步|现在)"
+)
+
+
+def _sanitize_candidate_cache_text(text: str) -> str:
+    cleaned = strip_refine_preamble(text).strip()
+    if not cleaned:
+        return ""
+
+    normalized = cleaned.replace("\r\n", "\n").replace("\r", "\n")
+    paragraphs = re.split(r"\n\s*\n", normalized, maxsplit=1)
+    opening = paragraphs[0].strip()
+    if (
+        opening
+        and len(opening) <= 200
+        and len(opening.splitlines()) <= 2
+        and not re.search(r"(?m)^\s*(?:#|\||[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)", opening)
+        and not re.search(r"\d|[%％]", opening)
+        and _LEADING_CANDIDATE_PROCESS_RE.search(opening)
+        and len(paragraphs) == 2
+    ):
+        return paragraphs[1].strip()
+    return cleaned
+
+
+def _sanitize_candidate_cache_payload(payload: dict[str, object]) -> dict[str, object]:
+    sanitized = dict(payload)
+    for key, value in tuple(sanitized.items()):
+        if isinstance(value, str) and key.endswith(_CANDIDATE_CACHE_TEXT_SUFFIXES):
+            sanitized[key] = _sanitize_candidate_cache_text(value)
+    signal = sanitized.get("backtest_signal")
+    if isinstance(signal, dict):
+        snapshot = signal.get("signal_text_snapshot")
+        if isinstance(snapshot, str):
+            signal = dict(signal)
+            signal["signal_text_snapshot"] = _sanitize_candidate_cache_text(snapshot)
+            sanitized["backtest_signal"] = signal
+    return sanitized
 
 
 class EtfAgentsGraph(TradingAgentsGraph):
@@ -157,6 +200,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
                     default_trade_date=trade_date,
                 ),
             }
+            result = _sanitize_candidate_cache_payload(result)
             cache.put(ticker, trade_date, result)
             results.append(result)
         ranked = sorted(

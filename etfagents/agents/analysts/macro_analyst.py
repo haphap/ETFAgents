@@ -20,6 +20,7 @@ from etfagents.agents.utils.report_leads import (
     collect_top_section_marks,
     contains_markdown_table,
     get_concise_heading_instruction,
+    get_no_process_narration_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
     has_invalid_opening_cap,
@@ -88,6 +89,7 @@ def create_macro_analyst(llm):
             "先调用 get_etf_info 和 get_etf_holdings 识别基准/风格/行业暴露，再调用 get_macro_regime_data(curr_date, look_back_days) 构建跨资产制度图谱（含Tushare经济日历，通过cn_schedule实现）。"
             "仅使用 get_global_news 和针对性 get_news 验证或挑战数据已暗示的驱动因素。\n\n"
             + "不得产出割裂的清单。建立一条逻辑链：ETF暴露 → 宏观与政策制度 → 异常信号 → 情景敏感性 → 下个再平衡窗口催化剂 → 配置含义。\n\n"
+            + get_no_process_narration_instruction() + "\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"

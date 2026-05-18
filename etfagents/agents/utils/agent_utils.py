@@ -83,8 +83,6 @@ def get_language_instruction() -> str:
         " fourth level (1) (2) (3); fifth level ① ② ③. "
         " Keep paragraphs distinct and numbering consistent from start to finish."
     )
-
-
 def get_no_greeting_instruction() -> str:
     """Return a prompt instruction forbidding greeting openers."""
     if _is_chinese_output():

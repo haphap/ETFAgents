@@ -13,6 +13,7 @@ from etfagents.agents.utils.report_leads import (
     collect_top_section_marks,
     contains_markdown_table,
     get_concise_heading_instruction,
+    get_no_process_narration_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
     has_invalid_opening_cap,
@@ -73,20 +74,18 @@ def create_etf_stock_research_analyst(llm):
             "你是一名资深ETF头部持仓研究分析师，专注于券商个股研究报告的深度交叉分析。"
             "你的任务是检索ETF最重要持仓的近期报告，深入分析每份报告，"
             "产出以ETF为优先的机构观点交叉分析。\n\n"
-            + "## 第一步：数据获取\n"
+            "先完成以下取数动作并直接据此成文：\n"
             "1. 调用 get_etf_holdings(ticker, curr_date) 获取ETF前十大持仓与集中度结构。\n"
             "2. 调用 get_etf_top_holdings_research(ticker, curr_date) 获取ETF头部披露持仓的近期个股报告。\n"
             "3. 逐份研读报告摘要全文——不得仅凭标题判断。\n\n"
-            "## 第二步：逐份深度分析\n"
-            "对每份个股报告，提取并记录：\n"
+            "对每份个股报告，逐份提取并记录：\n"
             "- 投资论点与核心论据\n"
             "- 引用的具体数据：营收/利润、毛利率、销量、订单 backlog、目标价、估值倍数、ROE、现金流、杠杆等\n"
             "- 评级、目标价与估值框架\n"
             "- 盈利预测与修正方向\n"
             "- 关键催化剂、风险与时间跨度\n"
             "- 该持仓的结果如何影响ETF收益归因与集中度风险\n\n"
-            "## 第三步：跨报告比较分析\n"
-            "不得简单罗列各报告。你的价值在于交叉分析。\n"
+            "跨报告比较时，不得简单罗列各报告。你的价值在于交叉分析。\n"
             "对比所有报告：\n"
             "- **共识观点 (Consensus View)**：多数券商对ETF头部持仓持何共识？\n"
             "- **核心分歧 (Key Divergences)**：券商在盈利持续性、估值、资本开支、利润率、政策暴露或执行风险上有何分歧？\n"
@@ -98,7 +97,7 @@ def create_etf_stock_research_analyst(llm):
             "- **关键催化剂 (Key Catalysts)**：按频次与可能的ETF影响排列催化剂。\n"
             "- **ETF组合影响 (ETF Portfolio Impact)**：解释哪些持仓支撑ETF论点、哪些拖累、哪些造成隐性集中度或政策风险。\n"
             "- **风险提示 (Risk Factors)**：按频次与严重程度排列风险，附券商引用。\n\n"
-            "## 第四步：结构化报告\n"
+            + get_no_process_narration_instruction() + "\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"

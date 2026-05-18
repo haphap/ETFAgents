@@ -1,6 +1,10 @@
 import re
 
-from etfagents.agents.utils.agent_utils import collapse_blank_lines, normalize_chinese_role_terms
+from etfagents.agents.utils.agent_utils import (
+    collapse_blank_lines,
+    normalize_chinese_role_terms,
+)
+from etfagents.report_prompt_utils import get_no_process_narration_instruction
 
 _H1_TITLE_PATTERN = re.compile(r"^#\s+\S")
 _TITLE_PREFIX_PATTERN = re.compile(r"^(?:#{1,6}\s+)?(?:[一二三四五六七八九十]+、\s*|（[一二三四五六七八九十\d]+）\s*)?")
@@ -110,8 +114,6 @@ def get_no_title_instruction() -> str:
         "For Chinese reports, write that overview before the first '一、' section; never start directly with '一、', '（一）', a bullet list, or a table. "
         "Do NOT repeat the report subject as a standalone title-like line anywhere in the body, and never construct pseudo-titles from only SH / SZ / HK / BJ or similar exchange suffixes."
     )
-
-
 def get_topic_and_term_style_instruction() -> str:
     return (
         " Make the opening sentence concise and thesis-led, with the same sharpness a strong title would have, rather than using generic scene-setting. "

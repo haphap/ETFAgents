@@ -21,6 +21,7 @@ from etfagents.agents.utils.analysis_memory import (
 from etfagents.agents.utils.report_leads import (
     collect_top_section_marks,
     get_concise_heading_instruction,
+    get_no_process_narration_instruction,
     get_no_title_instruction,
     get_topic_and_term_style_instruction,
     has_invalid_opening_cap,
@@ -104,7 +105,7 @@ def create_etf_market_analyst(llm):
         system_message = inject_memory_prompt_section((
             "你是一名ETF市场与资金流分析师，聚焦入场时机、流动性与执行质量。"
             "基于价格走势、均线、动量、波动率、份额变化、NAV线索与执行深度，为目标ETF构建一份技术面与资金流综合诊断报告。\n\n"
-            "## 数据获取\n"
+            "先按以下顺序取数并直接据此成文：\n"
             "1. 先调用 get_etf_price_data 获取价格数据，通常拉取3-6个月历史。\n"
             "2. 再调用 get_etf_indicators 获取技术指标，必须使用下方精确的指标ID，"
             "不得使用 MA、SMA、EMA 等通用别名。若需通用均线基准，请使用 close_20_sma。\n"
@@ -117,6 +118,7 @@ def create_etf_market_analyst(llm):
             "NAV溢价/折价也是资金信号：持续溢价说明需求旺盛，持续折价说明赎回压力，溢价收窄说明热情降温。\n\n"
             "Write a 2-4 sentence overview paragraph that summarizes the current directional bias, "
             "the most important confirming or contradicting signal, and the trading implication before section one.\n"
+            + get_no_process_narration_instruction() + "\n"
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
@@ -203,6 +205,7 @@ def create_etf_market_analyst(llm):
             current_date=current_date,
             instrument_context=instrument_context,
             report_acceptance_check=_looks_like_complete_market_flow_report,
+            rejected_report_fallback="last_attempt",
             unexecuted_tool_recovery={
                 "trigger_tool_names": [tool.name for tool in tools],
                 "tool_payloads": [
@@ -242,6 +245,10 @@ def create_etf_market_analyst(llm):
         report = pre_judge_clean(report) if report else report
         report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
         report = post_judge_clean(report) if report else report
+        if report and not _looks_like_complete_market_flow_report(report):
+            logger.warning(
+                "Market & flow report failed strict acceptance after retries; keeping last cleaned draft."
+            )
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

@@ -1,6 +1,8 @@
 import copy
+import json
 import re
 import unittest
+from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -766,6 +768,58 @@ class ETFExtensionTests(unittest.TestCase):
                 )
 
         self.assertEqual(call_count["propagate"], 2)
+
+    def test_candidate_pool_cache_sanitizes_report_preambles_before_persisting(self):
+        graph = object.__new__(EtfAgentsGraph)
+        graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
+        graph.selected_analysts = ["market_flow"]
+        with TemporaryDirectory() as tmpdir:
+            graph.config = copy.deepcopy(ETF_DEFAULT_CONFIG)
+            graph.config["results_dir"] = tmpdir
+
+            def _fake_propagate(ticker, _trade_date):
+                return (
+                    {
+                        "research_allocation_plan": "数据已获取完毕，以下为研究团队配置观点。\n\n研究观点正文",
+                        "trader_allocation_plan": "报告已就绪。以下为交易员配置计划。\n\n交易计划正文",
+                        "final_allocation_decision": "数据已获取完毕，以下为投资组合配置决策。\n\n最终配置建议：买入",
+                        "backtest_signal": {
+                            "ticker": ticker,
+                            "decision_date": "2026-01-15",
+                            "rating": "BUY",
+                            "source": "portfolio_manager",
+                            "source_section": "positioning_recommendation",
+                            "target_weight_pct": 25.0,
+                            "target_weight_min_pct": 25.0,
+                            "target_weight_max_pct": 25.0,
+                            "weight_source": "structured_field",
+                            "execution_delay": "next_open",
+                            "starter_size_text": "",
+                            "add_conditions": [],
+                            "reduce_conditions": [],
+                            "exit_conditions": [],
+                            "rebalance_conditions": [],
+                            "risk_controls": [],
+                            "monitoring_points": [],
+                            "signal_text_snapshot": "数据已获取完毕，以下为投资组合配置决策。\n\n最终配置建议：买入",
+                        },
+                    },
+                    "BUY",
+                )
+
+            graph.propagate = _fake_propagate
+
+            with backtest_context("2026-01-15"):
+                ranked = EtfAgentsGraph.analyze_candidate_pool(graph, ["510300.SH"], "2026-01-15")
+
+            cache_files = list(Path(tmpdir).rglob("2026-01-15.json"))
+            self.assertEqual(1, len(cache_files))
+            cached = json.loads(cache_files[0].read_text())
+            self.assertEqual("研究观点正文", cached["research_allocation_plan"])
+            self.assertEqual("交易计划正文", cached["trader_allocation_plan"])
+            self.assertEqual("最终配置建议：买入", cached["final_allocation_decision"])
+            self.assertEqual("最终配置建议：买入", cached["backtest_signal"]["signal_text_snapshot"])
+            self.assertEqual("研究观点正文", ranked[0]["research_allocation_plan"])
 
     def test_candidate_pool_cache_misses_when_config_changes(self):
         first_graph = object.__new__(EtfAgentsGraph)
