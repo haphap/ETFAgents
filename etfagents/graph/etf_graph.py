@@ -151,8 +151,13 @@ def _cacheable_candidate_payload(
     expected_report_keys: tuple[str, ...],
 ) -> dict[str, object]:
     cacheable = dict(payload)
-    for key, value in tuple(cacheable.items()):
-        if key.endswith("_report") and isinstance(value, str) and not value.strip():
+    report_keys = {
+        key for key in cacheable if key.endswith("_report")
+    }
+    report_keys.update(expected_report_keys)
+    for key in tuple(report_keys):
+        value = cacheable.get(key)
+        if isinstance(value, str) and not value.strip():
             cacheable.pop(key, None)
     return cacheable
 
