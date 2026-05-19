@@ -12,6 +12,7 @@ from cli.main import (
     _normalize_ticker_list,
     format_research_team_history,
     format_risk_management_history,
+    display_complete_report,
     process_chunk_messages,
     save_candidate_pool_report,
     save_report_to_disk,
@@ -1217,6 +1218,50 @@ class CliRoundFormattingTests(unittest.TestCase):
         self.assertIn("#### 1. 关键信号", normalized)
         self.assertIn("##### (1) 细项说明", normalized)
         self.assertIn("###### ① 更细分项", normalized)
+
+    def test_prepare_report_markdown_relevels_trader_headings_to_h2(self):
+        normalized = _prepare_report_markdown(
+            "一、配置逻辑\n"
+            "1. 第一条交易逻辑。\n\n"
+            "四、执行倾向\n"
+            "**增持**",
+            2,
+        )
+
+        self.assertIn("## 一、配置逻辑", normalized)
+        self.assertRegex(normalized, r"(?m)^## [二四]、执行倾向$")
+        self.assertNotRegex(normalized, r"(?m)^#(?!#)\s+")
+
+    def test_complete_report_displays_trader_headings_below_h1(self):
+        class RecordingConsole:
+            def __init__(self):
+                self.calls = []
+
+            def print(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+
+        # Keep the state minimal so this test isolates the trader display path.
+        final_state = {
+            "trader_allocation_plan": (
+                "一、配置逻辑\n"
+                "1. 境内长端利率对冲海外实际收益率上行。\n\n"
+                "四、执行倾向\n"
+                "**增持**"
+            )
+        }
+        recording_console = RecordingConsole()
+
+        with patch("cli.main.console", recording_console):
+            display_complete_report(final_state)
+
+        rendered_markdown = [
+            getattr(getattr(call[0][0], "renderable", None), "markup", "")
+            for call in recording_console.calls
+            if call[0]
+        ]
+        trader_markup = "\n".join(markup for markup in rendered_markdown if "配置逻辑" in markup)
+        self.assertIn("## 一、配置逻辑", trader_markup)
+        self.assertNotRegex(trader_markup, r"(?m)^#(?!#)\s+")
 
 
 if __name__ == "__main__":
