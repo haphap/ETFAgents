@@ -1194,6 +1194,27 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("Give a clear, actionable ETF portfolio recommendation", normalized)
         self.assertNotIn("\n\n\n", normalized)
 
+    def test_manager_normalization_demotes_inner_action_logic_headings(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 辩论结论\n"
+            "中性观点约束仓位，但价格结构仍未完全转弱。\n\n"
+            "## 行为逻辑\n"
+            "### 资金流确认\n"
+            "需要份额连续净申购后再上调仓位。\n\n"
+            "（一）仓位节奏\n"
+            "先维持底仓，等待成交量回到20日均量上方。\n\n"
+            "一、失效条件\n"
+            "若价格跌破2.05元且放量至20日均量1.3倍，应先减仓。"
+        )
+
+        self.assertIn("## 行为逻辑", normalized)
+        self.assertIn("资金流确认", normalized)
+        self.assertIn("仓位节奏", normalized)
+        self.assertIn("失效条件", normalized)
+        self.assertNotIn("### 资金流确认", normalized)
+        self.assertNotIn("（一）仓位节奏", normalized)
+        self.assertNotIn("一、失效条件", normalized)
+
     def test_manager_normalization_merges_duplicate_positioning_sections(self):
         normalized = normalize_chinese_manager_terms(
             "## 辩论结论\n"
