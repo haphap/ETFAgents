@@ -65,15 +65,19 @@ class _IntentThenFinalLLM(RunnableLambda):
         self.final_content = final_content or (
             "券商行业研究显示ETF主导暴露集中在工业金属，需求验证优先级高于估值扩张。\n\n"
             "一、行业主线与分歧焦点\n"
+            "工业金属报告的共同主线是需求验证强于估值扩张，ETF配置需要等待库存和订单同步确认。\n\n"
             "（一）共识主线\n"
             "报告内容。\n\n"
             "二、景气、政策与产业链验证\n"
+            "景气验证集中在价格、库存和政策传导三个变量，任何单点改善都不足以支撑行业贝塔扩散。\n\n"
             "（一）景气与价格对比\n"
             "报告内容。\n\n"
             "三、未解问题与风险边界\n"
+            "未解问题在于需求弹性和成本传导，风险边界应跟随盈利修正频次调整。\n\n"
             "（一）未解问题\n"
             "报告内容。\n\n"
             "四、ETF影响与研报总览\n"
+            "ETF暴露需要把工业金属行业景气转化为权重贡献，当前仍以需求验证作为加仓前提。\n\n"
             "（一）ETF暴露与配置含义\n"
             "ETF暴露需要等待行业需求验证。\n\n"
             "（二）研报总览表\n"
@@ -153,6 +157,8 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertNotIn("## 第一步：数据获取", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
+        self.assertIn("一级标题 -> 1-2句结论导语 -> 子章节标题", system_msg)
+        self.assertIn("不得写'本章''本节''本部分''旨在''梳理'", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
         self.assertIs(
             captured["acceptance_check"],
@@ -163,15 +169,19 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         valid_report = (
             "券商行业研究显示煤炭链条盈利预期仍受煤价下行压制，ETF配置应等待需求和库存同步修复。\n\n"
             "一、行业主线与分歧焦点\n"
+            "煤炭链条共识集中在煤价下行对盈利的压制，ETF配置需要等待需求和库存同步修复。\n\n"
             "（一）共识主线\n"
             "报告内容。\n\n"
             "二、景气、政策与产业链验证\n"
+            "景气验证的关键在于价格、库存和政策传导能否同时改善，否则行业贝塔仍难扩散。\n\n"
             "（一）景气与价格对比\n"
             "报告内容。\n\n"
             "三、未解问题与风险边界\n"
+            "券商分歧主要落在需求斜率和煤价中枢，风险边界应围绕盈利下修频次重新定价。\n\n"
             "（一）未解问题\n"
             "报告内容。\n\n"
             "四、ETF影响与研报总览\n"
+            "ETF暴露需要把行业盈利弹性转化为权重贡献，当前更适合等待需求验证后再提高仓位。\n\n"
             "（一）ETF暴露与配置含义\n"
             "ETF暴露需要等待需求验证。\n\n"
             "（二）研报总览表\n"
@@ -185,6 +195,36 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
             _looks_like_complete_holdings_industry_report(
                 "报告已就绪。以下为煤炭ETF（515220.SH）行业券商研究交叉分析：\n\n"
                 + valid_report
+            )
+        )
+        self.assertFalse(
+            _looks_like_complete_holdings_industry_report(
+                "本章旨在梳理当前新能源产业链的核心投资逻辑与市场认知差异。\n\n"
+                + valid_report
+            )
+        )
+        self.assertFalse(
+            _looks_like_complete_holdings_industry_report(
+                "券商行业研究显示煤炭链条盈利预期仍受煤价下行压制。\n\n"
+                "一、行业主线与分歧焦点\n"
+                "（一）共识主线\n"
+                "报告内容。\n\n"
+                "二、景气、政策与产业链验证\n"
+                "景气验证依赖库存去化。\n\n"
+                "（一）景气与价格对比\n"
+                "报告内容。\n\n"
+                "三、未解问题与风险边界\n"
+                "风险边界来自盈利下修。\n\n"
+                "（一）未解问题\n"
+                "报告内容。\n\n"
+                "四、ETF影响与研报总览\n"
+                "ETF暴露需要等待需求验证。\n\n"
+                "（一）ETF暴露与配置含义\n"
+                "ETF暴露需要等待需求验证。\n\n"
+                "（二）研报总览表\n"
+                "| 券商 | 行业关键词 | 立场 |\n"
+                "| --- | --- | --- |\n"
+                "| 示例券商 | 煤炭 | 谨慎 |"
             )
         )
 
@@ -267,7 +307,8 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("检索伪影", system_msg)
         self.assertIn("每项论点必须引用", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
-        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
+        self.assertIn("一级标题 -> 2-3句结论导语 -> 子章节标题", system_msg)
+        self.assertIn("不得写'本章''本节''本部分''旨在''梳理'", system_msg)
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertNotIn("## 第一步：数据获取", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
@@ -283,15 +324,19 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         valid_report = (
             "券商个股研究显示ETF头部持仓盈利修正方向分化，组合贡献集中在龙头。\n\n"
             "一、核心持仓共识与分歧\n"
+            "头部持仓的券商共识集中在龙头盈利韧性，但ETF组合贡献仍受权重集中度放大。\n\n"
             "（一）共识主线\n"
             "报告内容。\n\n"
             "二、盈利、估值与机构态度\n"
+            "盈利预期分化和估值层级差异决定ETF收益归因，机构评级分布需要与权重贡献一起看。\n\n"
             "（一）关键数据对比\n"
             "报告内容。\n\n"
             "三、催化、盲点与风险边界\n"
+            "催化剂集中在订单和利润率修复，未解问题是盈利兑现节奏能否覆盖估值压力。\n\n"
             "（一）未解问题\n"
             "报告内容。\n\n"
             "四、ETF影响与研报总览\n"
+            "ETF组合影响集中在龙头盈利修正和权重贡献，摘要表用于校验券商观点覆盖度。\n\n"
             "（一）ETF组合影响\n"
             "头部持仓对ETF组合影响集中在盈利修正和权重贡献。\n\n"
             "（二）研报总览表\n"
@@ -312,6 +357,30 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
                 "数据已全部获取完毕，现在撰写完整报告。\n\n" + valid_report
             )
         )
+        self.assertFalse(
+            _looks_like_complete_top_holdings_report(
+                "券商个股研究显示ETF头部持仓盈利修正方向分化。\n\n"
+                "一、核心持仓共识与分歧\n"
+                "（一）共识主线\n"
+                "报告内容。\n\n"
+                "二、盈利、估值与机构态度\n"
+                "盈利预期分化决定ETF收益归因。\n\n"
+                "（一）关键数据对比\n"
+                "报告内容。\n\n"
+                "三、催化、盲点与风险边界\n"
+                "催化剂集中在订单和利润率修复。\n\n"
+                "（一）未解问题\n"
+                "报告内容。\n\n"
+                "四、ETF影响与研报总览\n"
+                "ETF组合影响集中在龙头盈利修正。\n\n"
+                "（一）ETF组合影响\n"
+                "头部持仓对ETF组合影响集中在盈利修正和权重贡献。\n\n"
+                "（二）研报总览表\n"
+                "| 券商 | 持仓 | 评级 |\n"
+                "| --- | --- | --- |\n"
+                "| 示例券商 | 龙头公司 | 买入 |"
+            )
+        )
 
     def test_recovers_when_model_describes_top_holdings_tool_call_without_executing_it(self):
         llm = _IntentThenFinalLLM(
@@ -319,15 +388,19 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
             final_content=(
                 "券商个股研究显示ETF头部持仓盈利修正方向分化，组合贡献集中在龙头。\n\n"
                 "一、核心持仓共识与分歧\n"
+                "头部持仓的共识集中在龙头盈利韧性，但ETF组合贡献仍取决于权重集中度和修正广度。\n\n"
                 "（一）共识主线\n"
                 "报告内容。\n\n"
                 "二、盈利、估值与机构态度\n"
+                "盈利预期和估值分层共同决定ETF收益归因，机构态度分布需要结合权重贡献判断。\n\n"
                 "（一）关键数据对比\n"
                 "报告内容。\n\n"
                 "三、催化、盲点与风险边界\n"
+                "催化剂集中在订单和利润率修复，主要风险是盈利兑现慢于估值压力释放。\n\n"
                 "（一）未解问题\n"
                 "报告内容。\n\n"
                 "四、ETF影响与研报总览\n"
+                "ETF组合影响集中在龙头盈利修正和权重贡献，摘要表用于校验券商观点覆盖度。\n\n"
                 "（一）ETF组合影响\n"
                 "ETF组合影响集中在龙头盈利修正。\n\n"
                 "（二）研报总览表\n"
@@ -422,7 +495,7 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
         self.assertIn("反面示例（禁止）", system_msg)
         self.assertIn("正面示例（目标风格）", system_msg)
         self.assertIn("冲突驱动", system_msg)
-        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
+        self.assertIn("不得使用'本章''本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("不要写'本节锁定'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
@@ -783,6 +856,20 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         cleaned = strip_refine_preamble(report)
         self.assertEqual(cleaned, "价格仍站在20日均线上方，短线结构未被破坏。")
 
+    def test_clean_generated_report_removes_chapter_meta_opener(self):
+        report = (
+            "本章旨在梳理当前新能源产业链的核心投资逻辑与市场认知差异。"
+            "通过对机构共识的提炼与关键分歧点的拆解，明确周期位置与未来演绎路径，"
+            "为后续景气验证与风险定价提供基准框架。\n\n"
+            "新能源链条的订单兑现和价格止跌才是ETF配置节奏的核心变量。"
+        )
+
+        cleaned = clean_generated_report(report)
+
+        self.assertNotIn("本章旨在", cleaned)
+        self.assertNotIn("机构共识的提炼", cleaned)
+        self.assertTrue(cleaned.startswith("新能源链条的订单兑现"))
+
     def test_clean_generated_report_removes_combined_format_artifacts(self):
         report = (
             "以下是根据评审标准修正后的完整报告，直接陈述核心结论并补充第三部分导语，保留原有正确分析与数据。                                                               │\n"
@@ -914,7 +1001,7 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
+        self.assertIn("不得使用'本章''本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
@@ -993,7 +1080,7 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         )
 
         system_msg = captured.get("prompt", "")
-        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
+        self.assertIn("不得使用'本章''本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertNotIn("## 数据来源（已获取，直接使用）", system_msg)
