@@ -9,6 +9,7 @@ from etfagents.agents.utils.structured import (
 )
 from etfagents.agents.utils.agent_utils import (
     build_instrument_context,
+    collapse_blank_lines,
     get_localized_execution_bias_instruction,
     get_language_instruction,
     get_output_language,
@@ -54,6 +55,34 @@ def _trader_detail_instruction() -> str:
 
 def _demote_trader_h1_headings(text: str) -> str:
     return re.sub(r"(?m)^#(?!#)\s*", "## ", text or "")
+
+
+_TRADER_TAIL_EXECUTION_BIAS_RE = re.compile(
+    r"(?im)(?P<prefix>^|[\n。！？!?；;])\s*"
+    r"(?:执行倾向|最终配置建议|最终交易建议|研究结论|配置评级|评级)"
+    r"\s*[:：]\s*\**(?P<rating>买入|增持|持有|减持|卖出)\**[。！!？?\s]*$"
+)
+
+
+def _restore_trader_execution_bias_section(text: str) -> str:
+    content = (text or "").strip()
+    if (
+        not content
+        or get_output_language().strip().lower() not in {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
+        or re.search(r"(?m)^\s*四、执行倾向\s*$", content)
+    ):
+        return content
+
+    match = _TRADER_TAIL_EXECUTION_BIAS_RE.search(content)
+    if not match:
+        return content
+
+    body = content[:match.start()]
+    prefix = match.group("prefix")
+    if prefix and prefix != "\n":
+        body += prefix
+    rating = match.group("rating")
+    return collapse_blank_lines(f"{body.rstrip()}\n\n四、执行倾向\n**{rating}**")
 
 
 def create_trader(llm):
@@ -115,6 +144,7 @@ def create_trader(llm):
         rendered_result = _demote_trader_h1_headings(
             normalize_chinese_manager_terms(rendered_result)
         )
+        rendered_result = _restore_trader_execution_bias_section(rendered_result)
         trader_backtest_signal = build_trader_backtest_signal(
             asset_symbol,
             str(state.get("trade_date", "")),

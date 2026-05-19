@@ -189,6 +189,27 @@ class StructuredAgentTests(unittest.TestCase):
         self.assertIn("## Execution Plan", result["trader_investment_plan"])
         self.assertIn("## Risk Management", result["trader_investment_plan"])
 
+    def test_trader_chinese_freetext_restores_execution_bias_section(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "Chinese"
+        set_config(cfg)
+        llm = MagicMock()
+        llm.with_structured_output.side_effect = NotImplementedError("unsupported")
+        llm.invoke.return_value = _FakeResponse(
+            "一、配置逻辑\n"
+            "当前主线仍未被证伪，但执行必须等待量价确认。\n\n"
+            "二、配置执行计划\n"
+            "先维持现有底仓，只有价格重新站稳50日均线且成交量回到20日均量上方后才继续加仓。\n\n"
+            "三、再平衡与风险控制\n"
+            "若价格跌破关键支撑并放量，则先减仓；继续跟踪ETF份额、溢折价与资金流。执行倾向: 增持。"
+        )
+
+        result = create_trader(llm)(copy.deepcopy(_base_state()))
+
+        self.assertIn("四、执行倾向\n**增持**", result["trader_investment_plan"])
+        self.assertNotIn("执行倾向: 增持", result["trader_investment_plan"])
+        self.assertIn("三、再平衡与风险控制", result["trader_investment_plan"])
+
 
 if __name__ == "__main__":
     unittest.main()
