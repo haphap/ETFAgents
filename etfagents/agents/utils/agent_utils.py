@@ -2623,7 +2623,7 @@ def _hide_manager_machine_metric_names(text: str) -> str:
     use_chinese = _is_chinese_output()
 
     def _replacement(match: re.Match) -> str:
-        label_pair = _MANAGER_MACHINE_METRIC_DISPLAY.get(match.group(0), ("指标", "metric"))
+        label_pair = _MANAGER_MACHINE_METRIC_DISPLAY[match.group(0)]
         return label_pair[0] if use_chinese else label_pair[1]
 
     return _MANAGER_MACHINE_METRIC_NAME_RE.sub(_replacement, content)

@@ -176,8 +176,8 @@ class StructuredAgentTests(unittest.TestCase):
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("unsupported")
         llm.invoke.return_value = _FakeResponse(
-            "# Trading Thesis\nFallback thesis.\n\n"
-            "# Execution Plan\nWait.\n\n"
+            "#Trading Thesis\nFallback thesis.\n\n"
+            "#Execution Plan\nWait.\n\n"
             "## Risk Management\nWatch support.\n\n"
             "FINAL TRANSACTION PROPOSAL: **HOLD**"
         )

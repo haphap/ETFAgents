@@ -53,7 +53,7 @@ def _trader_detail_instruction() -> str:
 
 
 def _demote_trader_h1_headings(text: str) -> str:
-    return re.sub(r"(?m)^#(?!#)\s+", "## ", text or "")
+    return re.sub(r"(?m)^#(?!#)\s*", "## ", text or "")
 
 
 def create_trader(llm):
