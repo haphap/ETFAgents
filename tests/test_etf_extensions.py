@@ -52,6 +52,12 @@ class ETFExtensionTests(unittest.TestCase):
         self.assertEqual(get_hk_security_industry("00700.HK"), "互联网服务")
         mock_profile.assert_called_once_with("00700.HK")
 
+    @patch("etfagents.dataflows.akshare.get_hk_security_profile")
+    def test_akshare_hk_security_industry_rejects_non_industry_row_fallback(self, mock_profile):
+        mock_profile.return_value = pd.DataFrame([["所属行业", "腾讯控股有限公司", "互联网服务"]])
+
+        self.assertEqual(get_hk_security_industry("00700.HK"), "互联网服务")
+
     def test_ah_share_map_keys_match_basket_members(self):
         basket_members = {
             member["ts_code"]
@@ -894,6 +900,8 @@ class ETFExtensionTests(unittest.TestCase):
         mock_query.side_effect = _fake_query
         mock_get_broker_reports.return_value = "# Industry Research Reports for 互联网"
 
+        # The 恒生科技 proxy basket intentionally starts with Tencent and Alibaba,
+        # both in 互联网平台, so top_n=2 exercises per-industry fallback de-duplication.
         result = get_etf_top_holdings_research.invoke(
             {"ticker": "513130.SH", "curr_date": "2026-05-15", "top_n": 2}
         )

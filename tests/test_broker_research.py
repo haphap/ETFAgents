@@ -358,7 +358,7 @@ class BrokerResearchTushareTests(unittest.TestCase):
                 "title": ["互联网行业跟踪"],
                 "abstr": ["平台经济基本面改善。"],
                 "author": ["张三"],
-                "ts_code": ["00700.HK"],
+                "ts_code": ["600050.SH"],
                 "url": ["http://example.com/internet"],
                 "ind_name": ["互联网"],
             }

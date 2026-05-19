@@ -4,6 +4,15 @@ import pandas as pd
 
 from .exceptions import DataVendorUnavailable
 
+_PROFILE_LABELS = {
+    "所属行业",
+    "证券代码",
+    "证券简称",
+    "公司名称",
+    "英文名称",
+    "上市日期",
+}
+
 
 def _normalize_hk_symbol(symbol: str) -> str:
     raw = str(symbol or "").strip().upper()
@@ -28,10 +37,25 @@ def _clean_text(value: object) -> str:
     return text
 
 
+def _looks_like_industry_name(value: str) -> bool:
+    text = _clean_text(value)
+    if not 2 <= len(text) <= 30:
+        return False
+    if text in _PROFILE_LABELS:
+        return False
+    if text.isdigit() or "." in text or "://" in text:
+        return False
+    if any(token in text for token in ("代码", "简称", "名称", "公司", "有限", "日期")):
+        return False
+    return True
+
+
 def get_hk_security_profile(symbol: str) -> pd.DataFrame:
     """Return AkShare Eastmoney HK security profile for a 5-digit HK symbol."""
     hk_symbol = _normalize_hk_symbol(symbol)
     try:
+        # Keep AkShare lazy-loaded so non-HK workflows can import the package
+        # even if optional data dependencies are not initialized yet.
         import akshare as ak
     except ImportError as exc:
         raise DataVendorUnavailable(
@@ -61,7 +85,7 @@ def get_hk_security_industry(symbol: str) -> str:
     if "所属行业" in profile.columns:
         for value in profile["所属行业"]:
             industry = _clean_text(value)
-            if industry:
+            if _looks_like_industry_name(industry):
                 return industry
 
     for _, row in profile.iterrows():
@@ -69,7 +93,7 @@ def get_hk_security_industry(symbol: str) -> str:
         for idx, value in enumerate(row_values):
             if value == "所属行业":
                 for candidate in row_values[idx + 1 :]:
-                    if candidate:
+                    if _looks_like_industry_name(candidate):
                         return candidate
 
     return ""

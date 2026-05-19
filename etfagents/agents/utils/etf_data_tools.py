@@ -1847,6 +1847,7 @@ def get_etf_top_holdings_research(
             f"## Holding {idx}: {row['name']} ({display_code}) | {per_holding_weight_label} {_format_number(_safe_float(row.get('weight')), suffix='%')} | industry {row['industry']}{industry_source_suffix}"
         )
         if is_hk_proxy:
+            stock_report_error = ""
             if a_share_code:
                 try:
                     sections.append("[A+H dual-listed; queried stock research with A-share ticker.]")
@@ -1860,7 +1861,7 @@ def get_etf_top_holdings_research(
                     )
                     continue
                 except DataVendorUnavailable as exc:
-                    sections.append(f"No A-share stock research was available for this dual-listed holding: {exc}")
+                    stock_report_error = str(exc)
 
             keywords = _hk_industry_to_broker_keywords(str(row.get("industry", "")))
             if keywords:
@@ -1887,7 +1888,14 @@ def get_etf_top_holdings_research(
                         **broker_kwargs,
                     )
                     hk_theme_cache[keywords] = (idx, report)
-                    sections.append("[Theme-related industry reports; not constituent-level coverage.]")
+                    if stock_report_error:
+                        sections.append(
+                            "[A+H dual-listed, but A-share stock research was unavailable; "
+                            "falling back to theme-related industry reports, not constituent-level coverage. "
+                            f"Reason: {stock_report_error}]"
+                        )
+                    else:
+                        sections.append("[Theme-related industry reports; not constituent-level coverage.]")
                     sections.append(report)
                     continue
                 except DataVendorUnavailable as exc:
