@@ -2457,6 +2457,16 @@ _MANAGER_INSTRUCTION_INLINE_PATTERNS = (
 _MANAGER_SCHEMA_FIELD_LINE_RE = re.compile(
     r"\b(?:target_weight_pct|target_weight_band|execution_timing|add_triggers|reduce_triggers|exit_triggers|rebalance_triggers|risk_controls)\b"
 )
+_MANAGER_STRUCTURED_PARAMETER_BLOCK_START_RE = re.compile(
+    r"(?:结构化(?:参数|字段)|设定值/阈值)"
+)
+_MANAGER_STRUCTURED_PARAMETER_ROW_RE = re.compile(
+    r"(?:设定值|阈值|目标仓位|执行倾向|加仓触发|减仓触发|退出触发|再平衡|风险控制|风控)"
+)
+# Used only to stop table-block skipping when a real prose section resumes.
+_MARKDOWN_OR_CHINESE_SECTION_HEADING_RE = re.compile(
+    r"^(?:#{1,6}\s+|[一二三四五六七八九十]+、|（[一二三四五六七八九十]+）)"
+)
 _MANAGER_MACHINE_METRIC_DISPLAY = {
     "close_50_sma": ("50日均线", "50-day moving average"),
     "volume_ratio_20d": ("成交量比率", "20-day volume ratio"),
@@ -2600,6 +2610,7 @@ def strip_manager_instruction_leakage(text: str) -> str:
 
     for pattern in _MANAGER_INSTRUCTION_INLINE_PATTERNS:
         cleaned = pattern.sub("", cleaned)
+    cleaned = _strip_structured_parameter_blocks(cleaned)
     cleaned = _hide_manager_machine_metric_names(cleaned)
     filtered_lines = []
     for raw_line in cleaned.splitlines():
@@ -2618,6 +2629,47 @@ def strip_manager_instruction_leakage(text: str) -> str:
     cleaned = "\n".join(filtered_lines)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _strip_structured_parameter_blocks(text: str) -> str:
+    """Remove visible structured-parameter tables from prose reports."""
+    lines = (text or "").splitlines()
+    if not lines:
+        return ""
+
+    kept_lines: list[str] = []
+    skipping_block = False
+    for raw_line in lines:
+        stripped = raw_line.strip()
+        if not stripped:
+            skipping_block = False
+            kept_lines.append(raw_line)
+            continue
+
+        if skipping_block:
+            if _MARKDOWN_OR_CHINESE_SECTION_HEADING_RE.match(stripped):
+                skipping_block = False
+                kept_lines.append(raw_line)
+                continue
+            if (
+                any(char in stripped for char in "│─┌┐└┘├┤┬┴┼|")
+                or _MANAGER_STRUCTURED_PARAMETER_ROW_RE.search(stripped)
+                or _MANAGER_SCHEMA_FIELD_LINE_RE.search(stripped)
+            ):
+                continue
+            skipping_block = False
+            kept_lines.append(raw_line)
+            continue
+
+        if _MANAGER_STRUCTURED_PARAMETER_BLOCK_START_RE.search(stripped) and (
+            _MANAGER_STRUCTURED_PARAMETER_ROW_RE.search(stripped)
+        ):
+            skipping_block = True
+            continue
+
+        kept_lines.append(raw_line)
+
+    return "\n".join(kept_lines)
 
 
 def _hide_manager_machine_metric_names(text: str) -> str:

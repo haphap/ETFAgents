@@ -1357,6 +1357,27 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("机器可读字段名", normalized)
         self.assertIn("目标仓位先维持在15%至20%", normalized)
 
+    def test_manager_normalization_strips_visible_structured_parameter_table(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **增持**\n"
+            "### （二）建议\n"
+            "目标仓位维持30%，右侧确认后再提高到50%。\n\n"
+            "结构化参数      设定值/阈值\n"
+            "│   ─────────────────────────────────────────────────────────\n"
+            "│   目标仓位        30.0% (初始) / 50.0% (右侧确认) / 10.0% (风控底仓)\n"
+            "│   执行倾向: 增持。\n\n"
+            "继续跟踪成交额与折溢价变化。"
+        )
+
+        self.assertNotIn("结构化参数", normalized)
+        self.assertNotIn("设定值/阈值", normalized)
+        self.assertNotIn("30.0% (初始)", normalized)
+        self.assertNotIn("执行倾向: 增持", normalized)
+        self.assertIn("目标仓位维持30%", normalized)
+        self.assertIn("继续跟踪成交额与折溢价变化", normalized)
+
     def test_collaboration_stop_instruction_prefers_chinese_display(self):
         instruction = get_localized_final_proposal_instruction()
         self.assertIn("研究结论: **买入/增持/持有/减持/卖出**", instruction)

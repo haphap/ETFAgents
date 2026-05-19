@@ -1892,7 +1892,9 @@ def save_report_to_disk(final_state, ticker: str, save_path: Path):
     if get_state_value(final_state, "trader_allocation_plan", ""):
         trading_dir = save_path / "3_trading"
         trading_dir.mkdir(exist_ok=True)
-        trader_plan = _prepare_report_markdown(get_state_value(final_state, "trader_allocation_plan", ""))
+        trader_plan = _prepare_report_markdown(
+            get_state_value(final_state, "trader_allocation_plan", ""), 2
+        )
         (trading_dir / "trader.md").write_text(trader_plan, encoding="utf-8")
         sections.append(
             collapse_blank_lines(
@@ -2037,7 +2039,7 @@ def display_complete_report(final_state):
             Panel(
                 Markdown(
                     _prepare_report_markdown(
-                        get_state_value(final_state, "trader_allocation_plan", "")
+                        get_state_value(final_state, "trader_allocation_plan", ""), 2
                     )
                 ),
                 title=_localize_cli_role_title("Trader"),
