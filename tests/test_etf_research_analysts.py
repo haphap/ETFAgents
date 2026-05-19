@@ -599,7 +599,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("标准多头发散形态", system_msg)
         self.assertIn("这意味着什么", system_msg)
         self.assertIn("对交易应该怎么做", system_msg)
-        self.assertIn("Use EXACTLY three top-level sections (一、二、三)", system_msg)
+        self.assertIn("Use EXACTLY four top-level sections (一、二、三、四)", system_msg)
         self.assertIn("一、市场结构与量价诊断", system_msg)
         self.assertNotIn("一、市场结构与量价诊断 (", system_msg)
         self.assertIn("（一）趋势与动量", system_msg)
@@ -607,11 +607,13 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("关键价位与条件情景推演", system_msg)
         self.assertIn("（一）关键价位与触发条件", system_msg)
         self.assertIn("（二）条件情景推演", system_msg)
+        self.assertIn("四、综合结论和指标总览", system_msg)
+        self.assertIn("不得再写“指标总览”或“综合结论”独立标题", system_msg)
         self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
         self.assertIn("核心交易信号", system_msg)
         self.assertIn("结论依据", system_msg)
         self.assertIn("without any sub-heading", system_msg)
-        self.assertIn("每个一级章节（一、二、三）标题后直接写2-3句结论段", system_msg)
+        self.assertIn("前三个一级章节（一、二、三）标题后直接写2-3句结论段", system_msg)
         self.assertIn("段落式表达", system_msg)
         self.assertIn("反面示例（禁止）", system_msg)
         self.assertIn("正面示例（目标风格）", system_msg)
@@ -648,11 +650,11 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
             "执行导语。\n\n"
             "三、关键价位与条件情景推演\n"
             "情景导语。\n\n"
-            "指标总览\n"
+            "四、综合结论和指标总览\n"
+            "偏多配置，等待回踩确认。\n\n"
             "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
             "| --- | --- | --- | --- | --- |\n"
-            "| MACD | 1 | 上方 | 动能改善 | 下穿转弱 |\n\n"
-            "综合结论：偏多配置，等待回踩确认。"
+            "| MACD | 1 | 上方 | 动能改善 | 下穿转弱 |"
         )
 
         self.assertTrue(_looks_like_complete_market_flow_report(valid_report))
@@ -675,7 +677,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
                 "一、市场结构与量价诊断\n趋势导语。\n\n"
                 "二、交易确认与执行计划\n执行导语。\n\n"
                 "三、关键价位与条件情景推演\n情景导语。\n\n"
-                "指标总览\n综合结论：偏多配置。"
+                "四、综合结论和指标总览\n偏多配置。"
             )
         )
         self.assertFalse(
@@ -684,12 +686,12 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
                 "一、市场结构与量价诊断\n趋势导语。\n\n"
                 "二、交易确认与执行计划\n执行导语。\n\n"
                 "三、关键价位与条件情景推演\n情景导语。\n\n"
-                "指标总览\n综合结论：偏多配置。"
+                "四、综合结论和指标总览\n偏多配置。"
             )
         )
         self.assertFalse(
             _looks_like_complete_market_flow_report(
-                "一、市场结构与量价诊断\n趋势偏多。\n\n二、交易确认与执行计划\n执行。\n\n三、关键价位与条件情景推演\n情景。\n\n指标总览\n综合结论：偏多。"
+                "一、市场结构与量价诊断\n趋势偏多。\n\n二、交易确认与执行计划\n执行。\n\n三、关键价位与条件情景推演\n情景。\n\n四、综合结论和指标总览\n偏多。"
             )
         )
 
@@ -704,8 +706,8 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         verdict = static_validate(report, _REPORT_SPEC)
 
         self.assertTrue(_looks_like_complete_market_flow_report(report))
-        self.assertTrue(any("指标总览" in item for item in verdict.missing_elements))
-        self.assertTrue(any("综合结论" in item for item in verdict.missing_elements))
+        self.assertTrue(any("缺少一级章节『四、…』" in item for item in verdict.missing_elements))
+        self.assertTrue(any("综合结论和指标总览" in item for item in verdict.missing_elements))
 
     def test_market_flow_tail_normalizer_inserts_missing_hard_headings(self):
         report = (
@@ -721,8 +723,45 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
 
         normalized = _normalize_market_flow_tail_sections(report)
 
-        self.assertIn("\n指标总览\n\n| 指标 |", normalized)
-        self.assertIn("\n综合结论\n\n偏多配置，等待回踩确认。", normalized)
+        self.assertIn("\n四、综合结论和指标总览\n\n偏多配置，等待回踩确认。", normalized)
+        self.assertIn("\n\n| 指标 |", normalized)
+        self.assertNotIn("\n指标总览\n", normalized)
+        self.assertNotIn("\n综合结论\n", normalized)
+
+    def test_market_flow_tail_normalizer_keeps_combined_tail_heading_once(self):
+        report = (
+            "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
+            "一、市场结构与量价诊断\n趋势导语。\n\n"
+            "二、交易确认与执行计划\n执行导语。\n\n"
+            "三、关键价位与条件情景推演\n情景导语。\n\n"
+            "四、综合结论和指标总览\n\n"
+            "偏多配置，等待回踩确认。\n\n"
+            "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| MACD | 1 | 上方 | 动能改善 | 下穿转弱 |"
+        )
+
+        normalized = _normalize_market_flow_tail_sections(report)
+        normalized_again = _normalize_market_flow_tail_sections(normalized)
+
+        self.assertEqual(1, normalized.count("四、综合结论和指标总览"))
+        self.assertIn("\n四、综合结论和指标总览\n\n偏多配置，等待回踩确认。", normalized)
+        self.assertIn("\n\n| 指标 |", normalized)
+        self.assertEqual(normalized, normalized_again)
+
+    def test_market_flow_tail_normalizer_converts_inline_conclusion_without_table(self):
+        report = (
+            "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
+            "一、市场结构与量价诊断\n趋势导语。\n\n"
+            "二、交易确认与执行计划\n执行导语。\n\n"
+            "三、关键价位与条件情景推演\n情景导语。\n\n"
+            "综合结论：偏多配置，等待回踩确认。"
+        )
+
+        normalized = _normalize_market_flow_tail_sections(report)
+
+        self.assertIn("\n四、综合结论和指标总览\n\n偏多配置，等待回踩确认。", normalized)
+        self.assertNotIn("综合结论：", normalized)
 
     def test_market_flow_node_normalizes_tail_headings_when_content_exists(self):
         llm = _CapturingLLM()
@@ -757,8 +796,13 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
             )
 
         self.assertIn("趋势和资金流同步改善", result["market_flow_report"])
-        self.assertIn("\n指标总览\n\n| 指标 |", result["market_flow_report"])
-        self.assertIn("\n综合结论\n\n偏多配置，等待回踩确认。", result["market_flow_report"])
+        self.assertIn(
+            "\n四、综合结论和指标总览\n\n偏多配置，等待回踩确认。",
+            result["market_flow_report"],
+        )
+        self.assertIn("\n\n| 指标 |", result["market_flow_report"])
+        self.assertNotIn("\n指标总览\n", result["market_flow_report"])
+        self.assertNotIn("\n综合结论\n", result["market_flow_report"])
 
     def test_market_flow_node_warns_when_tail_elements_remain_missing(self):
         llm = _CapturingLLM()
@@ -792,8 +836,8 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
             )
 
         self.assertEqual(incomplete_report, result["market_flow_report"])
-        self.assertTrue(any("指标总览" in line for line in logs.output))
-        self.assertTrue(any("综合结论" in line for line in logs.output))
+        self.assertTrue(any("四、" in line for line in logs.output))
+        self.assertTrue(any("综合结论和指标总览" in line for line in logs.output))
 
 
 class ReportTitleNormalizationTests(unittest.TestCase):

@@ -38,18 +38,18 @@ logger = logging.getLogger(__name__)
 
 _REPORT_SPEC = AnalystReportSpec(
     analyst_name="market_flow",
-    required_top_sections=("一", "二", "三"),
+    required_top_sections=("一", "二", "三", "四"),
     required_indicator_tokens=("MACD", "RSI"),
-    required_tail_tokens=("指标总览", "综合结论"),
+    required_tail_tokens=("综合结论和指标总览",),
     custom_rules_markdown=(
         "### 内容覆盖\n"
-        "- 是否包含三个一级章节：一、市场结构与量价诊断；二、交易确认与执行计划；三、关键价位与条件情景推演？\n"
-        "- 每个一级章节（一、二、三）标题后是否直接写2-3句结论段，先给方向、证据和交易含义？\n"
+        "- 是否包含四个一级章节：一、市场结构与量价诊断；二、交易确认与执行计划；三、关键价位与条件情景推演；四、综合结论和指标总览？\n"
+        "- 每个分析章节（一、二、三）标题后是否直接写2-3句结论段，先给方向、证据和交易含义？\n"
         "- 是否覆盖趋势指标（SMA/EMA）、动量（MACD）、超买超卖（RSI）、波动率（Bollinger）和量能确认（VWMA）？\n"
         "- 是否结合份额变化、NAV溢价/折价和换手率分析资金积累/分配/拥挤状态？\n"
         "- 第三部分是否使用连贯段落而非标签式清单？\n"
-        "- 末尾是否附指标总览表（含指标、数值、位置、交易含义、关键阈值列）？\n"
-        "- 末尾是否附综合结论段落（含配置方向、关键价位、资金状态）？"
+        "- 第四部分是否在“综合结论和指标总览”一级标题下整合配置方向、关键价位、资金状态与指标总览表？\n"
+        "- 指标总览表是否包含指标、数值、位置、交易含义和关键阈值五列？"
     ),
 )
 
@@ -68,7 +68,10 @@ _ETF_MARKET_INDICATORS = {
     "atr": "volatility and stop-distance calibration",
     "vwma": "price-volume confirmation",
 }
+# The fast acceptance gate intentionally requires only the three analysis sections.
+# The fourth combined tail section is enforced by the report spec and normalizer.
 _MARKET_FLOW_REQUIRED_TOP_SECTIONS = {"一", "二", "三"}
+_MARKET_FLOW_COMBINED_TAIL_HEADING = "四、综合结论和指标总览"
 _MARKET_FLOW_TABLE_SEPARATOR_RE = re.compile(r"^\|(?:\s*:?-{3,}:?\s*\|)+\s*$")
 _MARKET_FLOW_CONCLUSION_LABEL_RE = re.compile(r"^\s*综合结论\s*[:：]\s*(.+)$")
 
@@ -113,6 +116,13 @@ def _find_last_markdown_table(lines: list[str]) -> tuple[int, int] | None:
 
 
 def _normalize_market_flow_tail_sections(report: str) -> str:
+    """Migrate legacy tail shapes into the combined market-flow tail section.
+
+    Legacy shapes include a standalone ``指标总览`` / ``四、指标总览`` heading
+    before the table, a standalone ``综合结论`` heading after the table, or an
+    inline ``综合结论：...`` label. Canonical output uses
+    ``四、综合结论和指标总览`` with any conclusion paragraph before the table.
+    """
     if not report:
         return ""
 
@@ -120,35 +130,66 @@ def _normalize_market_flow_tail_sections(report: str) -> str:
     table_span = _find_last_markdown_table(lines)
     if table_span is not None:
         table_start, table_end = table_span
+        table_lines = lines[table_start:table_end]
+        replacement_start = table_start
+        conclusion_text = ""
+
         before_idx = table_start - 1
         while before_idx >= 0 and not lines[before_idx].strip():
             before_idx -= 1
-        if before_idx < 0 or lines[before_idx].strip() != "指标总览":
-            insertion = ["指标总览", ""]
-            if table_start > 0 and lines[table_start - 1].strip():
-                insertion.insert(0, "")
-            lines[table_start:table_start] = insertion
-            delta = len(insertion)
-            table_start += delta
-            table_end += delta
+        if before_idx >= 0 and lines[before_idx].strip() in {
+            "指标总览",
+            "四、指标总览",
+            _MARKET_FLOW_COMBINED_TAIL_HEADING,
+        }:
+            replacement_start = before_idx
+        elif before_idx >= 0:
+            paragraph_start = before_idx
+            while paragraph_start >= 0 and lines[paragraph_start].strip():
+                paragraph_start -= 1
+            heading_idx = paragraph_start
+            while heading_idx >= 0 and not lines[heading_idx].strip():
+                heading_idx -= 1
+            if heading_idx >= 0 and lines[heading_idx].strip() == _MARKET_FLOW_COMBINED_TAIL_HEADING:
+                replacement_start = heading_idx
+                conclusion_text = "\n".join(
+                    line.strip() for line in lines[heading_idx + 1:table_start] if line.strip()
+                ).strip()
 
+        replacement_end = table_end
         conclusion_idx = table_end
         while conclusion_idx < len(lines) and not lines[conclusion_idx].strip():
             conclusion_idx += 1
         if conclusion_idx < len(lines):
             match = _MARKET_FLOW_CONCLUSION_LABEL_RE.match(lines[conclusion_idx])
             if match:
-                lines[conclusion_idx] = "综合结论"
-                lines.insert(conclusion_idx + 1, "")
-                lines.insert(conclusion_idx + 2, match.group(1).strip())
-            elif lines[conclusion_idx].strip() != "综合结论":
-                lines[conclusion_idx:conclusion_idx] = ["综合结论", ""]
+                conclusion_text = match.group(1).strip()
+                replacement_end = conclusion_idx + 1
+            elif lines[conclusion_idx].strip() == "综合结论":
+                paragraph_start = conclusion_idx + 1
+                while paragraph_start < len(lines) and not lines[paragraph_start].strip():
+                    paragraph_start += 1
+                paragraph_end = paragraph_start
+                while paragraph_end < len(lines) and lines[paragraph_end].strip():
+                    paragraph_end += 1
+                conclusion_text = "\n".join(
+                    line.strip() for line in lines[paragraph_start:paragraph_end]
+                ).strip()
+                replacement_end = paragraph_end
+
+        replacement = [_MARKET_FLOW_COMBINED_TAIL_HEADING, ""]
+        if conclusion_text:
+            replacement.extend([conclusion_text, ""])
+        replacement.extend(table_lines)
+        if replacement_start > 0 and lines[replacement_start - 1].strip():
+            replacement.insert(0, "")
+        lines[replacement_start:replacement_end] = replacement
     else:
         for index, line in enumerate(lines):
             match = _MARKET_FLOW_CONCLUSION_LABEL_RE.match(line)
             if not match:
                 continue
-            lines[index] = "综合结论"
+            lines[index] = _MARKET_FLOW_COMBINED_TAIL_HEADING
             lines.insert(index + 1, "")
             lines.insert(index + 2, match.group(1).strip())
             break
@@ -185,8 +226,8 @@ def create_etf_market_analyst(llm):
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
-            "Use EXACTLY three top-level sections (一、二、三). Do NOT create additional top-level sections.\n"
-            "每个一级章节（一、二、三）标题后直接写2-3句结论段，先给方向、证据和交易含义，然后空行进入子章节或正文。\n\n"
+            "Use EXACTLY four top-level sections (一、二、三、四). Do NOT create additional top-level sections.\n"
+            "前三个一级章节（一、二、三）标题后直接写2-3句结论段，先给方向、证据和交易含义，然后空行进入子章节或正文。\n\n"
             "一、市场结构与量价诊断\n"
             "  （一）趋势与动量\n"
             "    覆盖10 EMA / 20 SMA / 50 SMA / 200 SMA对比、MACD、信号线、柱状图、RSI。\n\n"
@@ -199,15 +240,15 @@ def create_etf_market_analyst(llm):
             "    用连贯段落而非清单，说明最重要的支撑/阻力/加仓/减仓/止损价位。\n"
             "  （二）条件情景推演\n"
             "    用连贯段落将价位与核心情景路径、确认或证伪条件、以及赋予该情景更高权重的理由联系起来。\n\n"
-            "在所有分析章节之后，报告最末必须先写一个独立标题行“指标总览”，再附对应的markdown表格，"
-            "包含指标、数值、位置、交易含义和关键阈值五列，覆盖本报告讨论的所有主要技术指标与资金指标。"
-            "表格之后必须另起一个独立标题行“综合结论”，再附一段总结，明确配置方向（偏多/偏空/中性）、关键价位区间和资金状态判断。\n\n"
+            "四、综合结论和指标总览\n"
+            "  标题后先用一段话整合配置方向（偏多/偏空/中性）、关键价位区间和资金状态判断，随后只放一个Markdown表格。\n"
+            "  表格包含指标、数值、位置、交易含义和关键阈值五列，覆盖本报告讨论的所有主要技术指标与资金指标；不得再写“指标总览”或“综合结论”独立标题。\n\n"
             "## 风格要求\n"
             '- 当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用"分别为"连接，例如"10日均线、20日均线、50日均线值分别为2.01元、2.02元、2.03元"，不得逐个单独陈述。\n'
             '- 若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出"数据缺失""数据不足"等提示。\n'
-            '- 开篇帽段和每个一级章节标题后的结论段都必须直接陈述结论，不得使用"本节""本部分""该部分""这一节"等自指式开头（如"本节核心结论指出""本部分结论表明""该部分说明"）。\n'
+            '- 开篇帽段和前三个一级章节标题后的结论段都必须直接陈述结论，不得使用"本节""本部分""该部分""这一节"等自指式开头（如"本节核心结论指出""本部分结论表明""该部分说明"）。\n'
             "- 标题后的结论段必须高于小节层面：综合方向、动量质量、资金确认与交易含义，不得简单复述下方小节内容。\n"
-            '- 使用上述精确的三段章节结构，不得引入"核心交易信号"、"结论依据"等额外标题。\n'
+            '- 使用上述精确的四段章节结构，不得引入"核心交易信号"、"结论依据"等额外标题。\n'
             '- 若使用"多头排列"、"金叉"、"发散"、"背离"、"放量突破"等技术术语，必须立即用通俗语言解释并说明交易含义，不得出现"标准多头发散形态"等未解释行话。\n'
             '- 每个主要信号之后必须回答两个问题："这意味着什么"和"对交易应该怎么做"。'
             '但不得将"这意味着什么""对交易应该怎么做"作为标题或标签输出，应将答案自然融入段落中。\n'
@@ -226,7 +267,8 @@ def create_etf_market_analyst(llm):
             "趋势、动量、波动率与资金流四维共振偏多，执行上以回踩支撑加仓为主、条件化风控为辅。若RSI进入超买区后出现死叉，应优先收缩仓位而非追高；若份额从净流入转为净流出，则说明资金在撤退，需重新评估偏多逻辑。当前建议维持偏多配置，仓位控制在5-6成，回踩448-450区间可加至7成，止损设在446元下方。\n\n"
             "三、关键价位与条件情景推演\n\n"
             "当前448-450一带既是20日均线与前期密集成交区重叠的支撑带，也是判断这轮偏多结构是否仍有效的第一道关口。若价格回踩后成交量没有明显失速、且VWMA继续向上抬升，说明资金承接并未破坏，基准情景仍是震荡后继续上攻462-465阻力带。操作上，若回踩448-450不破且量能未失速，可加仓至6-7成，止损446元下方；若放量跌破448则先减至3-4成，进一步跌破440则止损离场。最乐观情景下，若放量突破462元可追加至8成，目标470元以上。基于当前信号强度，基准情景权重约65%，最乐观情景约25%，转弱情景约10%。需警惕的风险包括：RSI进入超买区后死叉可能触发短期回调，份额从净流入转为净流出将否定偏多逻辑。\n\n"
-            "指标总览\n\n"
+            "四、综合结论和指标总览\n\n"
+            "偏多配置，回踩448-450加仓，止损446，目标462-465。资金状态：份额增长、溢价正常且换手率适中，说明资金仍在积累但尚未拥挤。\n\n"
             "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
             "| --- | --- | --- | --- | --- |\n"
             "| 10/20/50/200 SMA | 452/448/443/425 | 上方 | 多头排列，趋势偏多 | 跌破448则短期转弱 |\n"
@@ -235,8 +277,6 @@ def create_etf_market_analyst(llm):
             "| 布林带 | 中轨449, 上轨462 | 中轨与上轨之间 | 波动率扩张，方向向上 | 跌破中轨则趋势减弱 |\n"
             "| 份额变化 | +2.3% | — | 资金净流入 | 连续下降则资金撤退 |\n"
             "| 换手率 | 1.3% | 正常 | 未见拥挤 | 超过3%则拥挤加剧 |\n\n"
-            "综合结论\n\n"
-            "偏多配置，回踩448-450加仓，止损446，目标462-465。资金状态：份额增长+溢价正常+换手率适中=资金积累中。\n\n"
             "## 语言\n"
             "分析文本使用中文。工具名称、指标ID与行情代码保持英文。\n"
             + get_language_instruction()
