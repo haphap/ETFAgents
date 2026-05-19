@@ -1323,6 +1323,23 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("rebalance_triggers", normalized)
         self.assertIn("目标仓位先维持在15%至20%", normalized)
 
+    def test_manager_normalization_hides_machine_metric_names_in_visible_advice(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **增持**\n"
+            "### （二）建议\n"
+            "加仓触发条件为成交量比率（volume_ratio_20d）突破1.3倍、"
+            "溢价率（pnl_pct）稳定在1%安全区间且持仓权重（weight_pct）未现异常倒挂。"
+        )
+
+        self.assertNotIn("volume_ratio_20d", normalized)
+        self.assertNotIn("pnl_pct", normalized)
+        self.assertNotIn("weight_pct", normalized)
+        self.assertIn("成交量比率突破1.3倍", normalized)
+        self.assertIn("溢价率稳定在1%安全区间", normalized)
+        self.assertIn("持仓权重未现异常倒挂", normalized)
+
     def test_manager_normalization_strips_chinese_structured_mapping_leakage(self):
         normalized = normalize_chinese_manager_terms(
             "## 持仓建议\n"

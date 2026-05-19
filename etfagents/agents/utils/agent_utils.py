@@ -2457,6 +2457,28 @@ _MANAGER_INSTRUCTION_INLINE_PATTERNS = (
 _MANAGER_SCHEMA_FIELD_LINE_RE = re.compile(
     r"\b(?:target_weight_pct|target_weight_band|execution_timing|add_triggers|reduce_triggers|exit_triggers|rebalance_triggers|risk_controls)\b"
 )
+_MANAGER_MACHINE_METRIC_DISPLAY = {
+    "close_50_sma": ("50日均线", "50-day moving average"),
+    "volume_ratio_20d": ("成交量比率", "20-day volume ratio"),
+    "target_weight_pct": ("目标仓位", "target weight"),
+    "weight_pct": ("持仓权重", "position weight"),
+    "pnl_pct": ("盈亏比例", "P&L percentage"),
+    "sma_20": ("20日均线", "20-day moving average"),
+    "volume": ("成交量", "volume"),
+    "close": ("收盘价", "close"),
+    "open": ("开盘价", "open"),
+    "high": ("最高价", "high"),
+    "low": ("最低价", "low"),
+}
+_MANAGER_MACHINE_METRIC_NAMES = tuple(
+    sorted(_MANAGER_MACHINE_METRIC_DISPLAY, key=len, reverse=True)
+)
+_MANAGER_MACHINE_METRIC_NAME_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(name) for name in _MANAGER_MACHINE_METRIC_NAMES) + r")\b"
+)
+_MANAGER_MACHINE_METRIC_PAREN_RE = re.compile(
+    r"[（(]\s*(?:" + "|".join(re.escape(name) for name in _MANAGER_MACHINE_METRIC_NAMES) + r")\s*[）)]"
+)
 _MANAGER_SCHEMA_PUNCT_ONLY_RE = re.compile(r'^[\s\[\]\{\}",:：]+$')
 # Match a named holding followed by a parenthetical with constituent-level
 # financial data, e.g. `中国核电（7.91%权重，归母同比-34.19%）`.
@@ -2575,6 +2597,7 @@ def strip_manager_instruction_leakage(text: str) -> str:
 
     for pattern in _MANAGER_INSTRUCTION_INLINE_PATTERNS:
         cleaned = pattern.sub("", cleaned)
+    cleaned = _hide_manager_machine_metric_names(cleaned)
     filtered_lines = []
     for raw_line in cleaned.splitlines():
         stripped = raw_line.strip()
@@ -2592,6 +2615,18 @@ def strip_manager_instruction_leakage(text: str) -> str:
     cleaned = "\n".join(filtered_lines)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
+
+
+def _hide_manager_machine_metric_names(text: str) -> str:
+    """Hide schema/backtest metric identifiers while preserving readable labels."""
+    content = _MANAGER_MACHINE_METRIC_PAREN_RE.sub("", text or "")
+    use_chinese = _is_chinese_output()
+
+    def _replacement(match: re.Match) -> str:
+        label_pair = _MANAGER_MACHINE_METRIC_DISPLAY.get(match.group(0), ("指标", "metric"))
+        return label_pair[0] if use_chinese else label_pair[1]
+
+    return _MANAGER_MACHINE_METRIC_NAME_RE.sub(_replacement, content)
 
 
 def _collapse_duplicate_markdown_headings(text: str) -> str:
