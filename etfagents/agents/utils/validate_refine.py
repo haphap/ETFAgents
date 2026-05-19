@@ -63,7 +63,11 @@ class AnalystReportSpec:
     """Substrings expected near the end of the report (table headers, etc.)."""
 
     require_top_section_leads: bool = False
-    """Whether every required top-level section must include a prose lead."""
+    """Whether every required top-level section must include a prose lead.
+
+    Only meaningful together with ``required_top_sections``; otherwise all
+    detected top-level sections are checked.
+    """
 
     custom_rules_markdown: str = ""
     """Free-form rules forwarded verbatim to the LLM judge prompt."""

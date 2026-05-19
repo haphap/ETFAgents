@@ -44,8 +44,7 @@ _REPORT_SPEC = AnalystReportSpec(
     ),
 )
 
-_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTION_MARKS = ("一", "二", "三", "四")
-_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS = set(_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTION_MARKS)
+_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS = set(_REPORT_SPEC.required_top_sections)
 # Anchors must match the section names emitted by the prompt template below.
 _HOLDINGS_INDUSTRY_REQUIRED_MARKERS = ("ETF暴露", "研报总览")
 
@@ -60,7 +59,7 @@ def _looks_like_complete_holdings_industry_report(report: str) -> bool:
     if not _HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS.issubset(section_marks):
         return False
 
-    if find_top_sections_missing_leads(content, _HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTION_MARKS):
+    if find_top_sections_missing_leads(content, _REPORT_SPEC.required_top_sections):
         return False
 
     return (

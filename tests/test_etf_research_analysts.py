@@ -495,7 +495,7 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
         self.assertIn("反面示例（禁止）", system_msg)
         self.assertIn("正面示例（目标风格）", system_msg)
         self.assertIn("冲突驱动", system_msg)
-        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
+        self.assertIn("不得使用'本章''本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("不要写'本节锁定'", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
@@ -1001,7 +1001,7 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
             )
 
         system_msg = captured["system_message"]
-        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
+        self.assertIn("不得使用'本章''本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
@@ -1080,7 +1080,7 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         )
 
         system_msg = captured.get("prompt", "")
-        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
+        self.assertIn("不得使用'本章''本节''本部分''该部分''这一节'等自指式开头", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertNotIn("## 数据来源（已获取，直接使用）", system_msg)
