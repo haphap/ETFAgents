@@ -210,6 +210,46 @@ class StructuredAgentTests(unittest.TestCase):
         self.assertNotIn("执行倾向: 增持", result["trader_investment_plan"])
         self.assertIn("三、再平衡与风险控制", result["trader_investment_plan"])
 
+    def test_trader_freetext_fallback_prompt_is_prose_only(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "Chinese"
+        set_config(cfg)
+        llm = MagicMock()
+        llm.with_structured_output.side_effect = NotImplementedError("unsupported")
+        llm.invoke.return_value = _FakeResponse(
+            "一、配置逻辑\n结论。\n\n二、配置执行计划\n计划。\n\n三、再平衡与风险控制\n风控。\n\n四、执行倾向\n**持有**"
+        )
+
+        create_trader(llm)(copy.deepcopy(_base_state()))
+
+        fallback_prompt = llm.invoke.call_args.args[0]
+        system_prompt = fallback_prompt[0]["content"]
+        self.assertNotIn("populate the structured fields", system_prompt.lower())
+        self.assertNotIn("target_weight_pct", system_prompt)
+        self.assertNotIn("execution_timing", system_prompt)
+        self.assertIn("Use exactly four top-level sections", system_prompt)
+        self.assertIn("四、执行倾向", system_prompt)
+
+    def test_portfolio_manager_freetext_fallback_prompt_is_prose_only(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "Chinese"
+        set_config(cfg)
+        llm = MagicMock()
+        llm.with_structured_output.side_effect = NotImplementedError("unsupported")
+        llm.invoke.return_value = _FakeResponse(
+            "## 辩论结论\n结论。\n\n## 行为逻辑\n逻辑。\n\n## 持仓建议\n### （一）评级\n研究结论: **持有**\n### （二）建议\n维持当前仓位。\n\n反馈快照:\n- 立场: 持有\n- 本轮新增与反驳: 新增约束。\n- 待验证: 跟踪量价。"
+        )
+
+        create_portfolio_manager(llm)(copy.deepcopy(_base_state()))
+
+        fallback_prompt = llm.invoke.call_args.args[0]
+        self.assertNotIn("Populate the structured fields", fallback_prompt)
+        self.assertNotIn("target_weight_pct", fallback_prompt)
+        self.assertNotIn("execution_timing", fallback_prompt)
+        self.assertIn("write only the visible report", fallback_prompt)
+        self.assertIn("（一）评级", fallback_prompt)
+        self.assertIn("（二）建议", fallback_prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

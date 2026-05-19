@@ -25,6 +25,10 @@ from etfagents.agents.utils.analysis_memory import (
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value, with_state_aliases
 from etfagents.agents.schemas import PortfolioDecision, render_portfolio_decision
 from etfagents.agents.utils.structured import (
+    STRUCTURED_FIELD_POPULATION_INSTRUCTION,
+    STRUCTURED_FIELD_VISIBILITY_INSTRUCTION,
+    STRUCTURED_TRIGGER_METRICS_INSTRUCTION,
+    build_prose_only_fallback_prompt,
     bind_structured,
     invoke_structured_or_freetext_with_result,
 )
@@ -87,6 +91,13 @@ def _portfolio_detail_instruction(section: str) -> str:
     )
 
 
+_PORTFOLIO_MANAGER_FREETEXT_FALLBACK_INSTRUCTION = (
+    "Free-text fallback mode: write only the visible report using the exact heading order above. "
+    "Do not output schema/backtest field names, parameter mappings, trigger arrays, or field-value tables. "
+    "When writing in Chinese, keep `持仓建议` split into exactly `（一）评级` and `（二）建议`."
+)
+
+
 def create_portfolio_manager(llm, memory=None):
     structured_llm = bind_structured(llm, PortfolioDecision, "Portfolio Manager")
 
@@ -135,9 +146,9 @@ def create_portfolio_manager(llm, memory=None):
 Your response must evaluate all three risk perspectives before giving a position. Do not jump straight to the final recommendation.
 For ordinary lists, use Arabic numerals such as 1. 2. 3.; if you use Chinese section headings, keep forms like 一、二、三.
 Output only the finished report. Never copy, quote, or paraphrase the writing rules or bullet instructions from this prompt into the answer, and do not repeat a section heading once it has already appeared.
-Populate the structured fields target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls whenever the evidence supports them; use null or empty lists only when the reports truly do not justify reliable values.
-For structured triggers, prefer supported metrics such as close, open, high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, and weight_pct.
-Never expose machine-readable field names such as target_weight_pct, target_weight_band, execution_timing, add_triggers, reduce_triggers, exit_triggers, rebalance_triggers, or risk_controls in the visible prose.
+{STRUCTURED_FIELD_POPULATION_INSTRUCTION}
+{STRUCTURED_TRIGGER_METRICS_INSTRUCTION}
+{STRUCTURED_FIELD_VISIBILITY_INSTRUCTION}
 The analysis date is {analysis_date}. Treat dated macro / earnings / policy events as calendar-sensitive: cite an exact event date only when it is present in the provided evidence and still relevant as of the analysis date; otherwise describe the next verified release or observable threshold without repeating a stale calendar date.
 
 Use this exact output order with Markdown headings:
@@ -205,6 +216,10 @@ Be decisive and ground every conclusion in specific evidence from the analysts. 
 Only after the three sections above, append a feedback block in this exact format:
 {get_snapshot_template()}
 {get_snapshot_writing_instruction()}{get_language_instruction()}"""
+        fallback_prompt = build_prose_only_fallback_prompt(
+            prompt,
+            extra_instruction=_PORTFOLIO_MANAGER_FREETEXT_FALLBACK_INSTRUCTION,
+        )
 
         rendered_content, structured_result = invoke_structured_or_freetext_with_result(
             structured_llm,
@@ -223,6 +238,7 @@ Only after the three sections above, append a feedback block in this exact forma
                 ),
             ),
             "Portfolio Manager",
+            fallback_prompt=fallback_prompt,
         )
         normalized_content = normalize_chinese_manager_terms(rendered_content)
         portfolio_backtest_signal = build_portfolio_backtest_signal(
