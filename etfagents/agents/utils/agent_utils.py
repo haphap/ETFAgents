@@ -2752,6 +2752,68 @@ def _normalize_manager_section_key(title: str) -> str:
     return re.sub(r"\s+", "", cleaned)
 
 
+def _strip_manager_body_heading_marker(line: str) -> str:
+    stripped = (line or "").strip()
+    stripped = re.sub(r"^\s{0,3}#{1,6}\s*", "", stripped)
+    stripped = re.sub(r"^[一二三四五六七八九十]+[、.．]\s*", "", stripped)
+    stripped = re.sub(r"^[（(][一二三四五六七八九十\d]+[）)]\s*", "", stripped)
+    return stripped
+
+
+def _manager_section_key_prefix(title: str) -> str:
+    cleaned = (title or "").strip()
+    cleaned = re.sub(r"^\s{0,3}#{1,6}\s*", "", cleaned)
+    cleaned = re.sub(r"^[一二三四五六七八九十]+[、.．]?\s*", "", cleaned)
+    for key in sorted(_MANAGER_SECTION_KEYS, key=len, reverse=True):
+        if cleaned == key or cleaned.startswith(f"{key} "):
+            return key
+    return ""
+
+
+def _demote_manager_body_headings(text: str) -> str:
+    """Keep manager section anchors, but turn inner section headings into prose."""
+    lines = (text or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    if not lines:
+        return ""
+
+    demoted: list[str] = []
+    current_section = ""
+    for line in lines:
+        stripped = line.strip()
+        markdown_heading = re.match(r"^\s{0,3}#{1,6}\s+(.+?)\s*$", stripped)
+        plain_heading = (
+            stripped
+            if (
+                re.match(r"^(?:[一二三四五六七八九十]+[、.．]|[（(][一二三四五六七八九十\d]+[）)])\s*\S", stripped)
+                and not re.match(r"^[一二三四五六七八九十]+、[一二三四五六七八九十\d]+轮", stripped)
+            )
+            else ""
+        )
+        heading_text = markdown_heading.group(1).strip() if markdown_heading else plain_heading
+        manager_key_prefix = _manager_section_key_prefix(heading_text)
+        if manager_key_prefix:
+            current_section = manager_key_prefix
+            demoted.append(line)
+            continue
+
+        heading_key = _normalize_manager_section_key(heading_text) if heading_text else ""
+
+        if heading_key in _MANAGER_SECTION_KEYS:
+            current_section = heading_key
+            demoted.append(line)
+            continue
+
+        if current_section in {"辩论结论", "行为逻辑"} and heading_text:
+            body_line = _strip_manager_body_heading_marker(line)
+            if body_line:
+                demoted.append(body_line)
+            continue
+
+        demoted.append(line)
+
+    return "\n".join(demoted).strip()
+
+
 def _trim_section_lines(lines: list[str]) -> list[str]:
     trimmed = list(lines)
     while trimmed and not trimmed[0].strip():
@@ -3227,6 +3289,7 @@ def normalize_chinese_manager_terms(text: str) -> str:
         .replace("本轮双方", "整场辩论双方")
         .replace("本轮辩论", "整场辩论")
     )
+    body = _demote_manager_body_headings(body)
     body = re.sub(
         r"(?m)^((?:建议评级|评级|Recommendation|Rating)[:：][^\n]+)\n(?!\n|[#>*-]|\d+\.\s|最终配置建议|最终交易建议|FINAL ALLOCATION PROPOSAL|FINAL TRANSACTION PROPOSAL)(\S)",
         r"\1\n\n\2",
