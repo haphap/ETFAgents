@@ -69,6 +69,9 @@ class AnalystReportSpec:
     detected top-level sections are checked.
     """
 
+    lead_required_top_sections: tuple[str, ...] = ()
+    """Subset of required top-level section markers that must include a prose lead."""
+
     custom_rules_markdown: str = ""
     """Free-form rules forwarded verbatim to the LLM judge prompt."""
 
@@ -225,8 +228,9 @@ def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
             missing.append(f"缺少一级章节『{need}、…』")
 
     if spec.require_top_section_leads:
-        for mark in find_top_sections_missing_leads(report, spec.required_top_sections):
-            missing.append(f"一级章节『{mark}、…』缺少章节导语")
+        lead_marks = spec.lead_required_top_sections or spec.required_top_sections
+        for mark in find_top_sections_missing_leads(report, lead_marks):
+            missing.append(f"一级章节『{mark}、…』缺少标题后的结论段")
 
     if _MARKDOWN_H1_RE.search(report):
         issues.append("出现 markdown # H1 标题（应改为正文或中文一级编号）")
@@ -268,7 +272,7 @@ _JUDGE_BASE_RULES = (
     "- 报告是否以2-4句概述段落开头（不得以标题或列表开头）？\n"
     "- 一级标题是否使用「一、」「二、」「三、」格式，且标题中不得包含英文翻译或括号注释？\n"
     "- 不得出现连续重复的一级标题。\n"
-    "- 每个一级章节是否以2-3句概括性导语开头，且导语高于子章节层面（不重复子章节内容）？\n"
+    "- 每个一级章节标题后是否直接写2-3句概括性结论段，且结论段高于子章节层面（不重复子章节内容）？\n"
     "- 不得出现 ## 或其他 markdown 标题格式（应使用中文编号）。\n\n"
     "### 术语解释\n"
     "- 所有中文技术术语首次出现时是否用通俗语言解释并说明交易含义？\n"
@@ -277,7 +281,7 @@ _JUDGE_BASE_RULES = (
     "- 是否在每个主要信号后回答了「这意味着什么」和「对交易应该怎么做」？\n"
     "- 开篇第一句是否直接陈述核心结论或判断（偏多/偏空/中性及原因），而非「本报告将…」等场景设置？\n\n"
     "### 禁止内容\n"
-    "- 章节导语和段落开头不得使用任何自指式元叙述（「本节锁定…」「本部分聚焦…」等）。\n"
+    "- 一级章节标题后的结论段和段落开头不得使用任何自指式元叙述（「本节锁定…」「本部分聚焦…」等）。\n"
     "- 不得使用「判断：」「证据：」「关键价位：」「条件情景：」等标签式结构。\n"
     "- 不得讨论数据源分类噪声、券商标签噪声、搜索错配或检索伪影。\n\n"
     "### 段落质量\n"

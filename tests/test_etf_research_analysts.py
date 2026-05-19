@@ -157,7 +157,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertNotIn("## 第一步：数据获取", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
-        self.assertIn("一级标题 -> 1-2句结论导语 -> 子章节标题", system_msg)
+        self.assertIn("一级标题 -> 1-2句结论段 -> 子章节标题", system_msg)
         self.assertIn("不得写'本章''本节''本部分''旨在''梳理'", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
         self.assertIs(
@@ -307,7 +307,7 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("检索伪影", system_msg)
         self.assertIn("每项论点必须引用", system_msg)
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
-        self.assertIn("一级标题 -> 2-3句结论导语 -> 子章节标题", system_msg)
+        self.assertIn("一级标题 -> 2-3句结论段 -> 子章节标题", system_msg)
         self.assertIn("不得写'本章''本节''本部分''旨在''梳理'", system_msg)
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertNotIn("## 第一步：数据获取", system_msg)
@@ -472,10 +472,17 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
 
         system_msg = captured["system_message"]
         self.assertIn(
-            "近期合约表现总览",
+            "四、近期合约表现总览",
             system_msg,
         )
-        self.assertIn("在所有分析章节之后", system_msg)
+        self.assertIn("报告含四个一级章节", system_msg)
+        self.assertIn("一、二、三章标题后直接写2-3句结论段", system_msg)
+        self.assertIn("标题下一行必须是Markdown表格第一行", system_msg)
+        self.assertIn("禁止任何说明文字、结论段、子章节或其他标题", system_msg)
+        self.assertIn(
+            "四、近期合约表现总览\n| 合约 | 最新水平 | 近期价格表现 | 持仓变化 | 仓单变化 | 信号备注 |",
+            system_msg,
+        )
         self.assertIn(
             "两周内，铜与热卷的需求强势能否驱动焦煤仓单去化",
             system_msg,
@@ -524,15 +531,37 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
             "（一）制造业复苏与上游需求\n"
             "报告内容。\n\n"
             "三、情景推演与策略启示\n"
+            "基准情景仍偏防守，若制造业需求未能带动仓单去化，ETF配置不应主动放大风险暴露。\n\n"
             "（一）基准情景 — 概率估计 (%)\n"
             "报告内容。\n\n"
-            "近期合约表现总览\n"
+            "四、近期合约表现总览\n"
             "| 合约 | 最新水平 | 信号备注 |\n"
             "| --- | --- | --- |\n"
             "| CU | 80000 | 需求验证 |"
         )
 
         self.assertTrue(_looks_like_complete_meso_commodity_report(valid_report))
+        self.assertFalse(
+            _looks_like_complete_meso_commodity_report(
+                valid_report.replace("四、近期合约表现总览", "近期合约表现总览")
+            )
+        )
+        self.assertFalse(
+            _looks_like_complete_meso_commodity_report(
+                valid_report.replace(
+                    "四、近期合约表现总览\n",
+                    "四、近期合约表现总览\n（一）合约表现\n",
+                )
+            )
+        )
+        self.assertFalse(
+            _looks_like_complete_meso_commodity_report(
+                valid_report.replace(
+                    "四、近期合约表现总览\n",
+                    "四、近期合约表现总览\n铜和焦煤的仓单变化最能验证前述判断。\n\n",
+                )
+            )
+        )
         self.assertFalse(
             _looks_like_complete_meso_commodity_report(
                 "报告已就绪。以下为中观商品策略分析：\n\n" + valid_report
@@ -582,7 +611,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("核心交易信号", system_msg)
         self.assertIn("结论依据", system_msg)
         self.assertIn("without any sub-heading", system_msg)
-        self.assertIn("每个一级章节（一、二、三）以2-3句导语开头", system_msg)
+        self.assertIn("每个一级章节（一、二、三）标题后直接写2-3句结论段", system_msg)
         self.assertIn("段落式表达", system_msg)
         self.assertIn("反面示例（禁止）", system_msg)
         self.assertIn("正面示例（目标风格）", system_msg)
@@ -1006,6 +1035,8 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、暴露与宏观主线", system_msg)
+        self.assertIn("标题后直接写2-3句结论段", system_msg)
+        self.assertNotIn("以2-3句导语开头", system_msg)
         self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
         self.assertIn("If the structure does not provide a heading, write one that is brief, forceful, and immediately usable", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
@@ -1087,6 +1118,8 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         self.assertNotIn("## 分析指引", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、情绪主线与权重影响", system_msg)
+        self.assertIn("标题后直接写2-3句结论段", system_msg)
+        self.assertNotIn("以2-3句导语开头", system_msg)
         self.assertNotIn("一、情绪主线与权重影响 (", system_msg)
         self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
         self.assertIn("Do NOT output code blocks, JSON, dictionary mappings", system_msg)

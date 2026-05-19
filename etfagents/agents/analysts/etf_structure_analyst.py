@@ -30,20 +30,58 @@ from etfagents.tool_report_utils import run_tool_report_chain
 
 _REPORT_SPEC = AnalystReportSpec(
     analyst_name="meso_commodity",
+    required_top_sections=("一", "二", "三", "四"),
+    require_top_section_leads=True,
+    lead_required_top_sections=("一", "二", "三"),
     custom_rules_markdown=(
         "### 内容覆盖\n"
+        "- 是否包含四个一级章节：一、核心矛盾与主线判断；二、矛盾推演；三、情景推演与策略启示；四、近期合约表现总览？\n"
+        "- 一、二、三章标题后是否直接写结论段？四、近期合约表现总览标题后是否直接承接Markdown表格？\n"
         "- 是否将报告锁定在一个可证伪的命题上？\n"
         "- 是否按交易矛盾（而非商品品类）组织分析？\n"
         "- 是否对每个矛盾给出方向倾向和确信度（低/中/高）？\n"
         "- 是否验证了上下游成本转嫁是否完整？\n"
         "- 是否设置了情景推演（基准/替代/尾部）并给出概率估计？\n"
-        "- 末尾是否附近期合约表现总览表？"
+        "- 四、近期合约表现总览下是否附近期合约表现总览表？"
     ),
 )
 
-_MESO_COMMODITY_REQUIRED_TOP_SECTIONS = {"一", "二", "三"}
+_MESO_COMMODITY_REQUIRED_TOP_SECTIONS = set(_REPORT_SPEC.required_top_sections)
 # Anchors must match the section names emitted by the prompt template below.
 _MESO_COMMODITY_REQUIRED_MARKERS = ("核心矛盾", "近期合约表现总览")
+
+
+def _looks_like_markdown_table_row(line: str) -> bool:
+    stripped = (line or "").strip()
+    return stripped.startswith("|") and stripped.endswith("|") and stripped.count("|") >= 2
+
+
+def _looks_like_markdown_table_separator(line: str) -> bool:
+    stripped = (line or "").strip()
+    if not _looks_like_markdown_table_row(stripped):
+        return False
+    body = stripped.replace("|", "").replace(":", "").replace("-", "").strip()
+    return "-" in stripped and not body
+
+
+def _has_meso_commodity_overview_table_section(report: str) -> bool:
+    """Require section 四 to contain the overview table directly below the heading."""
+    lines = (report or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    for index, line in enumerate(lines):
+        if line.strip() != "四、近期合约表现总览":
+            continue
+
+        cursor = index + 1
+        while cursor < len(lines) and not lines[cursor].strip():
+            cursor += 1
+        if cursor + 1 >= len(lines):
+            return False
+        return (
+            _looks_like_markdown_table_row(lines[cursor])
+            and _looks_like_markdown_table_separator(lines[cursor + 1])
+        )
+
+    return False
 
 
 def _looks_like_complete_meso_commodity_report(report: str) -> bool:
@@ -59,6 +97,7 @@ def _looks_like_complete_meso_commodity_report(report: str) -> bool:
     return (
         all(marker in content for marker in _MESO_COMMODITY_REQUIRED_MARKERS)
         and contains_markdown_table(content)
+        and _has_meso_commodity_overview_table_section(content)
     )
 
 
@@ -99,7 +138,7 @@ def create_etf_structure_analyst(llm):
             + get_no_title_instruction() + "\n"
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
-            "报告含三个一级章节（一、二、三）。每个以2-3句导语开头总结该节核心结论，然后空行进入子章节。不得以原始合约数据或孤立标签开篇。\n\n"
+            "报告含四个一级章节（一、二、三、四）。一、二、三章标题后直接写2-3句结论段，先给主导矛盾、传导路径和配置含义，然后空行进入子章节。四、近期合约表现总览标题后直接放Markdown表格，不写结论段、子章节或其他标题。不得以原始合约数据或孤立标签开篇。\n\n"
             "一、核心矛盾与主线判断\n"
             "开篇直接抛出一个可证伪的命题，而非模糊概述。"
             "必须明确关键路标：两周内，铜与热卷的需求强势能否驱动焦煤仓单去化？"
@@ -130,6 +169,7 @@ def create_etf_structure_analyst(llm):
             "  - 同样段落式结构，末尾含跨链验证。\n\n"
             "（三）[下一矛盾，如有]\n\n"
             "三、情景推演与策略启示\n"
+            "标题后先写2-3句结论段，概括基准情景、最大替代风险和ETF配置动作，再进入子章节。"
             "以情景框架替代旧式要点列表。每个情景必须写成完整段落，非标签式清单。"
             "每个情景段落必须包含：概率与核心逻辑、主导产业链与传导路径、可量化的触发或证伪条件、以及概率赋值的简要理由。\n\n"
             "（一）基准情景 — 概率估计 (%)\n"
@@ -139,17 +179,22 @@ def create_etf_structure_analyst(llm):
             "  - 使用领先触发条件而非滞后总结。优选示例：'沪铜持仓一周内降幅超10%且现货升水收敛至平水'作为早期撤退信号。\n\n"
             "（三）尾部风险 — 概率估计 (%)\n"
             "  - 聚焦高杠杆合约如碳酸锂或原油的低估崩盘风险，触发条件如'3日跌幅超5%且价跌仓降'。\n\n"
-            "在所有分析章节之后，报告最末附一个标题为'近期合约表现总览'的markdown表格。"
-            "使用商品快照作为事实附录，包含讨论过的关键合约及工具提供的精确字段，"
-            "如最新水平、近期价格表现、持仓变化、仓单变化和简短信号备注。不得编造不可用的指标。\n\n"
+            "四之前先说明：四、近期合约表现总览标题下一行必须是Markdown表格第一行，"
+            "除空行外禁止任何说明文字、结论段、子章节或其他标题。"
+            "该表使用商品快照作为事实附录，包含讨论过的关键合约及工具提供的精确字段，"
+            "如最新水平、近期价格表现、持仓变化、仓单变化和简短信号备注；不得编造不可用的指标。\n\n"
+            "四、近期合约表现总览\n"
+            "| 合约 | 最新水平 | 近期价格表现 | 持仓变化 | 仓单变化 | 信号备注 |\n"
+            "| --- | --- | --- | --- | --- | --- |\n"
+            "| 示例合约 | 依工具数据填写 | 依工具数据填写 | 依工具数据填写 | 依工具数据填写 | 依工具数据填写 |\n\n"
             "## 风格要求\n"
             "- 直接以一中的核心矛盾论点开篇。不得以'本报告将…'、'以下是…'、'本分析基于…'等元描述开头。\n"
             "- 开篇帽段不得使用括号插入名词解释、术语解释、英文简称或白话注释；若必须解释术语，直接融入句子，不要写成'（……）'。\n"
             "- 当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用'分别为'连接，不得逐个单独陈述。\n"
             "- 若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出'数据缺失''数据不足'等提示。\n"
-            "- 标题导语与每个一级章节导语直接陈述结论。不得使用'本章''本节''本部分''该部分''这一节'等自指式开头（如'本章旨在梳理''本节核心结论指出''本部分结论表明''该部分说明'）。\n"
+            "- 开篇帽段和每个一级章节标题后的结论段都必须直接陈述结论。不得使用'本章''本节''本部分''该部分''这一节'等自指式开头（如'本章旨在梳理''本节核心结论指出''本部分结论表明''该部分说明'）。\n"
             "- 不要写'本节锁定'、'本节聚焦'、'本节讨论'、'本节围绕'、'该节…'、'这一节…'等自我指代句式，直接把矛盾、证据链和配置含义写成结论句。\n"
-            "- 导语段落必须高于子章节层面：综合主导矛盾、传导路径和ETF配置含义。"
+            "- 标题后的结论段必须高于子章节层面：综合主导矛盾、传导路径和ETF配置含义。"
             "不得简单复述即将在子章节中出现的相同合约观察。\n"
             "- 每句话必须传达具体数据点、异常或配置含义。删除'深度挂钩'、'全面覆盖'、'值得注意的是'、'it is worth noting'等填充语。\n"
             "- 连续出现三个以上裸数据片段后必须立即解释其揭示的矛盾和配置含义。\n"

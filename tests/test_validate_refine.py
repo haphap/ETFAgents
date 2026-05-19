@@ -159,8 +159,33 @@ class StaticValidateTests(unittest.TestCase):
 
         verdict = static_validate(report, spec)
 
-        self.assertTrue(any("一" in item and "章节导语" in item for item in verdict.missing_elements))
-        self.assertFalse(any("二" in item and "章节导语" in item for item in verdict.missing_elements))
+        self.assertTrue(any("一" in item and "结论段" in item for item in verdict.missing_elements))
+        self.assertFalse(any("二" in item and "结论段" in item for item in verdict.missing_elements))
+
+    def test_required_top_section_leads_can_target_subset(self):
+        spec = AnalystReportSpec(
+            analyst_name="meso_commodity",
+            required_top_sections=("一", "二", "三", "四"),
+            require_top_section_leads=True,
+            lead_required_top_sections=("一", "二", "三"),
+        )
+        report = (
+            "商品链条的成本传导仍未闭环。\n\n"
+            "一、核心矛盾与主线判断\n"
+            "核心矛盾集中在制造业需求和上游成本传导。\n\n"
+            "二、矛盾推演\n"
+            "制造业复苏仍需要仓单同步去化验证。\n\n"
+            "三、情景推演与策略启示\n"
+            "基准情景仍偏防守，ETF配置不应主动放大风险暴露。\n\n"
+            "四、近期合约表现总览\n"
+            "| 合约 | 最新水平 | 信号备注 |\n"
+            "| --- | --- | --- |\n"
+            "| CU | 80000 | 需求验证 |"
+        )
+
+        verdict = static_validate(report, spec)
+
+        self.assertFalse(any("四" in item and "结论段" in item for item in verdict.missing_elements))
 
 
 class ParseJudgeJsonTests(unittest.TestCase):
