@@ -73,7 +73,7 @@ class BacktestSignalTests(unittest.TestCase):
             "三、再平衡与风险控制\n"
             "若跌破关键支撑并放量，则先减仓；继续跟踪份额变化与资金流。\n\n"
             "四、执行倾向\n"
-            "执行倾向: **增持**"
+            "**增持**"
         )
         signal = build_trader_backtest_signal("510300.SH", "2026-01-15", rendered_text)
 

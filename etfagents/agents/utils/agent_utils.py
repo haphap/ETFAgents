@@ -2470,6 +2470,9 @@ _MANAGER_MACHINE_METRIC_DISPLAY = {
     "high": ("最高价", "high"),
     "low": ("最低价", "low"),
 }
+# Longer metric identifiers must come first: otherwise a future regex without
+# strict boundaries could match `close` before `close_50_sma` or `volume` before
+# `volume_ratio_20d`.
 _MANAGER_MACHINE_METRIC_NAMES = tuple(
     sorted(_MANAGER_MACHINE_METRIC_DISPLAY, key=len, reverse=True)
 )
@@ -2618,7 +2621,7 @@ def strip_manager_instruction_leakage(text: str) -> str:
 
 
 def _hide_manager_machine_metric_names(text: str) -> str:
-    """Hide schema/backtest metric identifiers while preserving readable labels."""
+    """Hide separated schema/backtest metric identifiers while preserving labels."""
     content = _MANAGER_MACHINE_METRIC_PAREN_RE.sub("", text or "")
     use_chinese = _is_chinese_output()
 

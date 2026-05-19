@@ -845,6 +845,8 @@ def _split_trader_heading_and_body(text: str) -> tuple[str, str]:
 
 
 def _format_trader_thesis_body(text: str) -> str:
+    # Keep semicolon-linked clauses together; only sentence/newline boundaries
+    # become separate numbered arguments under the thesis heading.
     sentences = [sentence.strip() for sentence in _split_sentences(text or "") if sentence.strip()]
     if len(sentences) <= 1:
         return (text or "").strip()
