@@ -1,4 +1,5 @@
 import functools
+import re
 from langchain_core.messages import AIMessage
 
 from etfagents.agents.schemas import TraderProposal, render_trader_proposal
@@ -49,6 +50,10 @@ def _trader_detail_instruction() -> str:
         "Write these sections as full analytical paragraphs with explicit thresholds and trigger conditions. "
         "If you cannot cite concrete price levels, moving-average values, volume baselines, or ETF share / premium-discount data from the reports above, do not issue add, reduce, or rebuild instructions."
     )
+
+
+def _demote_trader_h1_headings(text: str) -> str:
+    return re.sub(r"(?m)^#(?!#)\s*", "## ", text or "")
 
 
 def create_trader(llm):
@@ -107,7 +112,9 @@ def create_trader(llm):
             functools.partial(render_trader_proposal, context_text=market_flow_report),
             "Trader",
         )
-        rendered_result = normalize_chinese_manager_terms(rendered_result)
+        rendered_result = _demote_trader_h1_headings(
+            normalize_chinese_manager_terms(rendered_result)
+        )
         trader_backtest_signal = build_trader_backtest_signal(
             asset_symbol,
             str(state.get("trade_date", "")),

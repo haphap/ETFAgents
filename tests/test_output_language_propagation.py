@@ -612,7 +612,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("执行倾向: **持有**", rendered)
+        self.assertIn("四、执行倾向\n**持有**", rendered)
         self.assertNotIn("分批减持", rendered)
         self.assertIn("维持当前仓位", rendered)
         self.assertNotIn("\n\n\n", rendered)
@@ -706,7 +706,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("一、 配置核心逻辑", rendered)
         self.assertNotIn("二、 交易执行计划", rendered)
         self.assertNotIn("三、 调仓与风控机制", rendered)
-        self.assertIn("执行倾向: **持有**", rendered)
+        self.assertIn("四、执行倾向\n**持有**", rendered)
         self.assertIn("维持当前仓位，不主动追涨或杀跌", rendered)
 
     def test_trader_rendering_uses_capped_substantive_thesis_heading(self):
@@ -723,8 +723,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
 
         self.assertIn("一、当前宏观压制边际缓和、行业盈利改善信号同步出现\n", rendered)
-        self.assertIn("偏多逻辑更完整。", rendered)
-        self.assertIn("资金流仍需确认，执行上不能追高。", rendered)
+        self.assertIn("1. 偏多逻辑更完整。", rendered)
+        self.assertIn("2. 资金流仍需确认，执行上不能追高。", rendered)
         self.assertNotIn("一、当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整。资金流", rendered)
 
     def test_trader_rendering_splits_thesis_body_into_paragraphs(self):
@@ -742,9 +742,9 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("第一，价格仍处在关键均线附近", rendered)
-        self.assertIn("附近，说明趋势尚未完全破坏。\n\n第二，资金流", rendered)
-        self.assertIn("连续失速。\n\n第三，催化兑现前", rendered)
+        self.assertIn("1. 第一，价格仍处在关键均线附近", rendered)
+        self.assertIn("附近，说明趋势尚未完全破坏。\n\n2. 第二，资金流", rendered)
+        self.assertIn("连续失速。\n\n3. 第三，催化兑现前", rendered)
 
     def test_split_trader_heading_and_body_keeps_short_single_sentence_thesis_as_heading_only(self):
         heading, body = _split_trader_heading_and_body("维持持有，等待确认。")
@@ -1322,6 +1322,23 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertNotIn("execution_timing", normalized)
         self.assertNotIn("rebalance_triggers", normalized)
         self.assertIn("目标仓位先维持在15%至20%", normalized)
+
+    def test_manager_normalization_hides_machine_metric_names_in_visible_advice(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **增持**\n"
+            "### （二）建议\n"
+            "加仓触发条件为成交量比率（volume_ratio_20d）突破1.3倍、"
+            "溢价率（pnl_pct）稳定在1%安全区间且持仓权重（weight_pct）未现异常倒挂。"
+        )
+
+        self.assertNotIn("volume_ratio_20d", normalized)
+        self.assertNotIn("pnl_pct", normalized)
+        self.assertNotIn("weight_pct", normalized)
+        self.assertIn("成交量比率突破1.3倍", normalized)
+        self.assertIn("溢价率稳定在1%安全区间", normalized)
+        self.assertIn("持仓权重未现异常倒挂", normalized)
 
     def test_manager_normalization_strips_chinese_structured_mapping_leakage(self):
         normalized = normalize_chinese_manager_terms(

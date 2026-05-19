@@ -844,6 +844,15 @@ def _split_trader_heading_and_body(text: str) -> tuple[str, str]:
     return heading or "配置逻辑", body
 
 
+def _format_trader_thesis_body(text: str) -> str:
+    # Keep semicolon-linked clauses together; only sentence/newline boundaries
+    # become separate numbered arguments under the thesis heading.
+    sentences = [sentence.strip() for sentence in _split_sentences(text or "") if sentence.strip()]
+    if len(sentences) <= 1:
+        return (text or "").strip()
+    return "\n\n".join(f"{idx}. {sentence}" for idx, sentence in enumerate(sentences, 1))
+
+
 def _trader_thesis_needs_detail(text: str) -> bool:
     content = (text or "").strip()
     if not content:
@@ -1222,6 +1231,7 @@ def render_trader_proposal(plan: TraderProposal, context_text: str = "") -> str:
     risk_management = strip_constituent_trade_instructions(risk_management)
     if _is_chinese_output():
         thesis_heading, thesis_body = _split_trader_heading_and_body(thesis)
+        thesis_body = _format_trader_thesis_body(thesis_body)
         execution_plan = _format_trader_numbered_blocks(execution_plan, "execution")
         risk_management = _format_trader_numbered_blocks(risk_management, "risk")
         thesis_section = (
@@ -1237,7 +1247,7 @@ def render_trader_proposal(plan: TraderProposal, context_text: str = "") -> str:
             "三、再平衡与风险控制\n"
             f"{risk_management}\n\n"
             "四、执行倾向\n"
-            f"执行倾向: **{recommendation}**"
+            f"**{recommendation}**"
         )
     return collapse_blank_lines(
         "## ETF Allocation Thesis\n"

@@ -169,6 +169,26 @@ class StructuredAgentTests(unittest.TestCase):
         self.assertIn("Fallback thesis.", result["trader_investment_plan"])
         self.assertIn("FINAL TRANSACTION PROPOSAL: **HOLD**", result["trader_investment_plan"])
 
+    def test_trader_freetext_demotes_h1_markdown_headings(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "English"
+        set_config(cfg)
+        llm = MagicMock()
+        llm.with_structured_output.side_effect = NotImplementedError("unsupported")
+        llm.invoke.return_value = _FakeResponse(
+            "#Trading Thesis\nFallback thesis.\n\n"
+            "#Execution Plan\nWait.\n\n"
+            "## Risk Management\nWatch support.\n\n"
+            "FINAL TRANSACTION PROPOSAL: **HOLD**"
+        )
+
+        result = create_trader(llm)(copy.deepcopy(_base_state()))
+
+        self.assertNotRegex(result["trader_investment_plan"], r"(?m)^#(?!#)\s")
+        self.assertIn("## Trading Thesis", result["trader_investment_plan"])
+        self.assertIn("## Execution Plan", result["trader_investment_plan"])
+        self.assertIn("## Risk Management", result["trader_investment_plan"])
+
 
 if __name__ == "__main__":
     unittest.main()
