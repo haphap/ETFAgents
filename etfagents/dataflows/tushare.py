@@ -1984,6 +1984,9 @@ def get_broker_reports(
     end_date: str,
     max_reports: int = 30,
     extra_ind_names: Iterable[str] | None = None,
+    *,
+    _skip_market_check: bool = False,
+    _skip_industry_resolution: bool = False,
 ) -> str:
     """Retrieve broker research reports from tushare for A-share stocks.
 
@@ -1998,6 +2001,10 @@ def get_broker_reports(
         end_date: End date in YYYY-MM-DD format
         max_reports: Maximum number of reports to return (default 30)
         extra_ind_names: Additional tushare industry keywords to search and merge.
+        _skip_market_check: Internal ETF proxy escape hatch; callers outside
+            ``etf_data_tools`` should not pass this.
+        _skip_industry_resolution: Internal ETF proxy mode that uses explicit
+            ``extra_ind_names`` without resolving industry from stock reports.
 
     Returns:
         Formatted Markdown string of broker research reports with full abstracts
@@ -2009,21 +2016,11 @@ def get_broker_reports(
     ts_code = _normalize_ts_code(ticker)
     market = _classify_market(ts_code)
 
-    if market != "a_share":
+    if not _skip_market_check and market != "a_share":
         raise DataVendorUnavailable(
             f"Tushare broker research reports support A-share tickers only, got '{ts_code}'."
         )
 
-    industry, industry_source, basic_industry = _resolve_broker_industry_keyword(
-        pro,
-        ts_code,
-        start_date,
-        end_date,
-    )
-
-    start_api = start_date.replace("-", "")
-    end_api = end_date.replace("-", "")
-    candidate_industries = []
     raw_extra_ind_names = (
         (extra_ind_names,)
         if isinstance(extra_ind_names, str)
@@ -2032,7 +2029,39 @@ def get_broker_reports(
     normalized_extra_ind_names = [
         str(candidate or "").strip() for candidate in raw_extra_ind_names
     ]
-    for candidate in (industry, basic_industry, *normalized_extra_ind_names):
+    normalized_extra_ind_names = [
+        candidate for candidate in normalized_extra_ind_names if candidate
+    ]
+
+    if _skip_industry_resolution:
+        if not normalized_extra_ind_names:
+            raise DataVendorUnavailable(
+                "Explicit industry keywords are required when skipping broker industry resolution."
+            )
+        industry = normalized_extra_ind_names[0]
+        industry_source = "explicit industry keywords"
+        basic_industry = ""
+    elif _skip_market_check and market != "a_share":
+        raise DataVendorUnavailable(
+            "Non-A-share broker report queries require _skip_industry_resolution=True "
+            "together with explicit extra_ind_names."
+        )
+    else:
+        industry, industry_source, basic_industry = _resolve_broker_industry_keyword(
+            pro,
+            ts_code,
+            start_date,
+            end_date,
+        )
+
+    start_api = start_date.replace("-", "")
+    end_api = end_date.replace("-", "")
+    candidate_industries = []
+    if _skip_industry_resolution:
+        industry_candidates = normalized_extra_ind_names
+    else:
+        industry_candidates = (industry, basic_industry, *normalized_extra_ind_names)
+    for candidate in industry_candidates:
         normalized = str(candidate or "").strip()
         if normalized and normalized not in candidate_industries:
             candidate_industries.append(normalized)

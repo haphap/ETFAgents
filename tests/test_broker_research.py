@@ -344,6 +344,73 @@ class BrokerResearchTushareTests(unittest.TestCase):
         ]
         self.assertEqual(industry_calls[:2], ["养殖业", "农牧饲渔"])
 
+    @patch("etfagents.dataflows.tushare._get_pro_client")
+    def test_skip_industry_resolution_uses_explicit_keywords(self, mock_client):
+        from etfagents.dataflows.tushare import get_broker_reports
+
+        import pandas as pd
+
+        mock_pro = MagicMock()
+        mock_pro.research_report.return_value = pd.DataFrame(
+            {
+                "trade_date": ["20260515"],
+                "inst_csname": ["中信证券"],
+                "title": ["互联网行业跟踪"],
+                "abstr": ["平台经济基本面改善。"],
+                "author": ["张三"],
+                "ts_code": ["600050.SH"],
+                "url": ["http://example.com/internet"],
+                "ind_name": ["互联网"],
+            }
+        )
+        mock_client.return_value = mock_pro
+
+        result = get_broker_reports(
+            "00700.HK",
+            "2026-01-15",
+            "2026-05-15",
+            extra_ind_names=["互联网"],
+            _skip_market_check=True,
+            _skip_industry_resolution=True,
+        )
+
+        self.assertIn("Industry Research Reports for 互联网", result)
+        mock_pro.stock_basic.assert_not_called()
+        self.assertEqual(mock_pro.research_report.call_count, 1)
+        call_kwargs = mock_pro.research_report.call_args.kwargs
+        self.assertEqual(call_kwargs["ind_name"], "互联网")
+        self.assertNotIn("ts_code", call_kwargs)
+
+    @patch("etfagents.dataflows.tushare._get_pro_client")
+    def test_skip_industry_resolution_requires_explicit_keywords(self, mock_client):
+        from etfagents.dataflows.tushare import get_broker_reports
+
+        mock_client.return_value = MagicMock()
+
+        with self.assertRaisesRegex(DataVendorUnavailable, "Explicit industry keywords"):
+            get_broker_reports(
+                "00700.HK",
+                "2026-01-15",
+                "2026-05-15",
+                _skip_market_check=True,
+                _skip_industry_resolution=True,
+            )
+
+    @patch("etfagents.dataflows.tushare._get_pro_client")
+    def test_skip_market_check_without_explicit_resolution_rejects_hk(self, mock_client):
+        from etfagents.dataflows.tushare import get_broker_reports
+
+        mock_client.return_value = MagicMock()
+
+        with self.assertRaisesRegex(DataVendorUnavailable, "_skip_industry_resolution=True"):
+            get_broker_reports(
+                "00700.HK",
+                "2026-01-15",
+                "2026-05-15",
+                extra_ind_names=["互联网"],
+                _skip_market_check=True,
+            )
+
 
 class StockReportsTushareTests(unittest.TestCase):
     """Tests for the tushare stock reports data function."""

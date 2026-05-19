@@ -17,6 +17,7 @@ from etfagents.agents.utils.daily_snapshot_cache import (
     DailySnapshotCacheError,
     get_or_build_shared_snapshot,
 )
+from etfagents.dataflows.akshare import get_hk_security_industry
 from etfagents.dataflows.exceptions import DataVendorUnavailable, MissingEtfHoldings
 from etfagents.dataflows.interface import route_to_vendor
 from etfagents.dataflows.tushare import (
@@ -200,6 +201,40 @@ _HK_BENCHMARK_PROXY_BASKETS = (
     },
 )
 
+_AH_SHARE_MAP: dict[str, str | None] = {
+    "00700.HK": None,
+    "09988.HK": None,
+    "03690.HK": None,
+    "01810.HK": None,
+    "01024.HK": None,
+    "09618.HK": None,
+    "09999.HK": None,
+    "00981.HK": "688981.SH",
+    "00005.HK": None,
+    "00939.HK": "601939.SH",
+    "01299.HK": None,
+}
+
+_HK_INDUSTRY_TO_BROKER_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "互联网平台": ("互联网", "传媒"),
+    "互联网服务": ("互联网", "传媒"),
+    "软件服务": ("计算机", "软件"),
+    "本地生活": ("餐饮旅游", "社会服务"),
+    "智能硬件": ("电子", "消费电子"),
+    "消费电子": ("电子", "消费电子"),
+    "互联网内容": ("传媒", "互联网"),
+    "电商": ("商贸零售", "电子商务"),
+    "电子商务": ("商贸零售", "电子商务"),
+    "游戏娱乐": ("传媒", "游戏"),
+    "游戏": ("传媒", "游戏"),
+    "半导体": ("半导体", "电子"),
+    "金融": ("银行", "非银金融"),
+    "银行": ("银行",),
+    "保险": ("保险", "非银金融"),
+}
+_HK_INDUSTRY_SOURCE_AKSHARE = "akshare profile industry"
+_HK_INDUSTRY_SOURCE_BASKET = "basket fallback industry"
+
 
 def _normalize_indicator_token(indicator: str) -> str:
     normalized = re.sub(r"[^a-z0-9]+", "_", indicator.strip().lower()).strip("_")
@@ -321,6 +356,22 @@ def _match_hk_benchmark_proxy_basket(profile_row: pd.Series) -> dict[str, object
     return None
 
 
+def _resolve_a_share_counterpart(hk_code: str) -> str | None:
+    return _AH_SHARE_MAP.get(_normalize_ts_code(hk_code))
+
+
+@lru_cache(maxsize=128)
+def _lookup_akshare_hk_industry(hk_code: str) -> str:
+    return get_hk_security_industry(hk_code)
+
+
+def _hk_industry_to_broker_keywords(industry: str) -> tuple[str, ...]:
+    # AkShare industry labels do not always match Tushare broker-report
+    # taxonomy. Unknown labels pass through as a best-effort exact keyword.
+    normalized = str(industry or "").strip()
+    return _HK_INDUSTRY_TO_BROKER_KEYWORDS.get(normalized, (normalized,) if normalized else ())
+
+
 def _lookup_hk_metadata(ts_code: str, fallback_name: str, fallback_industry: str) -> dict[str, str]:
     """Look up HK constituent metadata.
 
@@ -389,6 +440,8 @@ def _build_hk_benchmark_proxy_frame(
             str(member.get("name", "")),
             str(member.get("industry", "")),
         )
+        akshare_industry = _lookup_akshare_hk_industry(member_code)
+        display_industry = akshare_industry or metadata["industry"]
         price = _lookup_hk_latest_price(member_code, curr_date)
         trade_date = str(price.get("latest_trade_date") or "")
         if trade_date:
@@ -398,7 +451,10 @@ def _build_hk_benchmark_proxy_frame(
             {
                 "ts_code": metadata["ts_code"],
                 "name": metadata["name"],
-                "industry": metadata["industry"],
+                "industry": display_industry,
+                "akshare_industry": akshare_industry,
+                "industry_source": _HK_INDUSTRY_SOURCE_AKSHARE if akshare_industry else _HK_INDUSTRY_SOURCE_BASKET,
+                "a_share_code": _resolve_a_share_counterpart(member_code),
                 "weight": (raw_member_weight / raw_basket_weight * 100.0) if raw_basket_weight > 0 else 0.0,
                 **price,
             }
@@ -1659,7 +1715,12 @@ def get_etf_industry_research(
         candidates = constituents[constituents[industry_column] == industry_name].sort_values("weight", ascending=False)
         if candidates.empty:
             continue
+        if is_hk_proxy and "a_share_code" in candidates.columns:
+            candidates = candidates.assign(
+                _has_a_share=candidates["a_share_code"].fillna("").astype(str).str.strip().ne("")
+            ).sort_values(["_has_a_share", "weight"], ascending=[False, False])
         representative = candidates.iloc[0].to_dict()
+        representative.pop("_has_a_share", None)
         representative["industry"] = industry_name
         representative["weight"] = _safe_float(industry_row["industry_weight"]) or 0.0
         representatives.append(representative)
@@ -1685,22 +1746,28 @@ def get_etf_industry_research(
         sections.insert(2, source_note)
     if is_hk_proxy:
         sections.append(
-            "Tushare broker-report industry search is A-share only; for this Hong Kong ETF proxy, "
-            "use the hk_basic/hk_daily-enriched basket above as the holdings exposure reference."
+            "This Hong Kong ETF proxy uses AkShare HK security profile industries where available. "
+            "A+H dual-listed holdings query Tushare with their A-share ticker; pure HK holdings query "
+            "theme-related broker reports by explicit industry keywords, not constituent-level coverage."
         )
     for idx, (_, row) in enumerate(reps_df.iterrows(), 1):
         base_industry = str(row.get("base_industry", "")).strip()
         industry_source = str(row.get("research_industry_source", "")).strip()
-        sections.append(
-            f"## Industry {idx}: {row['industry']} | {aggregated_weight_label} {_format_number(_safe_float(row.get('weight')), suffix='%')} | representative {row['name']} ({row['ts_code']})"
-        )
         if is_hk_proxy:
-            continue
+            industry_source = str(row.get("industry_source", "")).strip()
+        a_share_code = str(row.get("a_share_code", "") or "").strip()
+        sections.append(
+            f"## Industry {idx}: {row['industry']} | {aggregated_weight_label} {_format_number(_safe_float(row.get('weight')), suffix='%')} | representative {row['name']} ({row['ts_code']}{f' -> {a_share_code}' if is_hk_proxy and a_share_code else ''})"
+        )
         if industry_source:
             sections.append(f"Keyword source: {industry_source}")
         if base_industry and base_industry != str(row.get("industry", "")).strip():
             sections.append(f"Stock basic industry fallback / comparison: {base_industry}")
-        extra_ind_names = _related_broker_industry_keywords(row)
+        extra_ind_names = (
+            list(_hk_industry_to_broker_keywords(str(row.get("industry", ""))))
+            if is_hk_proxy
+            else _related_broker_industry_keywords(row)
+        )
         if extra_ind_names:
             sections.append(
                 "Related industry keywords searched: " + ", ".join(extra_ind_names)
@@ -1709,9 +1776,13 @@ def get_etf_industry_research(
             broker_report_kwargs = {"max_reports": max_reports_per_industry}
             if extra_ind_names:
                 broker_report_kwargs["extra_ind_names"] = extra_ind_names
+            if is_hk_proxy:
+                broker_report_kwargs["_skip_industry_resolution"] = True
+                if not a_share_code:
+                    broker_report_kwargs["_skip_market_check"] = True
             sections.append(
                 get_broker_reports(
-                    row["ts_code"],
+                    a_share_code if is_hk_proxy and a_share_code else row["ts_code"],
                     start_date,
                     end_date,
                     **broker_report_kwargs,
@@ -1764,14 +1835,74 @@ def get_etf_top_holdings_research(
         sections.insert(2, source_note)
     if is_hk_proxy:
         sections.append(
-            "Tushare stock research reports are A-share only; for this Hong Kong ETF proxy, "
-            "use hk_basic/hk_daily fields in the proxy basket for constituent-level context."
+            "This Hong Kong ETF proxy uses AkShare HK security profile industries where available. "
+            "A+H dual-listed holdings query Tushare stock reports with their A-share ticker; "
+            "other holdings use theme-related broker reports by explicit industry keywords."
         )
+    hk_theme_cache: dict[tuple[str, ...], tuple[int, str]] = {}
     for idx, (_, row) in enumerate(top_holdings.iterrows(), 1):
+        a_share_code = str(row.get("a_share_code", "") or "").strip()
+        industry_source = str(row.get("industry_source", "") or "").strip()
+        display_code = f"{row['ts_code']} -> {a_share_code}" if is_hk_proxy and a_share_code else str(row["ts_code"])
+        industry_source_suffix = f" | industry source {industry_source}" if is_hk_proxy and industry_source else ""
         sections.append(
-            f"## Holding {idx}: {row['name']} ({row['ts_code']}) | {per_holding_weight_label} {_format_number(_safe_float(row.get('weight')), suffix='%')} | industry {row['industry']}"
+            f"## Holding {idx}: {row['name']} ({display_code}) | {per_holding_weight_label} {_format_number(_safe_float(row.get('weight')), suffix='%')} | industry {row['industry']}{industry_source_suffix}"
         )
         if is_hk_proxy:
+            stock_report_error = ""
+            if a_share_code:
+                try:
+                    sections.append("[A+H dual-listed; queried stock research with A-share ticker.]")
+                    sections.append(
+                        get_stock_reports(
+                            a_share_code,
+                            start_date,
+                            end_date,
+                            max_reports=max_reports_per_stock,
+                        )
+                    )
+                    continue
+                except DataVendorUnavailable as exc:
+                    stock_report_error = str(exc)
+
+            keywords = _hk_industry_to_broker_keywords(str(row.get("industry", "")))
+            if keywords:
+                cached = hk_theme_cache.get(keywords)
+                if cached is not None:
+                    cached_idx, cached_report = cached
+                    sections.append(
+                        f"[Theme-related industry reports reused from Holding {cached_idx}; not constituent-level coverage.]"
+                    )
+                    sections.append(cached_report)
+                    continue
+                try:
+                    broker_kwargs = {
+                        "max_reports": max_reports_per_stock,
+                        "extra_ind_names": list(keywords),
+                        "_skip_industry_resolution": True,
+                    }
+                    if not a_share_code:
+                        broker_kwargs["_skip_market_check"] = True
+                    report = get_broker_reports(
+                        a_share_code or row["ts_code"],
+                        start_date,
+                        end_date,
+                        **broker_kwargs,
+                    )
+                    hk_theme_cache[keywords] = (idx, report)
+                    if stock_report_error:
+                        sections.append(
+                            "[A+H dual-listed, but A-share stock research was unavailable; "
+                            "falling back to theme-related industry reports, not constituent-level coverage. "
+                            f"Reason: {stock_report_error}]"
+                        )
+                    else:
+                        sections.append("[Theme-related industry reports; not constituent-level coverage.]")
+                    sections.append(report)
+                    continue
+                except DataVendorUnavailable as exc:
+                    sections.append(f"No theme-related industry research was available for this holding: {exc}")
+
             latest_close = _safe_float(row.get("latest_close"))
             latest_pct = _safe_float(row.get("latest_pct_chg"))
             latest_date = str(row.get("latest_trade_date", "") or "N/A")
