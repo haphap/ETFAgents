@@ -13,26 +13,41 @@ from etfagents.content_utils import extract_text_content
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
 logger = logging.getLogger(__name__)
 
-_STRUCTURED_ONLY_PROMPT_PATTERNS = (
-    re.compile(
-        r"(?:In addition to the prose sections,\s*)?populate the structured fields [^.!\n]*[.!\n]?\s*",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"For structured triggers,\s*prefer supported metrics [^.!\n]*[.!\n]?\s*",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"Never expose machine-readable field names [^.!\n]*[.!\n]?\s*",
-        re.IGNORECASE,
-    ),
+STRUCTURED_FIELD_POPULATION_INSTRUCTION = (
+    "In addition to the prose sections, populate the structured fields "
+    "target_weight_pct, target_weight_band, execution_timing, add_triggers, "
+    "reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls "
+    "whenever the evidence supports them; use null or empty lists only when "
+    "the reports truly do not justify reliable values."
+)
+STRUCTURED_TRIGGER_METRICS_INSTRUCTION = (
+    "For structured triggers, prefer supported metrics such as close, open, "
+    "high, low, volume, sma_20, close_50_sma, volume_ratio_20d, pnl_pct, "
+    "and weight_pct."
+)
+STRUCTURED_FIELD_VISIBILITY_INSTRUCTION = (
+    "Never expose machine-readable field names such as target_weight_pct, "
+    "target_weight_band, execution_timing, add_triggers, reduce_triggers, "
+    "exit_triggers, rebalance_triggers, or risk_controls in the visible prose."
+)
+_STRUCTURED_ONLY_PROMPT_SENTENCES = (
+    STRUCTURED_FIELD_POPULATION_INSTRUCTION,
+    STRUCTURED_TRIGGER_METRICS_INSTRUCTION,
+    STRUCTURED_FIELD_VISIBILITY_INSTRUCTION,
 )
 
 
 def _strip_structured_only_text(text: str) -> str:
+    """Remove shared structured-only sentences and lightly normalize whitespace.
+
+    This targets the shared prompt sentences reused by Trader and Portfolio
+    Manager when structured output is available. After stripping them, it
+    collapses runs of 3+ newlines and repeated spaces/tabs so the fallback
+    prompt remains readable even when whole sentences were removed mid-block.
+    """
     cleaned = text or ""
-    for pattern in _STRUCTURED_ONLY_PROMPT_PATTERNS:
-        cleaned = pattern.sub("", cleaned)
+    for sentence in _STRUCTURED_ONLY_PROMPT_SENTENCES:
+        cleaned = cleaned.replace(sentence, "")
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
     return cleaned.strip()
@@ -62,6 +77,9 @@ def build_prose_only_fallback_prompt(prompt: Any, extra_instruction: str = "") -
     plain model may surface those field names in the visible prose. This helper
     strips the structured-only instructions and optionally appends a prose-format
     reminder tailored to the fallback path.
+
+    For list/tuple chat-style prompts, the extra instruction is appended to the
+    first system message only; if no system message exists, one is prepended.
     """
     cleaned_prompt = _transform_prompt_strings(prompt, _strip_structured_only_text)
     extra = (extra_instruction or "").strip()
