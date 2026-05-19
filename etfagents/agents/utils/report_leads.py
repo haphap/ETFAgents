@@ -95,6 +95,8 @@ def has_invalid_opening_cap(
         return True
     if reject_meta and contains_meta_openers(first_line):
         return True
+    if reject_meta and contains_self_referential_meta_leads(first_line):
+        return True
     return False
 
 
@@ -303,6 +305,40 @@ def _looks_like_structural_line(line: str) -> bool:
     return bool(re.match(r"^(?:[-*+]\s+|\d+[.)、]\s+|>{1,}\s*)", stripped))
 
 
+def find_top_sections_missing_leads(report: str, required_marks: tuple[str, ...] = ()) -> list[str]:
+    """Return top-level Chinese sections that jump straight into structure."""
+    lines = (report or "").replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    required = set(required_marks)
+    missing: list[str] = []
+
+    for index, raw_line in enumerate(lines):
+        match = re.match(r"^\s*([一二三四五六七八九十]+)、", raw_line.strip())
+        if not match:
+            continue
+        mark = match.group(1)
+        if required and mark not in required:
+            continue
+
+        has_lead = False
+        cursor = index + 1
+        while cursor < len(lines):
+            stripped = lines[cursor].strip()
+            cursor += 1
+            if not stripped:
+                continue
+            if re.match(r"^[一二三四五六七八九十]+、", stripped):
+                break
+            if _looks_like_structural_line(stripped):
+                break
+            has_lead = True
+            break
+
+        if not has_lead:
+            missing.append(mark)
+
+    return missing
+
+
 def _strip_box_edge_line(line: str) -> str:
     stripped = (line or "").strip()
     if _looks_like_markdown_table_line(stripped):
@@ -346,7 +382,7 @@ def normalize_boxed_text_wrapping(report: str) -> str:
 
 _SELF_REFERENTIAL_META_LEAD_RE = re.compile(
     r"(?m)^\s*(?:（[^）]*）)?\s*"
-    r"(?:本节|本部分|该部分|这一节|本段|本文|本章节)"
+    r"(?:本节|本部分|该部分|这一节|本段|本文|本章|本章节)"
     r"(?:核心结论|章节导语|导语|锁定|聚焦|讨论|围绕|分析|探讨|旨在|将|主要|重点|结论|说明|指出|表明|认为|阐述|梳理|审视|检视)"
     r"[^\n]*\n?"
 )

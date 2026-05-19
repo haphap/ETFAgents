@@ -140,6 +140,28 @@ class StaticValidateTests(unittest.TestCase):
             msg=verdict_ok.missing_elements,
         )
 
+    def test_required_top_section_leads_recorded(self):
+        spec = AnalystReportSpec(
+            analyst_name="holdings_industry",
+            required_top_sections=("一", "二"),
+            require_top_section_leads=True,
+        )
+        report = (
+            "行业报告显示盈利修复仍需价格验证。\n\n"
+            "一、行业主线与分歧焦点\n"
+            "（一）共识主线\n"
+            "报告内容。\n\n"
+            "二、景气、政策与产业链验证\n"
+            "券商分歧集中在库存去化和政策传导速度。\n\n"
+            "（一）景气与价格对比\n"
+            "报告内容。"
+        )
+
+        verdict = static_validate(report, spec)
+
+        self.assertTrue(any("一" in item and "章节导语" in item for item in verdict.missing_elements))
+        self.assertFalse(any("二" in item and "章节导语" in item for item in verdict.missing_elements))
+
 
 class ParseJudgeJsonTests(unittest.TestCase):
     def test_strict_passed_payload_parsed(self):

@@ -32,6 +32,7 @@ from etfagents.agents.utils.report_leads import (
     contains_meta_openers,
     contains_qa_label_artifacts,
     contains_self_referential_meta_leads,
+    find_top_sections_missing_leads,
     starts_without_overview_paragraph,
 )
 from etfagents.agents.utils.structured import (
@@ -60,6 +61,9 @@ class AnalystReportSpec:
 
     required_tail_tokens: tuple[str, ...] = ()
     """Substrings expected near the end of the report (table headers, etc.)."""
+
+    require_top_section_leads: bool = False
+    """Whether every required top-level section must include a prose lead."""
 
     custom_rules_markdown: str = ""
     """Free-form rules forwarded verbatim to the LLM judge prompt."""
@@ -215,6 +219,10 @@ def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
     for need in spec.required_top_sections:
         if need not in section_marks:
             missing.append(f"缺少一级章节『{need}、…』")
+
+    if spec.require_top_section_leads:
+        for mark in find_top_sections_missing_leads(report, spec.required_top_sections):
+            missing.append(f"一级章节『{mark}、…』缺少章节导语")
 
     if _MARKDOWN_H1_RE.search(report):
         issues.append("出现 markdown # H1 标题（应改为正文或中文一级编号）")

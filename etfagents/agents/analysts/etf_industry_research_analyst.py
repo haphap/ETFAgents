@@ -12,6 +12,7 @@ from etfagents.agents.utils.agent_utils import (
 from etfagents.agents.utils.report_leads import (
     collect_top_section_marks,
     contains_markdown_table,
+    find_top_sections_missing_leads,
     get_concise_heading_instruction,
     get_no_process_narration_instruction,
     get_no_title_instruction,
@@ -31,6 +32,8 @@ from etfagents.tool_report_utils import run_tool_report_chain
 
 _REPORT_SPEC = AnalystReportSpec(
     analyst_name="holdings_industry",
+    required_top_sections=("一", "二", "三", "四"),
+    require_top_section_leads=True,
     custom_rules_markdown=(
         "### 内容覆盖\n"
         "- 是否逐份深度分析每份行业报告（而非仅凭标题判断）？\n"
@@ -41,7 +44,8 @@ _REPORT_SPEC = AnalystReportSpec(
     ),
 )
 
-_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS = {"一", "二", "三", "四"}
+_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTION_MARKS = ("一", "二", "三", "四")
+_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS = set(_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTION_MARKS)
 # Anchors must match the section names emitted by the prompt template below.
 _HOLDINGS_INDUSTRY_REQUIRED_MARKERS = ("ETF暴露", "研报总览")
 
@@ -54,6 +58,9 @@ def _looks_like_complete_holdings_industry_report(report: str) -> bool:
 
     section_marks = collect_top_section_marks(content)
     if not _HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS.issubset(section_marks):
+        return False
+
+    if find_top_sections_missing_leads(content, _HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTION_MARKS):
         return False
 
     return (
@@ -106,7 +113,9 @@ def create_etf_industry_research_analyst(llm):
             + get_topic_and_term_style_instruction() + "\n"
             + get_concise_heading_instruction() + "\n"
             "撰写全面的Markdown报告。保持视觉节奏紧凑，与其他分析师报告一致："
-            "每个一级章节（一、二、三、四）以1-2句导语开头，然后直接进入子章节，仅使用标准markdown分隔。"
+            "每个一级章节（一、二、三、四）必须按'一级标题 -> 1-2句结论导语 -> 子章节标题'的顺序输出。"
+            "章节导语必须是带券商证据、ETF权重或配置含义的结论句，不是任务说明；"
+            "不得写'本章''本节''本部分''旨在''梳理''等自指式导语，也不得写'导语：'标签。"
             "不得在章节导语与首个子章节之间插入额外空行、重复标题行或松散填充。\n\n"
             "一、行业主线与分歧焦点\n"
             "  （一）共识主线\n\n"
@@ -134,7 +143,7 @@ def create_etf_industry_research_analyst(llm):
             "- 直接以最重要的行业共识或分歧发现开篇。"
             "不得以'本报告将…'、'以下是…'、'本分析基于…'、'This report provides…'等元描述开头。\n"
             "- 标题导语与每个一级章节导语直接陈述结论。"
-            "不得使用'本节''本部分''该部分''这一节'等自指式开头（如'本节核心结论指出''本部分结论表明''该部分说明'）。\n"
+            "不得使用'本章''本节''本部分''该部分''这一节'等自指式开头（如'本章旨在梳理''本节核心结论指出''本部分结论表明''该部分说明'）。\n"
             "- 当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用'分别为'连接，不得逐个单独陈述。\n"
             "- 若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出'数据缺失''数据不足'等提示。\n"
             "- 导语段落必须高于子章节层面：综合更广泛的ETF暴露、风格、周期敏感度、估值/风险传导和配置含义。"

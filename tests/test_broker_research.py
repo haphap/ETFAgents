@@ -162,8 +162,8 @@ class ETFIndustryResearchAnalystTests(unittest.TestCase):
 
         system_msg = captured_args.get("system_message", "")
         self.assertIn("Do NOT write a report title or H1 heading", system_msg)
-        self.assertIn("不得使用'本节''本部分''该部分''这一节'等自指式开头", system_msg)
-        self.assertIn("1-2句导语开头", system_msg)
+        self.assertIn("不得使用'本章''本节''本部分''该部分''这一节'等自指式开头", system_msg)
+        self.assertIn("一级标题 -> 1-2句结论导语 -> 子章节标题", system_msg)
         self.assertIn("数据源分类噪声", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
