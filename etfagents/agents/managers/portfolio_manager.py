@@ -25,6 +25,7 @@ from etfagents.agents.utils.analysis_memory import (
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value, with_state_aliases
 from etfagents.agents.schemas import PortfolioDecision, render_portfolio_decision
 from etfagents.agents.utils.structured import (
+    build_prose_only_fallback_prompt,
     bind_structured,
     invoke_structured_or_freetext_with_result,
 )
@@ -205,6 +206,14 @@ Be decisive and ground every conclusion in specific evidence from the analysts. 
 Only after the three sections above, append a feedback block in this exact format:
 {get_snapshot_template()}
 {get_snapshot_writing_instruction()}{get_language_instruction()}"""
+        fallback_prompt = build_prose_only_fallback_prompt(
+            prompt,
+            extra_instruction=(
+                "Free-text fallback mode: write only the visible report using the exact heading order above. "
+                "Do not output schema/backtest field names, parameter mappings, trigger arrays, or field-value tables. "
+                "When writing in Chinese, keep `持仓建议` split into exactly `（一）评级` and `（二）建议`."
+            ),
+        )
 
         rendered_content, structured_result = invoke_structured_or_freetext_with_result(
             structured_llm,
@@ -223,6 +232,7 @@ Only after the three sections above, append a feedback block in this exact forma
                 ),
             ),
             "Portfolio Manager",
+            fallback_prompt=fallback_prompt,
         )
         normalized_content = normalize_chinese_manager_terms(rendered_content)
         portfolio_backtest_signal = build_portfolio_backtest_signal(

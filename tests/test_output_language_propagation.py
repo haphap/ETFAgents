@@ -1378,6 +1378,40 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("目标仓位维持30%", normalized)
         self.assertIn("继续跟踪成交额与折溢价变化", normalized)
 
+    def test_manager_normalization_strips_wrapped_schema_field_dump_and_field_table(self):
+        normalized = normalize_chinese_manager_terms(
+            "## 持仓建议\n"
+            "### （一）评级\n"
+            "研究结论: **增持**\n"
+            "### （二）建议\n"
+            "先维持4%至5%的基础仓位，等待宏观与量价确认。\n\n"
+            "1.target_weight_pct设定为4%；target_weight_band划定在4%至5%的基础区间，"
+            "加仓后动态上调至7%；execution_timing锚定5月下旬社零与工业产出数据公布后的观察期；"
+            "add_triggers包含单日成交量突破近20日均量1.3倍、MACD柱状图维持0.003正值；"
+            "reduce_triggers设定为价格回测1.115元布林中轨受阻回落；"
+            "exit_triggers明确为价格有效跌破1.085元绝对止损位；"
+            "rebalance_triggers触发于前十大持仓集中度突破1.50%；"
+            "risk_controls涵盖动态网格轮动机制与单日波动率ATR。\n"
+            "2.\n"
+            "字段标识  设定值/触发条件              说明\n"
+            "────────────────────────────────────────\n"
+            "目标仓位  4%—5%（初始）/ 7%（加仓后）  基于宏观缓冲与盈利拐点的基准配置区间\n\n"
+            "继续跟踪成交量与份额变化。"
+        )
+
+        self.assertNotIn("target_weight_pct", normalized)
+        self.assertNotIn("target_weight_band", normalized)
+        self.assertNotIn("execution_timing", normalized)
+        self.assertNotIn("add_triggers", normalized)
+        self.assertNotIn("reduce_triggers", normalized)
+        self.assertNotIn("exit_triggers", normalized)
+        self.assertNotIn("rebalance_triggers", normalized)
+        self.assertNotIn("risk_controls", normalized)
+        self.assertNotIn("字段标识", normalized)
+        self.assertNotIn("设定值/触发条件", normalized)
+        self.assertIn("先维持4%至5%的基础仓位", normalized)
+        self.assertIn("继续跟踪成交量与份额变化", normalized)
+
     def test_collaboration_stop_instruction_prefers_chinese_display(self):
         instruction = get_localized_final_proposal_instruction()
         self.assertIn("研究结论: **买入/增持/持有/减持/卖出**", instruction)

@@ -4,6 +4,7 @@ from langchain_core.messages import AIMessage
 
 from etfagents.agents.schemas import TraderProposal, render_trader_proposal
 from etfagents.agents.utils.structured import (
+    build_prose_only_fallback_prompt,
     bind_structured,
     invoke_structured_or_freetext_with_result,
 )
@@ -61,6 +62,15 @@ _TRADER_TAIL_EXECUTION_BIAS_RE = re.compile(
     r"(?im)(?P<prefix>^|[\n。！？!?；;])\s*"
     r"(?:执行倾向|最终配置建议|最终交易建议|研究结论|配置评级|评级)"
     r"\s*[:：]\s*\**(?P<rating>买入|增持|持有|减持|卖出)\**[。！!？?\s]*$"
+)
+
+_TRADER_FREETEXT_FALLBACK_INSTRUCTION = (
+    "Free-text fallback mode: write the final visible report directly, not hidden schema fields. "
+    "Use exactly four top-level sections in this order: "
+    "`一、[一句话配置逻辑标题]`, `二、配置执行计划`, `三、再平衡与风险控制`, `四、执行倾向`. "
+    "In section `四、执行倾向`, put only the final rating on the next line as `**买入/增持/持有/减持/卖出**` when writing in Chinese, "
+    "or `**BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL**` when writing in English. "
+    "Do not output parameter mappings, field-value tables, machine-readable field names, or trigger arrays."
 )
 
 
@@ -133,6 +143,10 @@ def create_trader(llm):
               },
             context,
         ]
+        fallback_messages = build_prose_only_fallback_prompt(
+            messages,
+            extra_instruction=_TRADER_FREETEXT_FALLBACK_INSTRUCTION,
+        )
 
         rendered_result, structured_result = invoke_structured_or_freetext_with_result(
             structured_llm,
@@ -140,6 +154,7 @@ def create_trader(llm):
             messages,
             functools.partial(render_trader_proposal, context_text=market_flow_report),
             "Trader",
+            fallback_prompt=fallback_messages,
         )
         rendered_result = _demote_trader_h1_headings(
             normalize_chinese_manager_terms(rendered_result)

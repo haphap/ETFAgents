@@ -2455,13 +2455,13 @@ _MANAGER_INSTRUCTION_INLINE_PATTERNS = (
 )
 
 _MANAGER_SCHEMA_FIELD_LINE_RE = re.compile(
-    r"\b(?:target_weight_pct|target_weight_band|execution_timing|add_triggers|reduce_triggers|exit_triggers|rebalance_triggers|risk_controls)\b"
+    r"(?<![A-Za-z0-9_])(?:target_weight_pct|target_weight_band|execution_timing|add_triggers|reduce_triggers|exit_triggers|rebalance_triggers|risk_controls)(?![A-Za-z0-9_])"
 )
 _MANAGER_STRUCTURED_PARAMETER_BLOCK_START_RE = re.compile(
-    r"(?:结构化(?:参数|字段)|设定值/阈值)"
+    r"(?:结构化(?:参数|字段)|字段标识|设定值/阈值|设定值/触发条件)"
 )
 _MANAGER_STRUCTURED_PARAMETER_ROW_RE = re.compile(
-    r"(?:设定值|阈值|目标仓位|执行倾向|加仓触发|减仓触发|退出触发|再平衡|风险控制|风控)"
+    r"(?:字段标识|设定值|触发条件|阈值|说明|目标仓位|目标权重|执行时机|执行倾向|加仓触发|减仓触发|退出触发|再平衡|风险控制|风控)"
 )
 # Used only to stop table-block skipping when a real prose section resumes.
 _MARKDOWN_OR_CHINESE_SECTION_HEADING_RE = re.compile(
@@ -2611,7 +2611,6 @@ def strip_manager_instruction_leakage(text: str) -> str:
     for pattern in _MANAGER_INSTRUCTION_INLINE_PATTERNS:
         cleaned = pattern.sub("", cleaned)
     cleaned = _strip_structured_parameter_blocks(cleaned)
-    cleaned = _hide_manager_machine_metric_names(cleaned)
     filtered_lines = []
     for raw_line in cleaned.splitlines():
         stripped = raw_line.strip()
@@ -2627,6 +2626,7 @@ def strip_manager_instruction_leakage(text: str) -> str:
             continue
         filtered_lines.append(raw_line)
     cleaned = "\n".join(filtered_lines)
+    cleaned = _hide_manager_machine_metric_names(cleaned)
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
     return cleaned.strip()
 
