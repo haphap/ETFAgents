@@ -692,7 +692,7 @@ class ETFExtensionTests(unittest.TestCase):
         tencent = frame[frame["ts_code"] == "00700.HK"].iloc[0]
         smic = frame[frame["ts_code"] == "00981.HK"].iloc[0]
         self.assertEqual(tencent["industry"], "互联网服务")
-        self.assertEqual(tencent["industry_source"], "akshare 所属行业")
+        self.assertEqual(tencent["industry_source"], "akshare profile industry")
         self.assertEqual(smic["a_share_code"], "688981.SH")
 
     @patch("etfagents.agents.utils.etf_data_tools._lookup_akshare_hk_industry", return_value="")
@@ -864,6 +864,62 @@ class ETFExtensionTests(unittest.TestCase):
             "2026-01-15",
             "2026-05-15",
             max_reports=5,
+        )
+
+    @patch("etfagents.agents.utils.etf_data_tools.get_broker_reports")
+    @patch("etfagents.agents.utils.etf_data_tools.get_stock_reports")
+    @patch("etfagents.agents.utils.etf_data_tools._lookup_akshare_hk_industry", return_value="")
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_hk_proxy_top_holdings_explains_dual_listed_stock_report_failover(
+        self,
+        mock_query,
+        _mock_lookup_akshare_hk_industry,
+        mock_get_stock_reports,
+        mock_get_broker_reports,
+    ):
+        def _fake_query(api_name, **params):
+            if api_name == "fund_portfolio":
+                return pd.DataFrame()
+            if api_name == "fund_basic":
+                return pd.DataFrame(
+                    [
+                        {
+                            "ts_code": "513130.SH",
+                            "name": "恒生科技ETF华泰柏瑞",
+                            "market": "SH",
+                            "fund_type": "ETF",
+                            "invest_type": "QDII",
+                            "benchmark": "恒生科技指数",
+                        }
+                    ]
+                )
+            if api_name == "hk_basic":
+                return pd.DataFrame([{"ts_code": params["ts_code"], "name": params["ts_code"]}])
+            if api_name == "hk_daily":
+                return pd.DataFrame([{"trade_date": "20260515", "close": 100.0, "pct_chg": 0.5}])
+            raise AssertionError(f"Unexpected api_name: {api_name}")
+
+        mock_query.side_effect = _fake_query
+        mock_get_stock_reports.side_effect = DataVendorUnavailable("No stock research reports found")
+        mock_get_broker_reports.return_value = "# Industry Research Reports for 半导体"
+
+        result = get_etf_top_holdings_research.invoke(
+            {"ticker": "513130.SH", "curr_date": "2026-05-15", "top_n": 8}
+        )
+
+        self.assertIn(
+            "[A+H dual-listed, but A-share stock research was unavailable; "
+            "falling back to theme-related industry reports, not constituent-level coverage. "
+            "Reason: No stock research reports found]",
+            result,
+        )
+        mock_get_broker_reports.assert_any_call(
+            "688981.SH",
+            "2026-01-15",
+            "2026-05-15",
+            max_reports=5,
+            extra_ind_names=["半导体", "电子"],
+            _skip_industry_resolution=True,
         )
 
     @patch("etfagents.agents.utils.etf_data_tools.get_broker_reports")

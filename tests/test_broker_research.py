@@ -402,7 +402,7 @@ class BrokerResearchTushareTests(unittest.TestCase):
 
         mock_client.return_value = MagicMock()
 
-        with self.assertRaisesRegex(DataVendorUnavailable, "Explicit industry keywords"):
+        with self.assertRaisesRegex(DataVendorUnavailable, "_skip_industry_resolution=True"):
             get_broker_reports(
                 "00700.HK",
                 "2026-01-15",

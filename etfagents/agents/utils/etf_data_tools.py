@@ -232,6 +232,8 @@ _HK_INDUSTRY_TO_BROKER_KEYWORDS: dict[str, tuple[str, ...]] = {
     "银行": ("银行",),
     "保险": ("保险", "非银金融"),
 }
+_HK_INDUSTRY_SOURCE_AKSHARE = "akshare profile industry"
+_HK_INDUSTRY_SOURCE_BASKET = "basket fallback industry"
 
 
 def _normalize_indicator_token(indicator: str) -> str:
@@ -358,14 +360,14 @@ def _resolve_a_share_counterpart(hk_code: str) -> str | None:
     return _AH_SHARE_MAP.get(_normalize_ts_code(hk_code))
 
 
+@lru_cache(maxsize=128)
 def _lookup_akshare_hk_industry(hk_code: str) -> str:
-    try:
-        return get_hk_security_industry(hk_code)
-    except Exception:
-        return ""
+    return get_hk_security_industry(hk_code)
 
 
 def _hk_industry_to_broker_keywords(industry: str) -> tuple[str, ...]:
+    # AkShare industry labels do not always match Tushare broker-report
+    # taxonomy. Unknown labels pass through as a best-effort exact keyword.
     normalized = str(industry or "").strip()
     return _HK_INDUSTRY_TO_BROKER_KEYWORDS.get(normalized, (normalized,) if normalized else ())
 
@@ -451,7 +453,7 @@ def _build_hk_benchmark_proxy_frame(
                 "name": metadata["name"],
                 "industry": display_industry,
                 "akshare_industry": akshare_industry,
-                "industry_source": "akshare 所属行业" if akshare_industry else "basket fallback industry",
+                "industry_source": _HK_INDUSTRY_SOURCE_AKSHARE if akshare_industry else _HK_INDUSTRY_SOURCE_BASKET,
                 "a_share_code": _resolve_a_share_counterpart(member_code),
                 "weight": (raw_member_weight / raw_basket_weight * 100.0) if raw_basket_weight > 0 else 0.0,
                 **price,

@@ -74,7 +74,11 @@ def get_hk_security_profile(symbol: str) -> pd.DataFrame:
 
 
 def get_hk_security_industry(symbol: str) -> str:
-    """Return AkShare '所属行业' for a 5-digit HK symbol, or '' when unavailable."""
+    """Return current AkShare '所属行业' for a 5-digit HK symbol, or ''.
+
+    AkShare does not expose a point-in-time industry profile here, so historical
+    backtests should treat this as current metadata rather than dated evidence.
+    """
     try:
         profile = get_hk_security_profile(symbol)
     except DataVendorUnavailable:

@@ -94,7 +94,7 @@ def _resolve_a_share_counterpart(hk_code: str) -> str | None:
 1. 调用 `_resolve_a_share_counterpart(member_code)`，把结果写入 DataFrame 的 `a_share_code` 列
 2. 调用 AkShare helper 获取 `所属行业`，写入 `akshare_industry` 列
 3. 将输出 `industry` 设为 `akshare_industry or metadata["industry"]`
-4. 增加 `industry_source` 列，值为 `akshare 所属行业` 或 `basket fallback industry`
+4. 增加 `industry_source` 列，值为 `akshare profile industry` 或 `basket fallback industry`
 
 该函数的行构建循环（约第 397-405 行）显式构造每行，需在 `rows.append({...})` 中显式新增这些字段。
 
@@ -106,7 +106,7 @@ rows.append(
         "name": metadata["name"],
         "industry": akshare_industry or metadata["industry"],
         "akshare_industry": akshare_industry,
-        "industry_source": "akshare 所属行业" if akshare_industry else "basket fallback industry",
+        "industry_source": "akshare profile industry" if akshare_industry else "basket fallback industry",
         "weight": ...,
         "a_share_code": _resolve_a_share_counterpart(member_code),
         **price,
@@ -142,7 +142,7 @@ rows.append(
 标题中补充行业来源，避免把 AkShare 行业、basket fallback 行业和券商研报行业混为一谈：
 
 ```
-## Holding 2: 腾讯控股 (00700.HK) | proxy-basket weight 10.0% | industry 互联网服务 | industry source akshare 所属行业
+## Holding 2: 腾讯控股 (00700.HK) | proxy-basket weight 10.0% | industry 互联网服务 | industry source akshare profile industry
 ```
 
 输出示例：
@@ -212,7 +212,10 @@ if _skip_industry_resolution:
     industry_source = "explicit industry keywords"
     basic_industry = ""
 elif _skip_market_check and _classify_market(ts_code) != "a_share":
-    raise DataVendorUnavailable("Explicit industry keywords are required for non-A-share broker report search.")
+    raise DataVendorUnavailable(
+        "Non-A-share broker report queries require _skip_industry_resolution=True "
+        "together with explicit extra_ind_names."
+    )
 else:
     industry, industry_source, basic_industry = _resolve_broker_industry_keyword(
         pro, ts_code, start_date, end_date,
@@ -227,6 +230,7 @@ else:
 - 纯 HK representative: `get_broker_reports(hk_code, ..., extra_ind_names=keywords, _skip_market_check=True, _skip_industry_resolution=True)`
 
 这两个参数以 `_` 前缀标记为内部使用，不暴露给 LangChain tool 接口。
+`get_broker_reports()` 不是 LangChain `@tool` 本身；这里的 `_` 前缀是内部调用约定，普通调用方不应传入这些参数。
 
 测试需验证 `_skip_industry_resolution=True` 时，不调用 `stock_basic()`，也不调用用于解析个股 `ind_name` 的 `research_report(ts_code=...)`，只调用 `research_report(ind_name=...)`。
 
@@ -293,6 +297,7 @@ def _hk_industry_to_broker_keywords(industry: str) -> tuple[str, ...]:
 - **不** 动态调用 Tushare `hk_hold` 做实时 A+H 映射（保持硬编码惯例，与 `_HK_BENCHMARK_PROXY_BASKETS` 一致）
 - **不** 为纯港股做逐只个股研报覆盖（Tushare 不支持）
 - **不** 使用 Tushare 个股研报 `ind_name` 反推 HK proxy 行业
+- AkShare `所属行业` 是当前公司资料，不是 point-in-time 分类。历史回测使用 HK proxy 时应将其视为当前元数据近似；若 AkShare 不可用会回退 basket 快照行业，可能改变缓存键中的行业文本。
 - **不** 修改 A 股 ETF 的任何研报逻辑
 - **不** 增加 LLM 调用（Rule 5: 模型仅用于判断）
 - **不** 修改分析师提示词 — 数据来源差异已由工具输出标注自然传达，无需额外的 prompt 引导

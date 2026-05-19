@@ -2001,6 +2001,10 @@ def get_broker_reports(
         end_date: End date in YYYY-MM-DD format
         max_reports: Maximum number of reports to return (default 30)
         extra_ind_names: Additional tushare industry keywords to search and merge.
+        _skip_market_check: Internal ETF proxy escape hatch; callers outside
+            ``etf_data_tools`` should not pass this.
+        _skip_industry_resolution: Internal ETF proxy mode that uses explicit
+            ``extra_ind_names`` without resolving industry from stock reports.
 
     Returns:
         Formatted Markdown string of broker research reports with full abstracts
@@ -2039,7 +2043,8 @@ def get_broker_reports(
         basic_industry = ""
     elif _skip_market_check and market != "a_share":
         raise DataVendorUnavailable(
-            "Explicit industry keywords are required for non-A-share broker report search."
+            "Non-A-share broker report queries require _skip_industry_resolution=True "
+            "together with explicit extra_ind_names."
         )
     else:
         industry, industry_source, basic_industry = _resolve_broker_industry_keyword(
