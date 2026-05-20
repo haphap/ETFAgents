@@ -16,19 +16,16 @@ _console = Console()
 cache_app = typer.Typer(help="Cache management utilities.")
 
 
-class _CacheType(str, Enum):
-    api = "api"
-    signals = "signals"
-    snapshots = "snapshots"
-    checkpoints = "checkpoints"
-
-
 class _CacheTypeAll(str, Enum):
+    # cleanup uses Optional[_CacheTypeAll] (None=all default); clear requires explicit choice including "all"
     api = "api"
     signals = "signals"
     snapshots = "snapshots"
     checkpoints = "checkpoints"
     all = "all"
+
+
+_CacheType = _CacheTypeAll
 
 
 @cache_app.command("stats")
