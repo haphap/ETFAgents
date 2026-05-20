@@ -70,11 +70,55 @@ _TRADER_TAIL_EXECUTION_BIAS_RE = re.compile(
 _TRADER_FREETEXT_FALLBACK_INSTRUCTION = (
     "Free-text fallback mode: write the final visible report directly, not hidden schema fields. "
     "Use exactly four top-level sections in this order: "
-    "`一、[一句话配置逻辑标题]`, `二、配置执行计划`, `三、再平衡与风险控制`, `四、执行倾向`. "
+    "`一、配置逻辑`, `二、配置执行计划`, `三、再平衡与风险控制`, `四、执行倾向`. "
     "In section `四、执行倾向`, put only the final rating on the next line as `**买入/增持/持有/减持/卖出**` when writing in Chinese, "
     "or `**BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL**` when writing in English. "
     "Do not output parameter mappings, field-value tables, machine-readable field names, or trigger arrays."
 )
+
+
+def _normalize_trader_config_logic_heading(text: str) -> str:
+    content = (text or "").strip()
+    if (
+        not content
+        or get_output_language().strip().lower() not in {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
+    ):
+        return content
+
+    lines = content.splitlines()
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*(?:#{1,6}\s*)?)一、\s*(.+?)\s*$", line)
+        if not match:
+            if line.strip():
+                break
+            continue
+
+        heading_prefix = match.group(1)
+        heading_text = match.group(2).strip()
+        if heading_text == "配置逻辑":
+            return content
+
+        lines[index] = f"{heading_prefix}一、配置逻辑"
+        if heading_text not in {"ETF配置逻辑", "配置核心逻辑"}:
+            next_idx = index + 1
+            while next_idx < len(lines) and not lines[next_idx].strip():
+                next_idx += 1
+            should_insert_heading = (
+                next_idx >= len(lines)
+                or re.match(r"^\s*(?:#{1,6}\s*)?二、", lines[next_idx])
+            )
+            if not should_insert_heading:
+                first_body_line = (lines[next_idx] or "").strip()
+                heading_norm = re.sub(r"[。！？!?；;：:\s]+$", "", heading_text)
+                body_norm = re.sub(r"[。！？!?；;：:\s]+$", "", first_body_line)
+                should_insert_heading = not (
+                    heading_norm and body_norm and body_norm.startswith(heading_norm)
+                )
+            if should_insert_heading:
+                lines[index + 1:index + 1] = [heading_text, ""]
+        return collapse_blank_lines("\n".join(lines))
+
+    return content
 
 
 def _restore_trader_execution_bias_section(text: str) -> str:
@@ -82,8 +126,22 @@ def _restore_trader_execution_bias_section(text: str) -> str:
     if (
         not content
         or get_output_language().strip().lower() not in {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
-        or re.search(r"(?m)^\s*四、执行倾向\s*$", content)
     ):
+        return content
+
+    section_match = re.search(r"(?m)^\s*四、执行倾向\s*$", content)
+    if section_match:
+        tail = content[section_match.end():]
+        label_match = re.search(
+            r"(?:执行倾向|最终配置建议|最终交易建议|研究结论|配置评级|评级)"
+            r"\s*[:：]\s*\**(?P<rating>买入|增持|持有|减持|卖出)\**",
+            tail,
+        )
+        bold_match = re.search(r"\**(?P<rating>买入|增持|持有|减持|卖出)\**", tail)
+        rating = (label_match or bold_match).group("rating") if (label_match or bold_match) else ""
+        if rating:
+            body = content[:section_match.start()].rstrip()
+            return collapse_blank_lines(f"{body}\n\n四、执行倾向\n**{rating}**")
         return content
 
     match = _TRADER_TAIL_EXECUTION_BIAS_RE.search(content)
@@ -162,6 +220,7 @@ def create_trader(llm):
         rendered_result = _demote_trader_h1_headings(
             normalize_chinese_manager_terms(rendered_result)
         )
+        rendered_result = _normalize_trader_config_logic_heading(rendered_result)
         rendered_result = _restore_trader_execution_bias_section(rendered_result)
         trader_backtest_signal = build_trader_backtest_signal(
             asset_symbol,

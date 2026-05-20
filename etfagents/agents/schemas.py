@@ -1230,18 +1230,12 @@ def render_trader_proposal(plan: TraderProposal, context_text: str = "") -> str:
     )
     risk_management = strip_constituent_trade_instructions(risk_management)
     if _is_chinese_output():
-        thesis_heading, thesis_body = _split_trader_heading_and_body(thesis)
-        thesis_body = _format_trader_thesis_body(thesis_body)
+        thesis_body = _format_trader_thesis_body(_strip_numbered_heading_prefix(thesis))
         execution_plan = _format_trader_numbered_blocks(execution_plan, "execution")
         risk_management = _format_trader_numbered_blocks(risk_management, "risk")
-        thesis_section = (
-            f"一、{thesis_heading}\n"
-            f"{thesis_body.strip()}\n\n"
-            if thesis_body.strip()
-            else f"一、{thesis_heading}\n\n"
-        )
         return collapse_blank_lines(
-            f"{thesis_section}"
+            "一、配置逻辑\n"
+            f"{thesis_body.strip()}\n\n"
             "二、配置执行计划\n"
             f"{execution_plan}\n\n"
             "三、再平衡与风险控制\n"
