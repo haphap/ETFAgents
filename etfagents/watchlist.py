@@ -214,6 +214,6 @@ class WatchlistManager:
                 if "name" in row and row["name"].strip():
                     return row["name"].strip()
             return ticker
-        except (ValueError, KeyError, IndexError, RuntimeError, ConnectionError, OSError) as exc:
+        except (ValueError, KeyError, IndexError, RuntimeError, OSError) as exc:
             logger.warning("Auto-fill name failed for %s: %s", ticker, exc)
             return ticker

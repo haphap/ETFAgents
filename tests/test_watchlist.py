@@ -187,8 +187,6 @@ class WatchlistManagerTests(unittest.TestCase):
             "560860.SH,工业有色ETF万家\n"
         )
         import unittest.mock
-        with unittest.mock.patch("etfagents.watchlist.WatchlistManager._auto_fill_name") as mock_af:
-            pass
         with unittest.mock.patch("etfagents.dataflows.interface.route_to_vendor", return_value=csv_with_comments):
             with unittest.mock.patch("etfagents.dataflows.config.get_config", return_value=True):
                 name = self.wl._auto_fill_name("560860.SH")
