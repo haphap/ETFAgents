@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import csv
+import io
 import json
+import logging
 import os
 import sqlite3
+from datetime import date
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class WatchlistManager:
@@ -63,6 +69,7 @@ class WatchlistManager:
                 cursor = conn.execute("INSERT INTO groups (name, sort_order) VALUES (?, ?)", (name, sort_order))
             except sqlite3.IntegrityError:
                 raise ValueError(f"Group '{name}' already exists") from None
+            logger.info("Added group '%s'", name)
             return cursor.lastrowid
 
     def remove_group(self, name: str) -> int:
@@ -71,11 +78,19 @@ class WatchlistManager:
             if row is None:
                 return 0
             conn.execute("DELETE FROM groups WHERE id = ?", (row["id"],))
+            logger.info("Removed group '%s' (cascade)", name)
             return 1
 
     def rename_group(self, old_name: str, new_name: str) -> None:
         with self._connect() as conn:
-            conn.execute("UPDATE groups SET name = ? WHERE name = ?", (new_name, old_name))
+            row = conn.execute("SELECT id FROM groups WHERE name = ?", (old_name,)).fetchone()
+            if row is None:
+                raise ValueError(f"Group '{old_name}' does not exist")
+            try:
+                conn.execute("UPDATE groups SET name = ? WHERE id = ?", (new_name, row["id"]))
+            except sqlite3.IntegrityError:
+                raise ValueError(f"Group '{new_name}' already exists") from None
+        logger.info("Renamed group '%s' -> '%s'", old_name, new_name)
 
     def add(self, ticker: str, group: str = "default", tags: list[str] | None = None, notes: str = "", name: str = "") -> None:
         group_id = self._resolve_group_id(group)
@@ -90,6 +105,7 @@ class WatchlistManager:
                 "ON CONFLICT(ticker, group_id) DO UPDATE SET name=excluded.name, tags=excluded.tags, notes=excluded.notes",
                 (ticker, name, group_id, tags_json, notes),
             )
+        logger.info("Added ticker %s to group '%s'", ticker, group)
 
     def remove(self, ticker: str, group: str | None = None) -> int:
         with self._connect() as conn:
@@ -100,7 +116,10 @@ class WatchlistManager:
                 if group_id is None:
                     return 0
                 cursor = conn.execute("DELETE FROM watchlist WHERE ticker = ? AND group_id = ?", (ticker, group_id))
-            return cursor.rowcount
+            count = cursor.rowcount
+        if count:
+            logger.info("Removed ticker %s (%s)", ticker, "all groups" if group is None else f"group '{group}'")
+        return count
 
     def list_tickers(self, group: str | None = None, tags: list[str] | None = None) -> list[dict[str, Any]]:
         with self._connect() as conn:
@@ -115,8 +134,9 @@ class WatchlistManager:
                 params.append(group)
             if tags:
                 for tag in tags:
-                    conditions.append("w.tags LIKE ?")
-                    params.append(f'%"{tag}"%')
+                    conditions.append("w.tags LIKE ? ESCAPE '\\'")
+                    escaped = tag.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                    params.append(f'%"{escaped}"%')
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
             query += " ORDER BY w.added_at"
@@ -174,15 +194,15 @@ class WatchlistManager:
             import copy
             if not get_config():
                 set_config(copy.deepcopy(DEFAULT_CONFIG))
-            csv_text = route_to_vendor("get_etf_info", ticker, None)
+            today_iso = date.today().isoformat()
+            csv_text = route_to_vendor("get_etf_info", ticker, today_iso)
             if not csv_text or "No ETF profile" in csv_text:
                 return ticker
-            for line in csv_text.strip().split("\n"):
-                if line.startswith("#") or not line.strip():
-                    continue
-                parts = line.split(",")
-                if len(parts) >= 2:
-                    return parts[1].strip()
+            reader = csv.DictReader(io.StringIO(csv_text))
+            for row in reader:
+                if "name" in row and row["name"].strip():
+                    return row["name"].strip()
             return ticker
-        except Exception:
+        except (ValueError, KeyError, IndexError, RuntimeError, ConnectionError, OSError) as exc:
+            logger.warning("Auto-fill name failed for %s: %s", ticker, exc)
             return ticker

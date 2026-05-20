@@ -63,7 +63,7 @@ class MemoryCliTests(unittest.TestCase):
         result = self.runner.invoke(app, ["analyze", "--memory-mode", "disabled"])
 
         self.assertEqual(0, result.exit_code, result.stdout)
-        mock_run_analysis.assert_called_once_with(checkpoint=False, memory_mode="disabled")
+        mock_run_analysis.assert_called_once_with(checkpoint=False, memory_mode="disabled", watchlist_group=None)
 
     @patch("cli.main.save_backtest_result")
     @patch("cli.main._preflight_local_backend")

@@ -147,6 +147,21 @@ class WatchlistManagerTests(unittest.TestCase):
         entries = self.wl.list_tickers()
         self.assertEqual(len(entries), 0)
 
+    def test_rename_group_nonexistent_raises(self):
+        with self.assertRaises(ValueError):
+            self.wl.rename_group("不存在", "新名")
+
+    def test_rename_group_duplicate_name_raises(self):
+        self.wl.add_group("行业")
+        self.wl.add_group("宽基")
+        with self.assertRaises(ValueError):
+            self.wl.rename_group("行业", "宽基")
+
+    def test_tag_wildcard_escaped(self):
+        self.wl.add("510300.SH", group="default", tags=["大盘"])
+        entries = self.wl.list_tickers(tags=["大盘%"])
+        self.assertEqual(len(entries), 0)
+
     def test_auto_fill_name_fallback(self):
         name = self.wl._auto_fill_name("INVALID.TICKER")
         self.assertEqual(name, "INVALID.TICKER")
