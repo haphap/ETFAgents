@@ -133,10 +133,12 @@ class WatchlistManager:
                 conditions.append("g.name = ?")
                 params.append(group)
             if tags:
+                tag_conditions = []
                 for tag in tags:
-                    conditions.append("w.tags LIKE ? ESCAPE '\\'")
+                    tag_conditions.append("w.tags LIKE ? ESCAPE '\\'")
                     escaped = tag.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
                     params.append(f'%"{escaped}"%')
+                conditions.append("(" + " OR ".join(tag_conditions) + ")")
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
             query += " ORDER BY w.added_at"
@@ -198,7 +200,12 @@ class WatchlistManager:
             csv_text = route_to_vendor("get_etf_info", ticker, today_iso)
             if not csv_text or "No ETF profile" in csv_text:
                 return ticker
-            reader = csv.DictReader(io.StringIO(csv_text))
+            clean_lines = []
+            for line in csv_text.splitlines():
+                stripped = line.strip()
+                if stripped and not stripped.startswith("#"):
+                    clean_lines.append(line)
+            reader = csv.DictReader(io.StringIO("\n".join(clean_lines)))
             for row in reader:
                 if "name" in row and row["name"].strip():
                     return row["name"].strip()

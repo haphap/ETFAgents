@@ -1,8 +1,12 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from typer.testing import CliRunner
 
 from etfagents.watchlist import WatchlistManager
+from cli.commands.watchlist import watchlist_app
 
 
 class WatchlistManagerTests(unittest.TestCase):
@@ -165,6 +169,49 @@ class WatchlistManagerTests(unittest.TestCase):
     def test_auto_fill_name_fallback(self):
         name = self.wl._auto_fill_name("INVALID.TICKER")
         self.assertEqual(name, "INVALID.TICKER")
+
+    def test_auto_fill_name_with_preamble(self):
+        csv_with_comments = (
+            "# Tushare ETF profile for 560860.SH\n"
+            "# Total records: 1\n"
+            "\n"
+            "ts_code,name\n"
+            "560860.SH,工业有色ETF万家\n"
+        )
+        import unittest.mock
+        with unittest.mock.patch("etfagents.watchlist.WatchlistManager._auto_fill_name") as mock_af:
+            pass
+        with unittest.mock.patch("etfagents.dataflows.interface.route_to_vendor", return_value=csv_with_comments):
+            with unittest.mock.patch("etfagents.dataflows.config.get_config", return_value=True):
+                name = self.wl._auto_fill_name("560860.SH")
+        self.assertEqual(name, "工业有色ETF万家")
+
+    def test_list_tags_any_match(self):
+        self.wl.add("510300.SH", group="default", tags=["大盘"])
+        self.wl.add("159915.SZ", group="default", tags=["成长"])
+        entries = self.wl.list_tickers(tags=["大盘", "成长"])
+        self.assertEqual(len(entries), 2)
+
+
+class WatchlistCliTests(unittest.TestCase):
+    def setUp(self):
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tempdir.name) / "watchlist.db"
+        self.runner = CliRunner()
+
+    def tearDown(self):
+        self.tempdir.cleanup()
+
+    def test_group_rename_positional_args(self):
+        with patch("cli.commands.watchlist.WatchlistManager", lambda: WatchlistManager(db_path=self.db_path)):
+            self.wl = WatchlistManager(db_path=self.db_path)
+            self.wl.add_group("行业")
+            result = self.runner.invoke(watchlist_app, ["group", "rename", "行业", "行业ETF"])
+            self.assertEqual(0, result.exit_code, result.output)
+            groups = self.wl.list_groups()
+            names = [g["name"] for g in groups]
+            self.assertIn("行业ETF", names)
+            self.assertNotIn("行业", names)
 
 
 if __name__ == "__main__":

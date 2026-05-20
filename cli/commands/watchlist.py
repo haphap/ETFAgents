@@ -84,7 +84,7 @@ def watchlist_list(
 def watchlist_group_cmd(
     action: str = typer.Argument(..., help="add|remove|rename|list"),
     name: str = typer.Argument("", help="Group name (empty for list)."),
-    new_name: Optional[str] = typer.Option(None, "--rename", help="New name for rename action."),
+    new_name: Optional[str] = typer.Argument(None, help="New name (for rename action)."),
 ) -> None:
     wl = WatchlistManager()
     if action == "list":
