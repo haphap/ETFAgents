@@ -75,6 +75,9 @@ app.add_typer(memory_app, name="memory")
 from cli.commands.cache import cache_app
 app.add_typer(cache_app, name="cache")
 
+from cli.commands.watchlist import watchlist_app
+app.add_typer(watchlist_app, name="watchlist")
+
 
 def save_backtest_result(result, output_dir):
     from etfagents.backtest import save_backtest_result as _save_backtest_result
@@ -1484,7 +1487,7 @@ def update_display(layout, spinner_text=None, stats_handler=None, start_time=Non
     layout["footer"].update(Panel(stats_table, border_style="grey50"))
 
 
-def get_user_selections():
+def get_user_selections(watchlist_group: str | None = None):
     """Get all user selections before starting the analysis display."""
     # Display ASCII art welcome message
     with open(Path(__file__).parent / "static" / "welcome.txt", "r", encoding="utf-8") as f:
@@ -1524,16 +1527,27 @@ def get_user_selections():
         return Panel(box_content, border_style="blue", padding=(1, 2))
 
     # Step 1: ETF ticker or candidate pool
-    console.print(
-        create_question_box(
-            "Step 1: ETF Ticker / Candidate Pool",
-            "Enter one ETF ticker, or a comma-separated candidate pool with exchange suffixes when needed (examples: 510300.SH or 510300.SH,159915.SZ,513100.SH)",
-            "510300.SH",
+    if watchlist_group:
+        from etfagents.watchlist import WatchlistManager
+        wl = WatchlistManager()
+        selected_tickers = wl.get_tickers_for_analysis(watchlist_group)
+        if not selected_tickers:
+            console.print(f"[red]Watchlist group '{watchlist_group}' is empty.[/red]")
+            raise typer.Exit(code=1)
+        analysis_mode = "candidate_pool" if len(selected_tickers) > 1 else "single"
+        selected_ticker = selected_tickers[0]
+        console.print(f"[green]Using watchlist group '{watchlist_group}': {', '.join(selected_tickers)}[/green]")
+    else:
+        console.print(
+            create_question_box(
+                "Step 1: ETF Ticker / Candidate Pool",
+                "Enter one ETF ticker, or a comma-separated candidate pool with exchange suffixes when needed (examples: 510300.SH or 510300.SH,159915.SZ,513100.SH)",
+                "510300.SH",
+            )
         )
-    )
-    selected_tickers = get_tickers()
-    analysis_mode = "candidate_pool" if len(selected_tickers) > 1 else "single"
-    selected_ticker = selected_tickers[0]
+        selected_tickers = get_tickers()
+        analysis_mode = "candidate_pool" if len(selected_tickers) > 1 else "single"
+        selected_ticker = selected_tickers[0]
 
     # Step 2: Analysis date
     default_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -2401,9 +2415,9 @@ def _format_runtime_failure(exc: Exception, selections: dict) -> str:
     return f"Analysis failed: {message}"
 
 
-def run_analysis(checkpoint: bool = False, memory_mode: str | None = None):
+def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watchlist_group: str | None = None):
     # First get all user selections
-    selections = get_user_selections()
+    selections = get_user_selections(watchlist_group=watchlist_group)
 
     # Create config with selected research depth
     config = copy.deepcopy(DEFAULT_CONFIG)
@@ -2819,7 +2833,8 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None):
 
 @app.command()
 def backtest(
-    tickers: str = typer.Option(..., "--tickers", help="Comma-separated ETF tickers."),
+    tickers: Optional[str] = typer.Option(None, "--tickers", help="Comma-separated ETF tickers."),
+    watchlist: Optional[str] = typer.Option(None, "--watchlist", "-w", help="Use tickers from a watchlist group."),
     benchmark_tickers: Optional[str] = typer.Option(
         None,
         "--benchmark-tickers",
@@ -2845,6 +2860,20 @@ def backtest(
     backend_url: Optional[str] = typer.Option(None, "--backend-url"),
     save_path: Optional[Path] = typer.Option(None, "--save-path"),
 ):
+    if not tickers and not watchlist:
+        console.print("[red]Error: Provide --tickers or --watchlist.[/red]")
+        raise typer.Exit(code=1)
+    if tickers and watchlist:
+        console.print("[red]Error: --tickers and --watchlist are mutually exclusive.[/red]")
+        raise typer.Exit(code=1)
+    if watchlist:
+        from etfagents.watchlist import WatchlistManager
+        wl = WatchlistManager()
+        resolved_tickers = wl.get_tickers_for_analysis(watchlist)
+        if not resolved_tickers:
+            console.print(f"[red]Watchlist group '{watchlist}' is empty.[/red]")
+            raise typer.Exit(code=1)
+        tickers = ",".join(resolved_tickers)
     normalized_tickers = _normalize_ticker_list(tickers)
     normalized_benchmarks = _normalize_benchmark_list(benchmark_tickers)
     if not normalized_tickers:
@@ -3012,13 +3041,18 @@ def analyze(
         "--memory-mode",
         help="disabled, continuity-only, lesson, or full.",
     ),
+    watchlist: Optional[str] = typer.Option(
+        None,
+        "--watchlist", "-w",
+        help="Analyze ETFs from a watchlist group instead of manual input.",
+    ),
 ):
     if clear_checkpoints:
         from etfagents.graph.checkpointer import clear_all_checkpoints
 
         deleted = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {deleted} checkpoint(s).[/yellow]")
-    run_analysis(checkpoint=checkpoint, memory_mode=memory_mode)
+    run_analysis(checkpoint=checkpoint, memory_mode=memory_mode, watchlist_group=watchlist)
 
 
 @memory_app.command("promote-playbook")
