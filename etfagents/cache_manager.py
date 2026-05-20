@@ -11,6 +11,7 @@ from typing import Any
 
 class CacheManager:
     CATEGORIES = ("api", "signals", "snapshots", "checkpoints")
+    _EXCLUDED_API_SUBDIRS: frozenset[str] = frozenset({"shared_snapshots", "checkpoints"})
 
     def __init__(self, config: dict[str, Any]) -> None:
         self._config = config
@@ -20,10 +21,10 @@ class CacheManager:
         self._checkpoint_dir: Path = Path(config["data_cache_dir"]) / "checkpoints"
 
     def stats(self) -> dict[str, Any]:
-        api_count, api_mb = self._dir_stats(self._api_cache_dir, exclude_subdirs={"shared_snapshots", "checkpoints"})
+        api_count, api_mb = self._dir_stats(self._api_cache_dir, exclude_subdirs=self._EXCLUDED_API_SUBDIRS)
         api_subdirs = sorted(
             p.name for p in self._api_cache_dir.iterdir()
-            if p.is_dir() and p.name not in ("shared_snapshots", "checkpoints")
+            if p.is_dir() and p.name not in self._EXCLUDED_API_SUBDIRS
         ) if self._api_cache_dir.is_dir() else []
 
         sig_count, sig_mb = self._dir_stats(self._signal_cache_dir)
@@ -54,7 +55,7 @@ class CacheManager:
 
         for cat in categories:
             if cat == "api":
-                deleted, freed = self._cleanup_dir(self._api_cache_dir, days, exclude_subdirs={"shared_snapshots", "checkpoints"})
+                deleted, freed = self._cleanup_dir(self._api_cache_dir, days, exclude_subdirs=self._EXCLUDED_API_SUBDIRS)
             elif cat == "signals":
                 deleted, freed = self._cleanup_dir(self._signal_cache_dir, days)
             elif cat == "snapshots":
@@ -101,10 +102,10 @@ class CacheManager:
             return {"deleted_files": count, "freed_mb": round(size_mb, 2)}
 
         if category == "api":
-            count, size_mb = self._dir_stats(self._api_cache_dir, exclude_subdirs={"shared_snapshots", "checkpoints"})
+            count, size_mb = self._dir_stats(self._api_cache_dir, exclude_subdirs=self._EXCLUDED_API_SUBDIRS)
             if self._api_cache_dir.is_dir():
                 for entry in list(self._api_cache_dir.iterdir()):
-                    if entry.is_dir() and entry.name in ("shared_snapshots", "checkpoints"):
+                    if entry.is_dir() and entry.name in self._EXCLUDED_API_SUBDIRS:
                         continue
                     if entry.is_dir():
                         shutil.rmtree(entry)
@@ -116,7 +117,7 @@ class CacheManager:
 
     def details(self, category: str, page: int = 1, page_size: int = 20) -> dict[str, Any]:
         if category == "api":
-            paths = list(self._walk_dir(self._api_cache_dir, exclude_subdirs={"shared_snapshots", "checkpoints"}))
+            paths = list(self._walk_dir(self._api_cache_dir, exclude_subdirs=self._EXCLUDED_API_SUBDIRS))
         elif category == "signals":
             paths = list(self._walk_dir(self._signal_cache_dir))
         elif category == "snapshots":
