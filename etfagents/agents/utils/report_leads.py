@@ -118,8 +118,9 @@ def get_topic_and_term_style_instruction() -> str:
         " Make the opening sentence concise and thesis-led, with the same sharpness a strong title would have, rather than using generic scene-setting. "
         "Do NOT start the opening paragraph with a standalone conclusion label such as '结论：偏多' or '结论：偏空' — weave the directional stance into the body of the paragraph naturally. "
         "Do NOT use '（导语）' as a label before introductory paragraphs. "
-        "When explaining technical terms, weave the explanation into the sentence where the term first appears — "
-        "do NOT collect multiple term definitions into a single parenthetical block such as '（附首次出现关键术语的白话解释：...）' or '（关键术语交易含义速览：...）'. "
+        "When explaining technical terms, weave the explanation into the sentence where the term first appears without parentheses — "
+        "do NOT write inline parenthetical definitions such as '10日EMA（指数移动平均线，...）', "
+        "and do NOT collect multiple term definitions into a single parenthetical block such as '（附首次出现关键术语的白话解释：...）' or '（关键术语交易含义速览：...）'. "
         "In Chinese output, do NOT lean on a single repeated word such as '反噬'; vary the wording with precise alternatives like '利润挤压', '成本倒逼', '负反馈', '传导受阻', or '盈利受压' when the context fits."
     )
 
@@ -461,6 +462,13 @@ _OPENING_TERM_EXPLANATION_RE = re.compile(
     r"英文|简称|又称|全称|定义|解释|白话|术语|交易含义"
     r")[^）]{0,140}）"
 )
+_INLINE_TECHNICAL_TERM_EXPLANATION_RE = re.compile(
+    r"(?P<term>(?:EMA|SMA|MACD|RSI|ATR|VWMA|NAV|仓单|升水|贴水|基差|贝塔|久期|溢价|折价|溢折价))"
+    r"（[^）]{0,140}(?:"
+    r"是指|指的是|即|也就是|意思是|通俗|简单说|简单来说|用于|用来|衡量|反映|代表|表示|"
+    r"英文|简称|又称|全称|定义|解释|白话|术语|交易含义|移动平均|指数移动|加权|平均线"
+    r")[^）]{0,140}）"
+)
 _DECISION_LABEL_LINE_RE = re.compile(
     r"(?im)^\s*"
     r"(?:final allocation proposal|final transaction proposal|execution bias|recommendation|rating|research view"
@@ -572,6 +580,15 @@ def strip_opening_term_explanations(report: str) -> str:
     rest = report[match.start() :]
     opening = _OPENING_TERM_EXPLANATION_RE.sub("", opening)
     return collapse_blank_lines(opening + rest)
+
+
+def strip_inline_technical_term_explanations(report: str) -> str:
+    """Remove inline parenthetical definitions after common technical terms."""
+    if not report:
+        return ""
+    return collapse_blank_lines(
+        _INLINE_TECHNICAL_TERM_EXPLANATION_RE.sub(lambda match: match.group("term"), report)
+    )
 
 
 def strip_decision_label_artifacts(report: str) -> str:
@@ -709,6 +726,7 @@ def pre_judge_clean(report: str) -> str:
     cleaned = strip_report_title(cleaned)
     cleaned = strip_qa_labels(cleaned)
     cleaned = strip_opening_term_explanations(cleaned)
+    cleaned = strip_inline_technical_term_explanations(cleaned)
     cleaned = strip_decision_label_artifacts(cleaned)
     cleaned = strip_meta_openers(cleaned)
     cleaned = strip_self_referential_meta_leads(cleaned)

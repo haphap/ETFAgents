@@ -17,6 +17,7 @@ from etfagents.agents.utils.report_leads import (
     post_judge_clean,
     pre_judge_clean,
     strip_artifact_only_lines,
+    strip_inline_technical_term_explanations,
     strip_refine_preamble,
     strip_standalone_term_definition_blocks,
 )
@@ -565,6 +566,17 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertIn("板块景气度：电池正极材料指引开始转弱", cleaned)
         self.assertIn("下一段：成交额放大至昨日两倍", cleaned)
         self.assertNotIn("仓单去化：", cleaned)
+
+    def test_inline_technical_parenthetical_definition_is_removed(self):
+        raw = (
+            "价格站上10日EMA（指数移动平均线，对近期价格赋予更高权重，反应更灵敏，反映短期趋势），"
+            "但需等待成交量确认（最近两日缩量）。"
+        )
+
+        cleaned = strip_inline_technical_term_explanations(raw)
+
+        self.assertIn("价格站上10日EMA，但需等待成交量确认（最近两日缩量）。", cleaned)
+        self.assertNotIn("指数移动平均线", cleaned)
 
 
 if __name__ == "__main__":

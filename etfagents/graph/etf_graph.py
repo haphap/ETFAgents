@@ -1,6 +1,6 @@
 import copy
 import re
-from typing import Any, Dict
+from typing import Any, Dict, TYPE_CHECKING
 
 from langgraph.prebuilt import ToolNode
 
@@ -29,15 +29,14 @@ from etfagents.backtest.signals import (
     build_state_backtest_signal,
 )
 from etfagents.backtest.cache import BacktestSignalStore
-from etfagents.backtest.backtrader_engine import (
-    BacktraderBacktestResult,
-    run_candidate_pool_backtest,
-)
 from etfagents.default_config import DEFAULT_CONFIG
 
 from .replay import ReplayResult, run_candidate_pool_replay
 from .etf_setup import ETFGraphSetup
 from .trading_graph import TradingAgentsGraph
+
+if TYPE_CHECKING:
+    from etfagents.backtest.backtrader_engine import BacktraderBacktestResult
 
 
 ETF_DEFAULT_CONFIG = copy.deepcopy(DEFAULT_CONFIG)
@@ -348,8 +347,10 @@ class EtfAgentsGraph(TradingAgentsGraph):
         benchmark_tickers: list[str] | None = None,
         force_refresh: bool = False,
         price_loader=None,
-    ) -> BacktraderBacktestResult:
+    ) -> "BacktraderBacktestResult":
         """Run a formal Backtrader backtest over ranked ETF candidate-pool decisions."""
+        from etfagents.backtest.backtrader_engine import run_candidate_pool_backtest
+
         return run_candidate_pool_backtest(
             self,
             tickers,
