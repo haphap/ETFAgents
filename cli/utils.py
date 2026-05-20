@@ -4,7 +4,12 @@ from typing import List, Optional, Tuple, Dict
 from rich.console import Console
 
 from cli.models import AnalystType
-from etfagents.llm_clients.model_catalog import OLLAMA_MODEL_ALIASES, get_model_options
+from etfagents.llm_clients.model_catalog import (
+    OLLAMA_MODEL_ALIASES,
+    RESEARCH_DEPTH_REQUIREMENTS,
+    get_model_options,
+    recommend_models,
+)
 
 console = Console()
 
@@ -120,6 +125,38 @@ def select_research_depth() -> int:
             questionary.Choice(display, value=value) for display, value in DEPTH_OPTIONS
         ],
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
+        style=questionary.Style(
+            [
+                ("selected", "fg:yellow noinherit"),
+                ("highlighted", "fg:yellow noinherit"),
+                ("pointer", "fg:yellow noinherit"),
+            ]
+        ),
+    ).ask()
+
+    if choice is None:
+        console.print("\n[red]No research depth selected. Exiting...[/red]")
+        exit(1)
+
+    return choice
+
+
+def _depth_desc(depth: str) -> str:
+    """Short description for a research depth level."""
+    req = RESEARCH_DEPTH_REQUIREMENTS.get(depth, {})
+    return f"debate\u00d7{req.get('debate_rounds', '?')}, risk\u00d7{req.get('risk_rounds', '?')}"
+
+
+def select_research_depth_name() -> str:
+    """Interactive selection of research depth by name."""
+    depths = list(RESEARCH_DEPTH_REQUIREMENTS.keys())
+    choice = questionary.select(
+        "Research depth / 研究深度:",
+        choices=[
+            {"name": f"{d} ({_depth_desc(d)})", "value": d}
+            for d in depths
+        ],
+        default="标准",
         style=questionary.Style(
             [
                 ("selected", "fg:yellow noinherit"),
@@ -323,6 +360,50 @@ def select_shallow_thinking_agent(provider, base_url: str = None) -> str:
 def select_deep_thinking_agent(provider, base_url: str = None) -> str:
     """Select deep thinking llm engine using an interactive selection."""
     return _select_model(provider, "deep", base_url)
+
+
+def select_model_strategy(depth: str, provider: str, base_url: str | None = None) -> dict:
+    """Select model strategy: smart recommendation or manual.
+
+    Returns:
+        {"quick": str, "deep": str} with selected model IDs.
+    """
+    rec = recommend_models(depth, provider)
+    can_recommend = rec["quick_model"] is not None or rec["deep_model"] is not None
+
+    if can_recommend:
+        rec_label = f"Smart recommendation ({depth})"
+        choice = questionary.select(
+            "Model selection strategy / 模型选择策略:",
+            choices=[
+                {"name": rec_label, "value": "recommend"},
+                {"name": "Manual selection / 手动选择", "value": "manual"},
+            ],
+            default="recommend",
+            style=questionary.Style(
+                [
+                    ("selected", "fg:cyan noinherit"),
+                    ("highlighted", "fg:cyan noinherit"),
+                    ("pointer", "fg:cyan noinherit"),
+                ]
+            ),
+        ).ask()
+
+        if choice == "recommend":
+            quick_model = rec["quick_model"] or select_shallow_thinking_agent(provider, base_url)
+            deep_model = rec["deep_model"] or select_deep_thinking_agent(provider, base_url)
+            if rec["quick_model"]:
+                console.print(f"[green]Quick model:[/green] {quick_model} ({rec['quick_reason']})")
+            if rec["deep_model"]:
+                console.print(f"[green]Deep model:[/green]  {deep_model} ({rec['deep_reason']})")
+            confirm = questionary.confirm("Accept recommendation?", default=True).ask()
+            if confirm:
+                return {"quick": quick_model, "deep": deep_model}
+
+    # Manual path
+    quick = select_shallow_thinking_agent(provider, base_url)
+    deep = select_deep_thinking_agent(provider, base_url)
+    return {"quick": quick, "deep": deep}
 
 def select_llm_provider() -> tuple[str, str]:
     """Select the LLM provider and its default API endpoint."""

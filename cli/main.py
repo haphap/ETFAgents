@@ -35,6 +35,7 @@ from cli.utils import *
 from cli.announcements import fetch_announcements, display_announcements
 from cli.stats_handler import StatsCallbackHandler
 from etfagents.content_utils import contains_cjk
+from etfagents.llm_clients.model_catalog import get_depth_config
 from etfagents.agents.utils.agent_utils import (
     collapse_blank_lines,
     extract_analyst_decision_summary,
@@ -1586,7 +1587,9 @@ def get_user_selections(watchlist_group: str | None = None):
             "Step 5: Research Depth", "Select your research depth level"
         )
     )
-    selected_research_depth = select_research_depth()
+    research_depth_name = select_research_depth_name()
+    depth_cfg = get_depth_config(research_depth_name)
+    selected_research_depth = depth_cfg["debate_rounds"] if depth_cfg else 1
 
     # Step 6: LLM Provider
     console.print(
@@ -1596,14 +1599,15 @@ def get_user_selections(watchlist_group: str | None = None):
     )
     selected_llm_provider, backend_url = select_llm_provider()
 
-    # Step 7: Thinking agents
+    # Step 7: Thinking agents (smart recommendation or manual)
     console.print(
         create_question_box(
             "Step 7: Thinking Agents", "Select your thinking agents for analysis"
         )
     )
-    selected_shallow_thinker = select_shallow_thinking_agent(selected_llm_provider, backend_url)
-    selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider, backend_url)
+    models = select_model_strategy(research_depth_name, selected_llm_provider, backend_url)
+    selected_shallow_thinker = models["quick"]
+    selected_deep_thinker = models["deep"]
 
     # Step 8: Provider-specific thinking configuration
     thinking_level = None
@@ -1643,6 +1647,7 @@ def get_user_selections(watchlist_group: str | None = None):
         "analysis_date": analysis_date,
         "analysts": selected_analysts,
         "research_depth": selected_research_depth,
+        "research_depth_name": research_depth_name,
         "llm_provider": selected_llm_provider.lower(),
         "backend_url": backend_url,
         "shallow_thinker": selected_shallow_thinker,
@@ -2421,8 +2426,13 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
 
     # Create config with selected research depth
     config = copy.deepcopy(DEFAULT_CONFIG)
-    config["max_debate_rounds"] = selections["research_depth"]
-    config["max_risk_discuss_rounds"] = selections["research_depth"]
+    depth_cfg = get_depth_config(selections.get("research_depth_name", ""))
+    if depth_cfg:
+        config["max_debate_rounds"] = depth_cfg["debate_rounds"]
+        config["max_risk_discuss_rounds"] = depth_cfg["risk_rounds"]
+    else:
+        config["max_debate_rounds"] = selections["research_depth"]
+        config["max_risk_discuss_rounds"] = selections["research_depth"]
     config["quick_think_llm"] = selections["shallow_thinker"]
     config["deep_think_llm"] = selections["deep_thinker"]
     config["backend_url"] = selections["backend_url"]

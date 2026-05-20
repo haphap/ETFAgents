@@ -30,6 +30,7 @@ DEFAULT_CONFIG = {
     # Output language for analyst reports and final decision
     # Internal agent debate stays in English for reasoning quality
     "output_language": "Chinese",
+    "research_depth_name": "标准",
     # Debate and discussion settings
     "max_debate_rounds": 1,
     "max_risk_discuss_rounds": 1,
