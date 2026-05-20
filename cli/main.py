@@ -28,7 +28,6 @@ from rich.rule import Rule
 from urllib.parse import urlparse
 
 from etfagents.graph.etf_graph import EtfAgentsGraph
-from etfagents.backtest import save_backtest_result
 from etfagents.agents.utils.analysis_memory import AnalysisMemoryStore
 from etfagents.default_config import DEFAULT_CONFIG
 from cli.models import AnalystType
@@ -72,6 +71,12 @@ app = typer.Typer(
 )
 memory_app = typer.Typer(help="Structured analysis memory utilities.")
 app.add_typer(memory_app, name="memory")
+
+
+def save_backtest_result(result, output_dir):
+    from etfagents.backtest import save_backtest_result as _save_backtest_result
+
+    return _save_backtest_result(result, output_dir)
 
 
 CHINESE_OUTPUT_VALUES = {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
