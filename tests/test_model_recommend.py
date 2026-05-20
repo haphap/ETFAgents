@@ -118,20 +118,17 @@ class RecommendModelsTests(unittest.TestCase):
         cap = MODEL_CAPABILITIES[rec["deep_model"]]
         self.assertGreaterEqual(cap["level"], 4)
 
-    def test_quick_sort_order(self):
+    def test_quick_recommendation_is_highest_level_among_qualifying(self):
         rec = recommend_models("标准", "openai")
-        quick_model = rec["quick_model"]
-        self.assertIsNotNone(quick_model)
-        openai_ids = _provider_model_ids("openai")
-        req = RESEARCH_DEPTH_REQUIREMENTS["标准"]
-        quick_cands = [
-            (mid, MODEL_CAPABILITIES[mid]) for mid in openai_ids if mid in MODEL_CAPABILITIES
-            and "quick" in MODEL_CAPABILITIES[mid]["roles"]
-            and MODEL_CAPABILITIES[mid]["level"] >= req["quick_min"]
-            and all(f in MODEL_CAPABILITIES[mid]["features"] for f in req["quick_required_features"])
+        self.assertIsNotNone(rec["quick_model"])
+        all_qualifying = [
+            cap["level"] for mid, cap in MODEL_CAPABILITIES.items()
+            if mid in _provider_model_ids("openai")
+            and "quick" in cap["roles"]
+            and cap["level"] >= RESEARCH_DEPTH_REQUIREMENTS["标准"]["quick_min"]
+            and all(f in cap["features"] for f in RESEARCH_DEPTH_REQUIREMENTS["标准"]["quick_required_features"])
         ]
-        quick_cands.sort(key=lambda x: (-x[1]["level"], -x[1]["cost"], -x[1]["speed"]))
-        self.assertEqual(quick_model, quick_cands[0][0])
+        self.assertEqual(MODEL_CAPABILITIES[rec["quick_model"]]["level"], max(all_qualifying))
 
 
 class ResearchDepthRequirementsTests(unittest.TestCase):

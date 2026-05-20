@@ -13,7 +13,19 @@ from etfagents.llm_clients.model_catalog import (
 
 console = Console()
 
-TICKER_INPUT_EXAMPLES = "Examples: 510300.SH, 159915.SZ, 513100.SH"
+_TICKER_INPUT_EXAMPLES = "Examples: 510300.SH, 159915.SZ, 513100.SH"
+
+_PICKER_STYLE_YELLOW = questionary.Style([
+    ("selected", "fg:yellow noinherit"),
+    ("highlighted", "fg:yellow noinherit"),
+    ("pointer", "fg:yellow noinherit"),
+])
+
+_PICKER_STYLE_CYAN = questionary.Style([
+    ("selected", "fg:cyan noinherit"),
+    ("highlighted", "fg:cyan noinherit"),
+    ("pointer", "fg:cyan noinherit"),
+])
 
 ANALYST_ORDER = [
     ("Market & Flow Analyst", AnalystType.MARKET_FLOW),
@@ -125,13 +137,7 @@ def select_research_depth() -> int:
             questionary.Choice(display, value=value) for display, value in DEPTH_OPTIONS
         ],
         instruction="\n- Use arrow keys to navigate\n- Press Enter to select",
-        style=questionary.Style(
-            [
-                ("selected", "fg:yellow noinherit"),
-                ("highlighted", "fg:yellow noinherit"),
-                ("pointer", "fg:yellow noinherit"),
-            ]
-        ),
+        style=_PICKER_STYLE_YELLOW,
     ).ask()
 
     if choice is None:
@@ -157,13 +163,7 @@ def select_research_depth_name() -> str:
             for d in depths
         ],
         default="标准",
-        style=questionary.Style(
-            [
-                ("selected", "fg:yellow noinherit"),
-                ("highlighted", "fg:yellow noinherit"),
-                ("pointer", "fg:yellow noinherit"),
-            ]
-        ),
+        style=_PICKER_STYLE_YELLOW,
     ).ask()
 
     if choice is None:
@@ -380,25 +380,18 @@ def select_model_strategy(depth: str, provider: str, base_url: str | None = None
                 {"name": "Manual selection / 手动选择", "value": "manual"},
             ],
             default="recommend",
-            style=questionary.Style(
-                [
-                    ("selected", "fg:cyan noinherit"),
-                    ("highlighted", "fg:cyan noinherit"),
-                    ("pointer", "fg:cyan noinherit"),
-                ]
-            ),
+            style=_PICKER_STYLE_CYAN,
         ).ask()
 
         if choice == "recommend":
+            # If a role lacks a qualifying model, fall back to manual prompt.
             quick_model = rec["quick_model"] or select_shallow_thinking_agent(provider, base_url)
             deep_model = rec["deep_model"] or select_deep_thinking_agent(provider, base_url)
             if rec["quick_model"]:
                 console.print(f"[green]Quick model:[/green] {quick_model} ({rec['quick_reason']})")
             if rec["deep_model"]:
                 console.print(f"[green]Deep model:[/green]  {deep_model} ({rec['deep_reason']})")
-            confirm = questionary.confirm("Accept recommendation?", default=True).ask()
-            if confirm:
-                return {"quick": quick_model, "deep": deep_model}
+            return {"quick": quick_model, "deep": deep_model}
 
     # Manual path
     quick = select_shallow_thinking_agent(provider, base_url)
