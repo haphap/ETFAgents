@@ -25,6 +25,7 @@ from etfagents.agents.utils.validate_refine import (
     AnalystReportSpec,
     JudgeVerdict,
     StaticVerdict,
+    _build_judge_prompt,
     _merge_verdicts,
     _parse_judge_json,
     static_validate,
@@ -577,6 +578,37 @@ class CleaningOrderingTests(unittest.TestCase):
 
         self.assertIn("价格站上10日EMA，但需等待成交量确认（最近两日缩量）。", cleaned)
         self.assertNotIn("指数移动平均线", cleaned)
+
+    def test_clean_generated_report_removes_meso_preamble_glossary_and_action_guide(self):
+        raw = (
+            "【核心结论与前置指引】\n"
+            "工业金属链条仍偏强，但焦煤仓单去化是验证需求扩散的关键。\n\n"
+            "（注：为统一分析口径，本报告核心术语界定如下：“仓单”指交易所指定交割仓库签发的大宗商品标准所有权凭证，"
+            "直接映射实物库存水平；“持仓”指未平仓合约总量，表征多空资金博弈强度与趋势持续性；"
+            "“补库”指产业链企业为匹配预期终端需求而主动增加上游原材料采购的周期行为；"
+            "“ETF”指交易所交易基金，此处特指跟踪工业金属与矿业产业链的被动型指数产品。）\n\n"
+            "一、核心矛盾与主线判断\n"
+            "铜与热卷的强势必须传导到焦煤仓单去化，否则利润上移逻辑不能成立。\n\n"
+            "（交易动作指引：建议采取“底仓配置+动态调仓”策略。基准情景下沿趋势右侧分批建仓；"
+            "替代情景触发时收缩仓位至防御水平；尾部风险出现时执行无差别清仓。）"
+        )
+
+        cleaned = clean_generated_report(raw)
+
+        self.assertTrue(cleaned.startswith("工业金属链条仍偏强"))
+        self.assertIn("一、核心矛盾与主线判断", cleaned)
+        self.assertIn("铜与热卷的强势必须传导到焦煤仓单去化", cleaned)
+        self.assertNotIn("核心结论与前置指引", cleaned)
+        self.assertNotIn("本报告核心术语界定", cleaned)
+        self.assertNotIn("交易动作指引", cleaned)
+
+    def test_judge_prompt_requires_integrated_terms_not_glossaries_or_action_labels(self):
+        prompt = _build_judge_prompt("报告正文", _MARKET_SPEC)
+
+        self.assertIn("必要术语说明是否自然融入分析句子", prompt)
+        self.assertIn("配置含义融入正文推理", prompt)
+        self.assertNotIn("所有中文技术术语首次出现时是否用通俗语言解释并说明交易含义", prompt)
+        self.assertNotIn("是否在每个主要信号后回答了「这意味着什么」和「对交易应该怎么做」", prompt)
 
 
 if __name__ == "__main__":
