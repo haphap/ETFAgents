@@ -239,11 +239,13 @@ def _query_pro(api_name: str, **params) -> pd.DataFrame:
     clean_params = {key: value for key, value in params.items() if value is not None}
     ticker = clean_params.get("ts_code", "")
     last_exc: Exception | None = None
+    attempts_executed = 0
     for attempt in range(1, _TUSHARE_QUERY_MAX_ATTEMPTS + 1):
         try:
             return client.query(api_name, **clean_params)
         except Exception as exc:
             last_exc = exc
+            attempts_executed = attempt
             if attempt >= _TUSHARE_QUERY_MAX_ATTEMPTS or not _is_transient_tushare_error(exc):
                 break
             delay = _TUSHARE_QUERY_BACKOFF_SECONDS[min(attempt - 1, len(_TUSHARE_QUERY_BACKOFF_SECONDS) - 1)]
@@ -260,7 +262,7 @@ def _query_pro(api_name: str, **params) -> pd.DataFrame:
     if last_exc is not None:
         raise DataVendorUnavailable(
             f"Tushare query '{api_name}' failed for '{ticker or 'unknown'}' after "
-            f"{_TUSHARE_QUERY_MAX_ATTEMPTS if _is_transient_tushare_error(last_exc) else 1} attempt(s): {last_exc}"
+            f"{attempts_executed} attempt(s): {last_exc}"
         ) from last_exc
     raise DataVendorUnavailable(
         f"Tushare query '{api_name}' failed for '{ticker or 'unknown'}': unknown error"

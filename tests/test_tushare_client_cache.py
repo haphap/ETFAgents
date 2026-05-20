@@ -95,7 +95,26 @@ class TestTushareClientCache(unittest.TestCase):
                 _query_pro("fund_basic", ts_code="560860.SH")
 
         self.assertEqual(client.query.call_count, 3)
-        self.assertEqual([call.args[0] for call in sleep.call_args_list], [0.5, 1.5])
+        self.assertEqual([sleep_call.args[0] for sleep_call in sleep.call_args_list], [0.5, 1.5])
+
+    def test_query_pro_reports_actual_attempt_count_after_mixed_failures(self):
+        from etfagents.dataflows.tushare import DataVendorUnavailable, _query_pro
+
+        client = MagicMock()
+        client.query.side_effect = [
+            ConnectionError("Connection aborted.", ConnectionResetError(104, "Connection reset by peer")),
+            RuntimeError("permission denied"),
+        ]
+
+        with (
+            patch("etfagents.dataflows.tushare._get_pro_client", return_value=client),
+            patch("etfagents.dataflows.tushare.time.sleep") as sleep,
+        ):
+            with self.assertRaisesRegex(DataVendorUnavailable, "after 2 attempt"):
+                _query_pro("fund_basic", ts_code="560860.SH")
+
+        self.assertEqual(client.query.call_count, 2)
+        sleep.assert_called_once_with(0.5)
 
     def test_query_pro_does_not_retry_non_transient_api_error(self):
         from etfagents.dataflows.tushare import DataVendorUnavailable, _query_pro
