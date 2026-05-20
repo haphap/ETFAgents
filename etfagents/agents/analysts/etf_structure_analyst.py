@@ -10,6 +10,7 @@ from etfagents.agents.utils.agent_utils import (
 )
 from etfagents.agents.utils.report_leads import (
     collect_top_section_marks,
+    contains_qa_label_artifacts,
     contains_markdown_table,
     get_concise_heading_instruction,
     get_no_process_narration_instruction,
@@ -87,7 +88,11 @@ def _has_meso_commodity_overview_table_section(report: str) -> bool:
 def _looks_like_complete_meso_commodity_report(report: str) -> bool:
     """Positive contract for accepting meso-commodity output into graph state."""
     content = report or ""
-    if not content.strip() or has_invalid_opening_cap(content):
+    if (
+        not content.strip()
+        or has_invalid_opening_cap(content)
+        or contains_qa_label_artifacts(content)
+    ):
         return False
 
     section_marks = collect_top_section_marks(content)

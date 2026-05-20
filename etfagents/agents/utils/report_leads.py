@@ -56,7 +56,12 @@ OPENING_STRUCTURE_RE = re.compile(
     r"\|"
     r")"
 )
-OPENING_LABEL_RE = re.compile(r"^\s*(?:概述|结论|核心结论|导语)\s*[:：]")
+OPENING_LABEL_RE = re.compile(
+    r"^\s*(?:[【\[]?\s*)?"
+    r"(?:概述|结论|核心结论|导语|前置指引|核心结论与前置指引)"
+    r"\s*(?:[】\]]|[:：])?"
+    r"\s*$|^\s*(?:概述|结论|核心结论|导语)\s*[:：]"
+)
 
 
 def first_nonempty_line(text: str) -> str:
@@ -418,6 +423,9 @@ _LABEL_CUES = (
     "条件情景",
     "结论",
     "核心结论",
+    "前置指引",
+    "核心结论与前置指引",
+    "【核心结论与前置指引】",
     "导语",
     "章节导语",
     "本章节导语",
@@ -448,8 +456,17 @@ _TERM_BLOCK_RE = re.compile(
     r"（(?:附首次出现关键术语|关键术语交易含义速览|关键术语解释|术语速览|术语说明|关键技术[^）]*|技术术语[^）]*|技术指标[^）]*|指标速览[^）]*|指标说明[^）]*)）",
     re.DOTALL,
 )
+_STANDALONE_PARENTHETICAL_GUIDANCE_RE = re.compile(
+    r"(?ms)^\s*"
+    r"[（(]"
+    r"[^）)\n]{0,40}(?:注|术语|口径|定义|解释|指引|交易动作|操作建议)"
+    r"[^）)]*"
+    r"[）)]"
+    r"\s*$\n?"
+)
 _TERM_DEFINITION_PREAMBLE_RE = re.compile(
-    r"为降低.{0,120}(?:技术术语|高频技术术语|术语).{0,80}(?:解释|说明|含义)",
+    r"(?:为降低.{0,120}(?:技术术语|高频技术术语|术语).{0,80}(?:解释|说明|含义)"
+    r"|(?:为统一|统一).{0,80}(?:分析口径|口径|术语界定|术语定义))",
 )
 _TERM_DEFINITION_LINE_RE = re.compile(
     r"(?:[•·]\s*)?[^：:\n]{1,30}[：:].{0,180}(?:是指|指的是|交易含义|市场含义|配置含义)"
@@ -505,6 +522,7 @@ def strip_qa_labels(report: str) -> str:
     cleaned = _LEADING_LABEL_PREFIX_RE.sub(_strip_label_prefix, report)
     cleaned = _QA_LABEL_RE.sub("", cleaned)
     cleaned = _TERM_BLOCK_RE.sub("", cleaned)
+    cleaned = _STANDALONE_PARENTHETICAL_GUIDANCE_RE.sub("", cleaned)
     cleaned = strip_standalone_term_definition_blocks(cleaned)
     return collapse_blank_lines(cleaned)
 
@@ -690,6 +708,8 @@ def contains_qa_label_artifacts(report: str) -> bool:
     if _QA_LABEL_RE.search(report):
         return True
     if _TERM_BLOCK_RE.search(report):
+        return True
+    if _STANDALONE_PARENTHETICAL_GUIDANCE_RE.search(report):
         return True
     return any(
         _TERM_DEFINITION_PREAMBLE_RE.search(_strip_table_artifact_edges(line))

@@ -567,6 +567,20 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
                 "报告已就绪。以下为中观商品策略分析：\n\n" + valid_report
             )
         )
+        self.assertFalse(
+            _looks_like_complete_meso_commodity_report(
+                "【核心结论与前置指引】\n" + valid_report
+            )
+        )
+        self.assertFalse(
+            _looks_like_complete_meso_commodity_report(
+                valid_report.replace(
+                    "一、核心矛盾与主线判断\n",
+                    "（注：为统一分析口径，本报告核心术语界定如下：“仓单”指交易所指定交割仓库签发的大宗商品标准所有权凭证。）\n\n"
+                    "一、核心矛盾与主线判断\n",
+                )
+            )
+        )
 
 
 class EtfMarketAnalystPromptTests(unittest.TestCase):
