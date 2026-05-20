@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Dict, List, Tuple
+from enum import IntEnum
+from typing import Dict, List, Literal, Tuple
 
 ModelOption = Tuple[str, str]
 ProviderModeOptions = Dict[str, Dict[str, List[ModelOption]]]
@@ -10,6 +11,214 @@ ProviderModeOptions = Dict[str, Dict[str, List[ModelOption]]]
 OLLAMA_MODEL_ALIASES = {
     "Qwen3.5-35B-3A": "samuelcardillo/Qwopus-MoE-35B-A3B-GGUF:Q4_K_M",
     "Qwen3.5-35B-A3B": "samuelcardillo/Qwopus-MoE-35B-A3B-GGUF:Q4_K_M",
+}
+
+
+class CapabilityLevel(IntEnum):
+    BASIC = 1
+    STANDARD = 2
+    ADVANCED = 3
+    PROFESSIONAL = 4
+    FLAGSHIP = 5
+
+
+ModelFeature = Literal[
+    "tool_calling", "long_context", "reasoning",
+    "fast_response", "cost_effective",
+]
+
+_SKIP_RECOMMENDATION_PROVIDERS = {"openrouter", "vllm", "ollama"}
+
+MODEL_CAPABILITIES: dict[str, dict] = {
+    # openai
+    "gpt-5.4-mini": {
+        "level": 2, "roles": ["quick", "deep"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 5, "cost": 5, "quality": 2,
+    },
+    "gpt-5.4-nano": {
+        "level": 1, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 5, "cost": 5, "quality": 1,
+    },
+    "gpt-5.4": {
+        "level": 3, "roles": ["quick", "deep"],
+        "features": ["tool_calling", "long_context"],
+        "speed": 3, "cost": 3, "quality": 4,
+    },
+    "gpt-4.1": {
+        "level": 2, "roles": ["quick"],
+        "features": ["tool_calling"],
+        "speed": 4, "cost": 3, "quality": 3,
+    },
+    "gpt-5.2": {
+        "level": 4, "roles": ["deep"],
+        "features": ["tool_calling", "long_context", "reasoning"],
+        "speed": 2, "cost": 2, "quality": 4,
+    },
+    "gpt-5.4-pro": {
+        "level": 5, "roles": ["deep"],
+        "features": ["tool_calling", "long_context", "reasoning"],
+        "speed": 1, "cost": 1, "quality": 5,
+    },
+    # anthropic
+    "claude-haiku-4-5": {
+        "level": 2, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 5, "cost": 4, "quality": 2,
+    },
+    "claude-sonnet-4-5": {
+        "level": 3, "roles": ["quick", "deep"],
+        "features": ["tool_calling", "long_context"],
+        "speed": 3, "cost": 3, "quality": 4,
+    },
+    "claude-sonnet-4-6": {
+        "level": 3, "roles": ["quick", "deep"],
+        "features": ["tool_calling", "long_context"],
+        "speed": 4, "cost": 3, "quality": 4,
+    },
+    "claude-opus-4-5": {
+        "level": 5, "roles": ["deep"],
+        "features": ["tool_calling", "long_context", "reasoning"],
+        "speed": 1, "cost": 1, "quality": 5,
+    },
+    "claude-opus-4-6": {
+        "level": 5, "roles": ["deep"],
+        "features": ["tool_calling", "long_context", "reasoning"],
+        "speed": 2, "cost": 1, "quality": 5,
+    },
+    # google
+    "gemini-2.5-flash": {
+        "level": 2, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 5, "cost": 5, "quality": 2,
+    },
+    "gemini-2.5-flash-lite": {
+        "level": 1, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 5, "cost": 5, "quality": 1,
+    },
+    "gemini-2.5-pro": {
+        "level": 4, "roles": ["deep"],
+        "features": ["tool_calling", "long_context", "reasoning"],
+        "speed": 2, "cost": 2, "quality": 4,
+    },
+    "gemini-3-flash-preview": {
+        "level": 3, "roles": ["quick", "deep"],
+        "features": ["tool_calling", "long_context"],
+        "speed": 4, "cost": 4, "quality": 3,
+    },
+    "gemini-3.1-flash-lite-preview": {
+        "level": 2, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 5, "cost": 5, "quality": 2,
+    },
+    "gemini-3.1-pro-preview": {
+        "level": 4, "roles": ["deep"],
+        "features": ["tool_calling", "long_context", "reasoning"],
+        "speed": 2, "cost": 2, "quality": 4,
+    },
+    # xai
+    "grok-4-fast-non-reasoning": {
+        "level": 2, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 4, "cost": 3, "quality": 2,
+    },
+    "grok-4-1-fast-non-reasoning": {
+        "level": 2, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 4, "cost": 3, "quality": 2,
+    },
+    "grok-4-1-fast-reasoning": {
+        "level": 3, "roles": ["quick", "deep"],
+        "features": ["tool_calling", "reasoning"],
+        "speed": 3, "cost": 2, "quality": 3,
+    },
+    "grok-4-fast-reasoning": {
+        "level": 3, "roles": ["quick", "deep"],
+        "features": ["tool_calling", "reasoning"],
+        "speed": 3, "cost": 2, "quality": 3,
+    },
+    "grok-4-0709": {
+        "level": 5, "roles": ["deep"],
+        "features": ["tool_calling", "long_context", "reasoning"],
+        "speed": 1, "cost": 1, "quality": 5,
+    },
+    # minimax
+    "MiniMax-M2.7-highspeed": {
+        "level": 2, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 5, "cost": 5, "quality": 1,
+    },
+    "MiniMax-M2.5-highspeed": {
+        "level": 2, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 5, "cost": 5, "quality": 1,
+    },
+    "MiniMax-M2.1": {
+        "level": 1, "roles": ["quick"],
+        "features": ["tool_calling"],
+        "speed": 3, "cost": 4, "quality": 1,
+    },
+    "MiniMax-M2.7": {
+        "level": 3, "roles": ["deep"],
+        "features": ["tool_calling"],
+        "speed": 3, "cost": 4, "quality": 3,
+    },
+    "MiniMax-M2.5": {
+        "level": 2, "roles": ["deep"],
+        "features": ["tool_calling"],
+        "speed": 3, "cost": 4, "quality": 2,
+    },
+    "MiniMax-M2": {
+        "level": 2, "roles": ["deep"],
+        "features": ["tool_calling"],
+        "speed": 3, "cost": 4, "quality": 2,
+    },
+    # deepseek
+    "deepseek-v4-flash": {
+        "level": 2, "roles": ["quick"],
+        "features": ["tool_calling", "fast_response", "cost_effective"],
+        "speed": 4, "cost": 5, "quality": 2,
+    },
+    "deepseek-chat": {
+        "level": 3, "roles": ["quick", "deep"],
+        "features": ["tool_calling"],
+        "speed": 3, "cost": 4, "quality": 3,
+    },
+    "deepseek-v4-pro": {
+        "level": 4, "roles": ["deep"],
+        "features": ["tool_calling", "long_context", "reasoning"],
+        "speed": 1, "cost": 3, "quality": 4,
+    },
+    "deepseek-reasoner": {
+        "level": 4, "roles": ["deep"],
+        "features": ["reasoning", "long_context"],
+        "speed": 1, "cost": 3, "quality": 4,
+    },
+}
+
+RESEARCH_DEPTH_REQUIREMENTS: dict[str, dict] = {
+    "快速": {"min_level": 1, "quick_min": 1, "deep_min": 1,
+             "quick_required_features": ["tool_calling"],
+             "deep_required_features": ["tool_calling"],
+             "debate_rounds": 0, "risk_rounds": 0},
+    "基础": {"min_level": 1, "quick_min": 1, "deep_min": 2,
+             "quick_required_features": ["tool_calling"],
+             "deep_required_features": ["tool_calling"],
+             "debate_rounds": 1, "risk_rounds": 0},
+    "标准": {"min_level": 2, "quick_min": 2, "deep_min": 3,
+             "quick_required_features": ["tool_calling"],
+             "deep_required_features": ["tool_calling"],
+             "debate_rounds": 1, "risk_rounds": 1},
+    "深度": {"min_level": 3, "quick_min": 2, "deep_min": 4,
+             "quick_required_features": ["tool_calling"],
+             "deep_required_features": ["tool_calling"],
+             "debate_rounds": 2, "risk_rounds": 2},
+    "全面": {"min_level": 3, "quick_min": 3, "deep_min": 5,
+             "quick_required_features": ["tool_calling"],
+             "deep_required_features": ["tool_calling", "reasoning"],
+             "debate_rounds": 3, "risk_rounds": 3},
 }
 
 
@@ -144,4 +353,114 @@ def get_known_models() -> Dict[str, List[str]]:
             }
         )
         for provider, mode_options in MODEL_OPTIONS.items()
+    }
+
+
+def get_depth_config(depth: str) -> dict | None:
+    """Return debate/risk round configuration for a research depth name."""
+    return RESEARCH_DEPTH_REQUIREMENTS.get(depth)
+
+
+def _provider_model_ids(provider: str) -> set[str]:
+    """Return non-custom static model IDs for a cloud provider."""
+    return {
+        mid
+        for mode_options in MODEL_OPTIONS.get(provider, {}).values()
+        for _, mid in mode_options
+        if mid != "custom"
+    }
+
+
+def recommend_models(
+    depth: str,
+    provider: str | None = None,
+) -> dict:
+    """Recommend optimal quick+deep model pair based on research depth.
+
+    Algorithm:
+    1. Filter MODEL_CAPABILITIES by depth requirements (level, features, roles).
+    2. If provider specified, restrict to models in MODEL_OPTIONS[provider];
+       if provider is None, search across all cloud providers.
+    3. Sort quick candidates by (level DESC, cost DESC, speed DESC).
+    4. Sort deep candidates by (level DESC, quality DESC, cost DESC).
+    5. Return top candidate for each role.
+    """
+    if provider and provider.lower() in _SKIP_RECOMMENDATION_PROVIDERS:
+        return {
+            "quick_model": None,
+            "deep_model": None,
+            "quick_reason": f"Provider '{provider}' uses dynamic/custom models, skip recommendation",
+            "deep_reason": f"Provider '{provider}' uses dynamic/custom models, skip recommendation",
+            "depth": depth,
+        }
+
+    req = RESEARCH_DEPTH_REQUIREMENTS.get(depth)
+    if req is None:
+        return {
+            "quick_model": None,
+            "deep_model": None,
+            "quick_reason": f"Unknown depth '{depth}'",
+            "deep_reason": f"Unknown depth '{depth}'",
+            "depth": depth,
+        }
+
+    if provider:
+        allowed_ids = _provider_model_ids(provider.lower())
+        if not allowed_ids:
+            return {
+                "quick_model": None,
+                "deep_model": None,
+                "quick_reason": f"Provider '{provider}' has no static models",
+                "deep_reason": f"Provider '{provider}' has no static models",
+                "depth": depth,
+            }
+    else:
+        all_ids: set[str] = set()
+        for p in MODEL_OPTIONS:
+            if p not in _SKIP_RECOMMENDATION_PROVIDERS:
+                all_ids.update(_provider_model_ids(p))
+        allowed_ids = all_ids
+
+    candidates = {
+        mid: cap for mid, cap in MODEL_CAPABILITIES.items()
+        if mid in allowed_ids
+    }
+
+    def _meets(cap: dict, min_level: int, role: str, required_features: list[str]) -> bool:
+        if role not in cap["roles"]:
+            return False
+        if cap["level"] < min_level:
+            return False
+        return all(f in cap["features"] for f in required_features)
+
+    quick_cands = [
+        (mid, cap) for mid, cap in candidates.items()
+        if _meets(cap, req["quick_min"], "quick", req["quick_required_features"])
+    ]
+    deep_cands = [
+        (mid, cap) for mid, cap in candidates.items()
+        if _meets(cap, req["deep_min"], "deep", req["deep_required_features"])
+    ]
+
+    quick_cands.sort(key=lambda x: (-x[1]["level"], -x[1]["cost"], -x[1]["speed"]))
+    deep_cands.sort(key=lambda x: (-x[1]["level"], -x[1]["quality"], -x[1]["cost"]))
+
+    quick_model = quick_cands[0][0] if quick_cands else None
+    deep_model = deep_cands[0][0] if deep_cands else None
+
+    quick_reason = (
+        f"Level {quick_cands[0][1]['level']}, cost {quick_cands[0][1]['cost']}, speed {quick_cands[0][1]['speed']}"
+        if quick_model else "No qualifying quick model found"
+    )
+    deep_reason = (
+        f"Level {deep_cands[0][1]['level']}, quality {deep_cands[0][1]['quality']}, cost {deep_cands[0][1]['cost']}"
+        if deep_model else "No qualifying deep model found"
+    )
+
+    return {
+        "quick_model": quick_model,
+        "deep_model": deep_model,
+        "quick_reason": quick_reason,
+        "deep_reason": deep_reason,
+        "depth": depth,
     }
