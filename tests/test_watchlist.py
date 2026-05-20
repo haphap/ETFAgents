@@ -155,6 +155,14 @@ class WatchlistManagerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.wl.rename_group("不存在", "新名")
 
+    def test_rename_default_group_raises(self):
+        with self.assertRaises(ValueError):
+            self.wl.rename_group("default", "其他")
+
+    def test_remove_default_group_raises(self):
+        with self.assertRaises(ValueError):
+            self.wl.remove_group("default")
+
     def test_rename_group_duplicate_name_raises(self):
         self.wl.add_group("行业")
         self.wl.add_group("宽基")

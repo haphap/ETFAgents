@@ -73,6 +73,8 @@ class WatchlistManager:
             return cursor.lastrowid
 
     def remove_group(self, name: str) -> int:
+        if name == "default":
+            raise ValueError("Cannot remove the reserved 'default' group")
         with self._connect() as conn:
             row = conn.execute("SELECT id FROM groups WHERE name = ?", (name,)).fetchone()
             if row is None:
@@ -82,6 +84,8 @@ class WatchlistManager:
             return 1
 
     def rename_group(self, old_name: str, new_name: str) -> None:
+        if old_name == "default":
+            raise ValueError("Cannot rename the reserved 'default' group")
         with self._connect() as conn:
             row = conn.execute("SELECT id FROM groups WHERE name = ?", (old_name,)).fetchone()
             if row is None:
