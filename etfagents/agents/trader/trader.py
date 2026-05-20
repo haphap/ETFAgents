@@ -103,7 +103,18 @@ def _normalize_trader_config_logic_heading(text: str) -> str:
             next_idx = index + 1
             while next_idx < len(lines) and not lines[next_idx].strip():
                 next_idx += 1
-            if next_idx >= len(lines) or re.match(r"^\s*(?:#{1,6}\s*)?二、", lines[next_idx]):
+            should_insert_heading = (
+                next_idx >= len(lines)
+                or re.match(r"^\s*(?:#{1,6}\s*)?二、", lines[next_idx])
+            )
+            if not should_insert_heading:
+                first_body_line = (lines[next_idx] or "").strip()
+                heading_norm = re.sub(r"[。！？!?；;：:\s]+$", "", heading_text)
+                body_norm = re.sub(r"[。！？!?；;：:\s]+$", "", first_body_line)
+                should_insert_heading = not (
+                    heading_norm and body_norm and body_norm.startswith(heading_norm)
+                )
+            if should_insert_heading:
                 lines[index + 1:index + 1] = [heading_text, ""]
         return collapse_blank_lines("\n".join(lines))
 

@@ -252,8 +252,10 @@ class StructuredAgentTests(unittest.TestCase):
         result = create_trader(llm)(copy.deepcopy(_base_state()))
 
         plan = result["trader_investment_plan"]
-        self.assertIn("一、配置逻辑\n当前宏观实际利率高企", plan)
-        self.assertNotIn("产业现金流拐点与长单锁价机制有效对冲宏观估值压制\n当前宏观实际利率高企", plan)
+        self.assertIn(
+            "一、配置逻辑\n产业现金流拐点与长单锁价机制有效对冲宏观估值压制\n\n当前宏观实际利率高企",
+            plan,
+        )
         self.assertNotIn("一、产业现金流拐点", plan)
         self.assertIn("四、执行倾向\n**增持**", plan)
         self.assertNotIn("执行倾向: 增持", plan)
