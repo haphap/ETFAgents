@@ -15,6 +15,7 @@ The project coordinates specialist analyst agents, a bull/bear research debate, 
 - **Backtrader-powered backtests** of candidate-pool decisions with structured triggers, configurable execution timing, and benchmark comparison
 - **Layered analyst report validation** with static structural checks first, then an optional structured-output LLM judge / refine pass
 - **Checkpoint/resume support** for long-running runs
+- **Cache management** with `etfagents cache stats/cleanup/clear` across API, signal, snapshot, and checkpoint categories
 - **Layered agent memory** with latest-analysis continuity, resolved lessons, and reusable method reminders
 - **English and Chinese output** for reports and final decisions
 
@@ -115,6 +116,17 @@ etfagents backtest \
   --execution-timing same_close
 ```
 
+Manage cached data:
+
+```bash
+etfagents cache stats                    # Show cache statistics (4 categories)
+etfagents cache stats --json             # JSON output
+etfagents cache cleanup --days 7         # Remove entries older than 7 days
+etfagents cache cleanup --days 0         # Clear all cached entries
+etfagents cache clear --type signals     # Clear signal cache only
+etfagents cache clear --type all --yes   # Clear everything (skip prompt)
+```
+
 ## Python Usage
 
 ```python
@@ -161,7 +173,9 @@ Saved backtest artifacts now include `summary.md`, `report.html`, `nav_chart.svg
 
 ```text
 cli/                  Interactive CLI entrypoint and terminal UI
+cli/commands/         CLI subcommand modules (cache, etc.)
 etfagents/agents/     Analyst, researcher, trader, risk, and manager agents
+etfagents/cache_manager.py  Unified cache statistics and cleanup
 etfagents/dataflows/  Data vendor integrations and routing
 etfagents/graph/      LangGraph orchestration, setup, replay, checkpoints
 etfagents/llm_clients/Provider abstraction and model handling
@@ -177,7 +191,8 @@ main.py               Minimal programmatic example
 - `etfagents/agents/utils/analysis_memory.py` stores structured analysis snapshots, resolved outcome lessons, and reusable method rules, then builds role-aware continuity / lesson / method briefs for later runs.
 - `etfagents/agents/utils/validate_refine.py` runs the layered report validator (static structural checks first, optional structured-output LLM judge / refine), driven by per-analyst `AnalystReportSpec` definitions.
 - `etfagents/agents/utils/report_leads.py` provides the `pre_judge_clean` / `post_judge_clean` regex pipeline that strips refine preambles, H1 titles, QA labels, meta openers, and self-referential leads.
-- `etfagents/backtest/` contains the Backtrader engine, candidate-pool runner, signal cache, and the structured `BacktestSignal` / `Trigger` / `RiskRule` data models that drive dynamic mid-cycle rebalances.
+- `etfagents/backtest/` contains the Backtrader engine, candidate-pool runner, signal cache, and the structured `BacktestSignal` / `Trigger` / `RiskRule` data models that drive dynamic mid-cycle rebalances. The `BACKTEST_SIGNAL_PROMPT_VERSION` constant in `backtest/cache.py` must be bumped when prompt or signal-extraction logic changes semantically, to invalidate stale cached signals.
+- `etfagents/cache_manager.py` aggregates four cache categories (api, signals, snapshots, checkpoints) for statistics, age-based cleanup, and full clear. It is wired into the CLI as `etfagents cache stats|cleanup|clear`.
 - `etfagents/dataflows/interface.py` routes tool calls to the configured data vendors with fallback behavior, and applies the `as_of_date` clamp that prevents future-data leakage during backtests.
 - `etfagents/llm_clients/factory.py` normalizes LLM provider setup behind a single client factory.
 

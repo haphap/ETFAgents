@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import tempfile
 import time
@@ -10,6 +11,9 @@ from pathlib import Path
 from typing import Any, Callable, Generator
 
 from etfagents.dataflows.config import get_config
+
+
+logger = logging.getLogger(__name__)
 
 
 class DailySnapshotCacheError(RuntimeError):
@@ -79,23 +83,42 @@ def _load_snapshot_file(snapshot_kind: str, curr_date: str) -> dict[str, Any] | 
         with path.open("r", encoding="utf-8") as handle:
             snapshot = json.load(handle)
     except json.JSONDecodeError as exc:
+        _quarantine_corrupt_snapshot(path)
         raise DailySnapshotCacheError(
             f"Corrupted shared snapshot cache at '{path}': invalid JSON."
         ) from exc
 
     if not isinstance(snapshot, dict):
+        _quarantine_corrupt_snapshot(path)
         raise DailySnapshotCacheError(
             f"Corrupted shared snapshot cache at '{path}': root payload must be an object."
         )
     if not isinstance(snapshot.get("metadata"), dict):
+        _quarantine_corrupt_snapshot(path)
         raise DailySnapshotCacheError(
             f"Corrupted shared snapshot cache at '{path}': missing metadata object."
         )
     if "payload" not in snapshot:
+        _quarantine_corrupt_snapshot(path)
         raise DailySnapshotCacheError(
             f"Corrupted shared snapshot cache at '{path}': missing payload field."
         )
     return snapshot
+
+
+def _quarantine_corrupt_snapshot(path: Path) -> None:
+    """Rename a corrupt snapshot file to ``.corrupt.<timestamp>`` so it self-heals on next call.
+
+    Unlike the plan's suggested pattern of returning ``None`` (transparent rebuild),
+    callers still raise :class:`DailySnapshotCacheError` after quarantining. This
+    preserves backward compatibility with existing tests that assert corrupted caches
+    must raise. The file is moved aside so the *next* call rebuilds successfully.
+    """
+    corrupt_path = path.with_suffix(path.suffix + f".corrupt.{int(time.time())}")
+    try:
+        path.rename(corrupt_path)
+    except OSError as exc:
+        logger.warning("Failed to quarantine corrupt snapshot %s: %s", path, exc)
 
 
 def _is_usable_snapshot(
@@ -110,9 +133,7 @@ def _is_usable_snapshot(
     metadata = snapshot.get("metadata", {})
     coverage_days = metadata.get("coverage_days")
     if not isinstance(coverage_days, int):
-        raise DailySnapshotCacheError(
-            "Corrupted shared snapshot cache metadata: coverage_days must be an integer."
-        )
+        return False
     return coverage_days >= min_coverage_days
 
 

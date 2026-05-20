@@ -95,4 +95,7 @@ DEFAULT_CONFIG = {
         "get_broker_research": "tushare",
         "get_stock_research": "tushare",
     },
+    "snapshot_max_age_days": 30,
+    "backtest_cache_max_age_days": 90,
+    "checkpoint_max_age_days": 30,
 }

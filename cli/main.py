@@ -72,6 +72,9 @@ app = typer.Typer(
 memory_app = typer.Typer(help="Structured analysis memory utilities.")
 app.add_typer(memory_app, name="memory")
 
+from cli.commands.cache import cache_app
+app.add_typer(cache_app, name="cache")
+
 
 def save_backtest_result(result, output_dir):
     from etfagents.backtest import save_backtest_result as _save_backtest_result
