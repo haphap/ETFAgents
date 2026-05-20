@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import logging
 from enum import IntEnum
 from typing import Dict, List, Literal, Tuple
-
-logger = logging.getLogger(__name__)
 
 ModelOption = Tuple[str, str]
 ProviderModeOptions = Dict[str, Dict[str, List[ModelOption]]]
