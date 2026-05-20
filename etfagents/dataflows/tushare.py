@@ -4,7 +4,6 @@ import logging
 import os
 import re
 from datetime import datetime, timedelta
-from functools import lru_cache
 from typing import Callable, Iterable
 
 import pandas as pd

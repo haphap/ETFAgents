@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -10,6 +12,7 @@ from etfagents.dataflows.config import get_backtest_context
 
 
 _CACHE_VERSION = 2
+BACKTEST_SIGNAL_PROMPT_VERSION = 1
 
 
 def _safe_path_token(value: str) -> str:
@@ -40,10 +43,20 @@ class BacktestSignalStore:
             return
         path = self._cache_path(ticker, decision_date)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(dict(payload), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        temp_path: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False,
+                dir=path.parent, encoding="utf-8",
+            ) as tmp:
+                json.dump(dict(payload), tmp, ensure_ascii=False, indent=2, default=str)
+                tmp.flush()
+                os.fsync(tmp.fileno())
+                temp_path = tmp.name
+            os.replace(temp_path, path)
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.unlink(temp_path)
 
     def _cache_path(self, ticker: str, decision_date: str) -> Path:
         return (
@@ -68,6 +81,7 @@ class BacktestSignalStore:
             "data_vendors": self.config.get("data_vendors"),
             "tool_vendors": self.config.get("tool_vendors"),
             "memory_signature": self.memory_signature or "",
+            "backtest_signal_prompt_version": BACKTEST_SIGNAL_PROMPT_VERSION,
         }
         encoded = json.dumps(material, sort_keys=True, ensure_ascii=False).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()[:16]
