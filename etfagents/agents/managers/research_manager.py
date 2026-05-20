@@ -145,6 +145,13 @@ Use this exact output order with Markdown headings:
         - When writing in Chinese, split this section into exactly two second-level subsections: `（一）评级` and `（二）建议`.
         - Do NOT create extra top-level headings such as `四、评级` or `五、建议`; both must stay under `持仓建议`.
         - Put the single explicit recommendation label only in `（一）评级`.
+        - In `（二）建议`, write the execution guidance as separate numbered paragraphs with a blank line between each block. Use exactly this numbering and order:
+          1. `初始仓位与执行节奏` — initial allocation band, maximum initial sizing, and baseline stance.
+          2. `加仓触发条件` — explicit numeric thresholds for adding (price levels, volume multiples, flow checks, macro/industry confirmations).
+          3. `减仓与止损条件` — explicit numeric thresholds for reducing or stopping out.
+          4. `再平衡触发` — rebalance triggers, risk controls, and invalidation signals that force a sizing change.
+          5. `后续验证指标` — what to monitor next with concrete data points and observation windows.
+          Each numbered item must restate the concrete price, moving-average, volume, share-change, or macro values inline; do not write "refer to the market report" or "the level cited above" — always write the actual numbers directly in the sentence.
         - Put all execution detail, allocation band, add / reduce / rotate conditions, rebalance triggers, risk controls, and monitoring priorities in `（二）建议`.
         - The execution object is the ETF only. You may cite constituent names, weights, valuations, or earnings as evidence, but do not instruct the user to clear, trim, retain, or rebalance named constituent stocks.
         - Give a clear, actionable ETF allocation recommendation—{localize_rating_term("Buy")}, {localize_rating_term("Overweight")}, {localize_rating_term("Hold")}, {localize_rating_term("Underweight")}, or {localize_rating_term("Sell")}—grounded in the debate's strongest arguments.
