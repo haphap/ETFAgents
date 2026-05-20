@@ -699,7 +699,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         )
 
         self.assertNotIn("## ETF配置逻辑", rendered)
-        self.assertIn("一、当前多空因素并存", rendered)
+        self.assertIn("一、配置逻辑\n1. 当前多空因素并存", rendered)
         self.assertEqual(rendered.count("二、配置执行计划"), 1)
         self.assertEqual(rendered.count("三、再平衡与风险控制"), 1)
         self.assertEqual(rendered.count("四、执行倾向"), 1)
@@ -709,7 +709,7 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("四、执行倾向\n**持有**", rendered)
         self.assertIn("维持当前仓位，不主动追涨或杀跌", rendered)
 
-    def test_trader_rendering_uses_capped_substantive_thesis_heading(self):
+    def test_trader_rendering_uses_fixed_config_logic_heading(self):
         rendered = render_trader_proposal(
             TraderProposal(
                 thesis=(
@@ -722,10 +722,10 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("一、当前宏观压制边际缓和、行业盈利改善信号同步出现\n", rendered)
-        self.assertIn("1. 偏多逻辑更完整。", rendered)
+        self.assertIn("一、配置逻辑\n", rendered)
+        self.assertNotIn("一、当前宏观压制边际缓和", rendered)
+        self.assertIn("1. 当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整。", rendered)
         self.assertIn("2. 资金流仍需确认，执行上不能追高。", rendered)
-        self.assertNotIn("一、当前宏观压制边际缓和、行业盈利改善信号同步出现，偏多逻辑更完整。资金流", rendered)
 
     def test_trader_rendering_splits_thesis_body_into_paragraphs(self):
         rendered = render_trader_proposal(
@@ -742,9 +742,9 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("1. 第一，价格仍处在关键均线附近", rendered)
-        self.assertIn("附近，说明趋势尚未完全破坏。\n\n2. 第二，资金流", rendered)
-        self.assertIn("连续失速。\n\n3. 第三，催化兑现前", rendered)
+        self.assertIn("2. 第一，价格仍处在关键均线附近", rendered)
+        self.assertIn("附近，说明趋势尚未完全破坏。\n\n3. 第二，资金流", rendered)
+        self.assertIn("连续失速。\n\n4. 第三，催化兑现前", rendered)
 
     def test_split_trader_heading_and_body_keeps_short_single_sentence_thesis_as_heading_only(self):
         heading, body = _split_trader_heading_and_body("维持持有，等待确认。")

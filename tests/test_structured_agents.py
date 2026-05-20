@@ -228,7 +228,35 @@ class StructuredAgentTests(unittest.TestCase):
         self.assertNotIn("target_weight_pct", system_prompt)
         self.assertNotIn("execution_timing", system_prompt)
         self.assertIn("Use exactly four top-level sections", system_prompt)
+        self.assertIn("`一、配置逻辑`", system_prompt)
+        self.assertNotIn("[一句话配置逻辑标题]", system_prompt)
         self.assertIn("四、执行倾向", system_prompt)
+
+    def test_trader_chinese_freetext_uses_fixed_config_heading_and_rating_only(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "Chinese"
+        set_config(cfg)
+        llm = MagicMock()
+        llm.with_structured_output.side_effect = NotImplementedError("unsupported")
+        llm.invoke.return_value = _FakeResponse(
+            "一、产业现金流拐点与长单锁价机制有效对冲宏观估值压制\n"
+            "当前宏观实际利率高企与产业盈利底垫实质性夯实形成明确对冲，偏多逻辑更为完整。\n\n"
+            "二、配置执行计划\n"
+            "先维持现有底仓，只有价格重新站稳50日均线且成交量回到20日均量上方后才继续加仓。\n\n"
+            "三、再平衡与风险控制\n"
+            "若价格跌破关键支撑并放量，则先减仓；继续跟踪ETF份额、溢折价与资金流。\n\n"
+            "四、执行倾向\n"
+            "执行倾向: 增持"
+        )
+
+        result = create_trader(llm)(copy.deepcopy(_base_state()))
+
+        plan = result["trader_investment_plan"]
+        self.assertIn("一、配置逻辑\n当前宏观实际利率高企", plan)
+        self.assertNotIn("产业现金流拐点与长单锁价机制有效对冲宏观估值压制\n当前宏观实际利率高企", plan)
+        self.assertNotIn("一、产业现金流拐点", plan)
+        self.assertIn("四、执行倾向\n**增持**", plan)
+        self.assertNotIn("执行倾向: 增持", plan)
 
     def test_portfolio_manager_freetext_fallback_prompt_is_prose_only(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
