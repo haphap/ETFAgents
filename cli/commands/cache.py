@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from enum import Enum
 from typing import Optional
 
 import typer
@@ -14,6 +15,21 @@ from etfagents.cache_manager import CacheManager
 _console = Console()
 
 cache_app = typer.Typer(help="Cache management utilities.")
+
+
+class _CacheType(str, Enum):
+    api = "api"
+    signals = "signals"
+    snapshots = "snapshots"
+    checkpoints = "checkpoints"
+
+
+class _CacheTypeAll(str, Enum):
+    api = "api"
+    signals = "signals"
+    snapshots = "snapshots"
+    checkpoints = "checkpoints"
+    all = "all"
 
 
 @cache_app.command("stats")
@@ -46,26 +62,26 @@ def cache_stats(
 @cache_app.command("cleanup")
 def cache_cleanup(
     days: int = typer.Option(7, "--days", min=0, help="Remove entries older than N days. 0=clear all."),
-    category: Optional[str] = typer.Option(None, "--type", help="api|signals|snapshots|checkpoints. Default: all."),
+    category: Optional[_CacheType] = typer.Option(None, "--type", help="Cache category. Default: all."),
 ) -> None:
     config = copy.deepcopy(DEFAULT_CONFIG)
     mgr = CacheManager(config)
-    cat = category or "all"
+    cat = category.value if category else "all"
     result = mgr.cleanup(days, cat)
     _console.print(f"Deleted {result['deleted_files']} file(s), freed {result['freed_mb']:.2f} MB")
 
 
 @cache_app.command("clear")
 def cache_clear(
-    category: str = typer.Option("all", "--type", help="api|signals|snapshots|checkpoints|all"),
+    category: _CacheTypeAll = typer.Option(_CacheTypeAll.all, "--type", help="Cache category to clear."),
     confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     if not confirm:
-        confirmed = typer.confirm(f"Clear all '{category}' cache? This cannot be undone")
+        confirmed = typer.confirm(f"Clear all '{category.value}' cache? This cannot be undone")
         if not confirmed:
             raise typer.Exit(code=0)
 
     config = copy.deepcopy(DEFAULT_CONFIG)
     mgr = CacheManager(config)
-    result = mgr.clear(category)
+    result = mgr.clear(category.value)
     _console.print(f"Cleared {result['deleted_files']} file(s), freed {result['freed_mb']:.2f} MB")

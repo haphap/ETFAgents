@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from etfagents.cache_manager import CacheManager
+from etfagents.dataflows.config import get_config, set_config
 from etfagents.default_config import DEFAULT_CONFIG
 
 
@@ -183,11 +184,12 @@ class F3IsUsableSnapshotTests(unittest.TestCase):
 class F2QuarantineCorruptSnapshotTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
-        self.original_config = copy.deepcopy(DEFAULT_CONFIG)
+        self.original_config = copy.deepcopy(get_config())
         self.config = copy.deepcopy(DEFAULT_CONFIG)
         self.config["data_cache_dir"] = self.tempdir.name
 
     def tearDown(self):
+        set_config(self.original_config)
         self.tempdir.cleanup()
 
     def test_corrupt_json_file_is_quarantined(self):
@@ -244,6 +246,12 @@ class F4PromptVersionTests(unittest.TestCase):
 
 
 class F1AtomicWriteTests(unittest.TestCase):
+    def setUp(self):
+        self.original_config = copy.deepcopy(get_config())
+
+    def tearDown(self):
+        set_config(self.original_config)
+
     def test_put_creates_valid_json_file(self):
         from etfagents.backtest.cache import BacktestSignalStore
         from etfagents.dataflows.config import set_config, get_backtest_context

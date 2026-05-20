@@ -24,15 +24,15 @@ class CacheManager:
         api_subdirs = sorted(
             p.name for p in self._api_cache_dir.iterdir()
             if p.is_dir() and p.name not in ("shared_snapshots", "checkpoints")
-        ) if self._api_cache_dir.exists() else []
+        ) if self._api_cache_dir.is_dir() else []
 
         sig_count, sig_mb = self._dir_stats(self._signal_cache_dir)
 
         snap_count, snap_mb = self._dir_stats(self._snapshot_cache_dir)
-        snap_kinds = sorted(p.name for p in self._snapshot_cache_dir.iterdir() if p.is_dir()) if self._snapshot_cache_dir.exists() else []
+        snap_kinds = sorted(p.name for p in self._snapshot_cache_dir.iterdir() if p.is_dir()) if self._snapshot_cache_dir.is_dir() else []
 
         cp_count, cp_mb = self._dir_stats(self._checkpoint_dir)
-        cp_tickers = sorted(p.stem for p in self._checkpoint_dir.glob("*.db")) if self._checkpoint_dir.exists() else []
+        cp_tickers = sorted(p.stem for p in self._checkpoint_dir.glob("*.db")) if self._checkpoint_dir.is_dir() else []
 
         total_mb = api_mb + sig_mb + snap_mb + cp_mb
 
@@ -45,6 +45,8 @@ class CacheManager:
         }
 
     def cleanup(self, days: int, category: str = "all") -> dict[str, Any]:
+        if days < 0:
+            raise ValueError(f"days must be >= 0, got {days}")
         categories = self.CATEGORIES if category == "all" else (category,)
         by_category: dict[str, dict[str, Any]] = {}
         total_deleted = 0
@@ -88,19 +90,19 @@ class CacheManager:
 
         if category == "signals":
             count, size_mb = self._dir_stats(self._signal_cache_dir)
-            if self._signal_cache_dir.exists():
+            if self._signal_cache_dir.is_dir():
                 shutil.rmtree(self._signal_cache_dir)
             return {"deleted_files": count, "freed_mb": round(size_mb, 2)}
 
         if category == "snapshots":
             count, size_mb = self._dir_stats(self._snapshot_cache_dir)
-            if self._snapshot_cache_dir.exists():
+            if self._snapshot_cache_dir.is_dir():
                 shutil.rmtree(self._snapshot_cache_dir)
             return {"deleted_files": count, "freed_mb": round(size_mb, 2)}
 
         if category == "api":
             count, size_mb = self._dir_stats(self._api_cache_dir, exclude_subdirs={"shared_snapshots", "checkpoints"})
-            if self._api_cache_dir.exists():
+            if self._api_cache_dir.is_dir():
                 for entry in list(self._api_cache_dir.iterdir()):
                     if entry.is_dir() and entry.name in ("shared_snapshots", "checkpoints"):
                         continue
@@ -124,8 +126,15 @@ class CacheManager:
         else:
             paths = []
 
+        timed_paths: list[tuple[float, Path]] = []
+        for p in paths:
+            try:
+                timed_paths.append((p.stat().st_mtime, p))
+            except OSError:
+                continue
+
         entries = []
-        for p in sorted(paths, key=lambda x: x.stat().st_mtime, reverse=True):
+        for _, p in sorted(timed_paths, key=lambda x: x[0], reverse=True):
             try:
                 st = p.stat()
                 entries.append({
@@ -146,7 +155,7 @@ class CacheManager:
         }
 
     def _walk_dir(self, root: Path, pattern: str = "*", exclude_subdirs: set[str] | None = None) -> list[Path]:
-        if not root.exists():
+        if not root.is_dir():
             return []
         results: list[Path] = []
         for entry in root.rglob(pattern):
@@ -159,7 +168,7 @@ class CacheManager:
         return results
 
     def _dir_stats(self, root: Path, exclude_subdirs: set[str] | None = None) -> tuple[int, float]:
-        if not root.exists():
+        if not root.is_dir():
             return 0, 0.0
         files = self._walk_dir(root, exclude_subdirs=exclude_subdirs)
         total_bytes = 0
@@ -173,7 +182,7 @@ class CacheManager:
         return count, total_bytes / (1024 * 1024)
 
     def _cleanup_dir(self, root: Path, days: int, exclude_subdirs: set[str] | None = None) -> tuple[int, float]:
-        if not root.exists():
+        if not root.is_dir():
             return 0, 0.0
         if days == 0:
             count, size_mb = self._dir_stats(root, exclude_subdirs=exclude_subdirs)
