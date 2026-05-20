@@ -207,6 +207,14 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("ETF头部持仓研究", prompt)
         self.assertIn("所有执行动作只能针对ETF整体仓位或ETF目标权重", prompt)
         self.assertIn("催化节奏", prompt)
+        for label in (
+            "初始仓位与执行节奏",
+            "加仓触发条件",
+            "减仓与止损条件",
+            "再平衡触发",
+            "后续验证指标",
+        ):
+            self.assertIn(label, prompt)
         self.assertNotIn("catalyst timing", prompt)
 
     def test_bull_bear_researcher_prompts_require_chinese_body_and_decision_summary(self):
@@ -499,7 +507,27 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("Treat dated macro / earnings / policy events as calendar-sensitive", prompt)
         self.assertNotIn("Lessons from past decisions", prompt)
         self.assertIn("催化节奏", prompt)
+        for label in (
+            "初始仓位与执行节奏",
+            "加仓触发条件",
+            "减仓与止损条件",
+            "再平衡触发",
+            "后续验证指标",
+        ):
+            self.assertIn(label, prompt)
         self.assertNotIn("catalyst timing", prompt)
+
+    def test_manager_structured_fields_include_positioning_block_contract(self):
+        for schema in (ResearchPlan, PortfolioDecision):
+            description = schema.model_fields["positioning_recommendation"].description
+            for label in (
+                "初始仓位与执行节奏",
+                "加仓触发条件",
+                "减仓与止损条件",
+                "再平衡触发",
+                "后续验证指标",
+            ):
+                self.assertIn(label, description)
 
     def test_research_plan_rendering_drops_conflicting_recommendation_text(self):
         rendered = render_research_plan(
@@ -1093,12 +1121,13 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("1. 初始仓位设置。当前维持不超过12%的轻仓头寸", rendered)
-        self.assertIn("2. 加仓条件与关键位。加仓条件需同时满足三个技术标准", rendered)
+        self.assertIn("1. 初始仓位与执行节奏。当前维持不超过12%的轻仓头寸", rendered)
+        self.assertIn("2. 加仓触发条件。加仓条件需同时满足三个技术标准", rendered)
         self.assertIn("3. 减仓与止损条件。减仓条件为价格跌破0.800元整数关口", rendered)
-        self.assertIn("4. 极端退出触发（极端情景）：若美国10年实际利率突破2.20%", rendered)
-        self.assertIn("5. 再平衡触发：当ETF溢价率扩大", rendered)
-        self.assertIn("6. 后续验证指标。下一步重点监控的验证指标包括", rendered)
+        self.assertIn("退出触发（极端情景）：若美国10年实际利率突破2.20%", rendered)
+        self.assertIn("4. 再平衡触发：当ETF溢价率扩大", rendered)
+        self.assertIn("5. 后续验证指标。下一步重点监控的验证指标包括", rendered)
+        self.assertNotIn("\n6. ", rendered)
 
     def test_manager_normalization_splits_long_freetext_positioning_advice(self):
         normalized = normalize_chinese_manager_terms(
@@ -1112,8 +1141,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             "下一步重点监控的验证指标包括社零、猪价和份额变化。"
         )
 
-        self.assertIn("1. 初始仓位设置。当前维持不超过12%的轻仓头寸", normalized)
-        self.assertIn("2. 加仓条件与关键位。加仓条件需同时满足", normalized)
+        self.assertIn("1. 初始仓位与执行节奏。当前维持不超过12%的轻仓头寸", normalized)
+        self.assertIn("2. 加仓触发条件。加仓条件需同时满足", normalized)
         self.assertIn("### （一）评级", normalized)
         self.assertIn("### （二）建议", normalized)
 

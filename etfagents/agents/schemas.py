@@ -51,11 +51,16 @@ _ETF_ONLY_ALLOCATION_SCOPE = (
     "Use holdings and constituent weights only as attribution evidence; do not recommend buying, selling, trimming, clearing, or retaining named constituents."
 )
 
+_CHINESE_POSITIONING_FIVE_BLOCK_CONTRACT = (
+    "When writing Chinese positioning guidance, structure the field as five numbered blocks in this exact order: "
+    "1. 初始仓位与执行节奏; 2. 加仓触发条件; 3. 减仓与止损条件; 4. 再平衡触发; 5. 后续验证指标."
+)
+
 
 class ResearchPlan(BaseModel):
     debate_conclusion: str = Field(description="A detailed synthesis paragraph comparing both sides, naming the strongest evidence from each, and explaining the decisive weakness in the losing view for ETF allocation.")
     action_logic: str = Field(description="A detailed evidence-to-allocation paragraph linking ETF structure, flows, catalysts, downside boundaries, and confirmation or invalidation triggers to the final decision.")
-    positioning_recommendation: str = Field(description=f"Actionable ETF allocation guidance with execution details, exposure sizing, concrete add or reduce conditions, rebalance triggers, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate the numeric level inline in the same sentence instead of referring readers back to an earlier report. {_ETF_ONLY_ALLOCATION_SCOPE}")
+    positioning_recommendation: str = Field(description=f"Actionable ETF allocation guidance with execution details, exposure sizing, concrete add or reduce conditions, rebalance triggers, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate the numeric level inline in the same sentence instead of referring readers back to an earlier report. {_CHINESE_POSITIONING_FIVE_BLOCK_CONTRACT} {_ETF_ONLY_ALLOCATION_SCOPE}")
     rating: PortfolioRating = Field(description="Final research-manager rating for ETF allocation.")
     snapshot_stance: str = Field(description="Concise stance for the feedback snapshot.")
     snapshot_new_and_rebuttal: str = Field(description="What was newly added this round and how it rebuts the opposing case.")
@@ -80,7 +85,7 @@ class TraderProposal(BaseModel):
 class PortfolioDecision(BaseModel):
     debate_conclusion: str = Field(description="A detailed synthesis of the full risk debate across all perspectives, explicitly comparing aggressive, conservative, and neutral cases and stating why the losing view was overruled for ETF allocation.")
     action_logic: str = Field(description="A detailed portfolio-manager paragraph showing how ETF evidence leads to sizing, hedging, rebalance triggers, and risk controls.")
-    positioning_recommendation: str = Field(description=f"Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate those numeric levels inline rather than telling the reader to look back at the market report. {_ETF_ONLY_ALLOCATION_SCOPE}")
+    positioning_recommendation: str = Field(description=f"Final actionable ETF portfolio recommendation and implementation guidance with target exposure, execution sequence, rebalance rules, and monitoring priorities. Must cite exact price or moving-average levels, volume or fund-flow thresholds, and ETF structure checks rather than vague confirmation language. Restate those numeric levels inline rather than telling the reader to look back at the market report. {_CHINESE_POSITIONING_FIVE_BLOCK_CONTRACT} {_ETF_ONLY_ALLOCATION_SCOPE}")
     rating: PortfolioRating = Field(description="Final portfolio-manager rating for ETF allocation.")
     target_weight_pct: float | None = Field(default=None, description="Structured target portfolio weight in percent for this ETF, from 0 to 100. Use when the final recommendation implies a single target sizing.")
     target_weight_band: tuple[float, float] | None = Field(default=None, description="Structured target weight band in percent as (low, high), from 0 to 100. Use when the final recommendation specifies a sizing range rather than a single weight.")

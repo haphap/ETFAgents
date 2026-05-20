@@ -2733,10 +2733,13 @@ _POSITIONING_ADVICE_HEADING_RE = re.compile(
     r"^\s*(?:#{1,6}\s*)?(?:[一二三四五六七八九十]+、\s*)?(?:（[一二三四五六七八九十\d]+）\s*)?建议(?:正文)?\s*$"
 )
 _POSITIONING_EXECUTION_CUES = (
-    ("加仓条件", "加仓条件与关键位"),
+    ("加仓触发条件", "加仓触发条件"),
+    ("加仓条件", "加仓触发条件"),
+    ("减仓与止损条件", "减仓与止损条件"),
     ("减仓条件", "减仓与止损条件"),
-    ("退出触发", "极端退出触发"),
+    ("退出触发", "减仓与止损条件"),
     ("再平衡触发", "再平衡触发"),
+    ("后续验证指标", "后续验证指标"),
     ("下一步重点监控", "后续验证指标"),
     ("后续重点监控", "后续验证指标"),
     ("重点监控", "后续验证指标"),
@@ -2880,7 +2883,7 @@ def format_chinese_positioning_recommendation(text: str) -> str:
     initial = content[:first_start].strip()
     if initial:
         initial_title = (
-            "初始仓位设置"
+            "初始仓位与执行节奏"
             if re.search(r"(仓位|头寸|底仓|配置)", initial)
             else "执行原则"
         )
@@ -2896,7 +2899,8 @@ def format_chinese_positioning_recommendation(text: str) -> str:
     for title, cue, chunk in chunks:
         if deduped and deduped[-1][0] == title:
             previous_title, previous_cue, previous_chunk = deduped[-1]
-            deduped[-1] = (previous_title, previous_cue, f"{previous_chunk}{chunk}")
+            separator = "" if previous_chunk.endswith(("。", "！", "？", "；", ";", ".", "!", "?")) else "。"
+            deduped[-1] = (previous_title, previous_cue, f"{previous_chunk}{separator}{chunk}")
             continue
         deduped.append((title, cue, chunk))
 
