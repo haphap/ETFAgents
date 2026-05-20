@@ -2430,6 +2430,7 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
     if depth_cfg:
         config["max_debate_rounds"] = depth_cfg["debate_rounds"]
         config["max_risk_discuss_rounds"] = depth_cfg["risk_rounds"]
+        config["research_depth_name"] = selections["research_depth_name"]
     else:
         config["max_debate_rounds"] = selections["research_depth"]
         config["max_risk_discuss_rounds"] = selections["research_depth"]

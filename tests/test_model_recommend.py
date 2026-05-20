@@ -1,5 +1,7 @@
+import copy
 import unittest
 
+from etfagents.default_config import DEFAULT_CONFIG
 from etfagents.llm_clients.model_catalog import (
     MODEL_CAPABILITIES,
     MODEL_OPTIONS,
@@ -146,6 +148,32 @@ class ResearchDepthRequirementsTests(unittest.TestCase):
             nxt = RESEARCH_DEPTH_REQUIREMENTS[names[i + 1]]
             self.assertLessEqual(cur["debate_rounds"], nxt["debate_rounds"])
             self.assertLessEqual(cur["risk_rounds"], nxt["risk_rounds"])
+
+
+class RunAnalysisConfigTests(unittest.TestCase):
+    """Regression test: run_analysis config construction propagates depth name."""
+
+    def test_depth_name_propagated_into_config(self):
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        depth_name = "全面"
+        depth_cfg = get_depth_config(depth_name)
+        config["max_debate_rounds"] = depth_cfg["debate_rounds"]
+        config["max_risk_discuss_rounds"] = depth_cfg["risk_rounds"]
+        config["research_depth_name"] = depth_name
+        self.assertEqual(config["research_depth_name"], "全面")
+        self.assertNotEqual(config["research_depth_name"], DEFAULT_CONFIG["research_depth_name"])
+
+    def test_default_depth_name_not_stale_after_override(self):
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        self.assertEqual(config["research_depth_name"], "标准")
+        for depth_name in RESEARCH_DEPTH_REQUIREMENTS:
+            if depth_name == "标准":
+                continue
+            depth_cfg = get_depth_config(depth_name)
+            config["research_depth_name"] = depth_name
+            config["max_debate_rounds"] = depth_cfg["debate_rounds"]
+            self.assertEqual(config["research_depth_name"], depth_name)
+            self.assertEqual(config["max_debate_rounds"], depth_cfg["debate_rounds"])
 
 
 if __name__ == "__main__":
