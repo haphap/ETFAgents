@@ -174,6 +174,19 @@ class WatchlistManagerTests(unittest.TestCase):
         entries = self.wl.list_tickers(tags=["大盘%"])
         self.assertEqual(len(entries), 0)
 
+    def test_tag_filter_matches_literal_quotes(self):
+        self.wl.add("510300.SH", group="default", tags=['含"引号'])
+        entries = self.wl.list_tickers(tags=['含"引号'])
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]["ticker"], "510300.SH")
+
+    def test_list_tickers_invalid_tags_json_falls_back_to_empty_list(self):
+        self.wl.add("510300.SH", group="default", name="沪深300ETF")
+        with self.wl._connect() as conn:
+            conn.execute("UPDATE watchlist SET tags = ? WHERE ticker = ?", ("{bad json", "510300.SH"))
+        entries = self.wl.list_tickers()
+        self.assertEqual(entries[0]["tags"], [])
+
     def test_auto_fill_name_fallback(self):
         name = self.wl._auto_fill_name("INVALID.TICKER")
         self.assertEqual(name, "INVALID.TICKER")
@@ -218,6 +231,20 @@ class WatchlistCliTests(unittest.TestCase):
             names = [g["name"] for g in groups]
             self.assertIn("行业ETF", names)
             self.assertNotIn("行业", names)
+
+    def test_group_remove_value_error_is_reported_cleanly(self):
+        with patch("cli.commands.watchlist.WatchlistManager", lambda: WatchlistManager(db_path=self.db_path)):
+            result = self.runner.invoke(watchlist_app, ["group", "remove", "default"])
+        self.assertEqual(1, result.exit_code, result.output)
+        self.assertIn("Cannot remove the reserved", result.output)
+        self.assertIn("'default'", result.output)
+
+    def test_group_rename_value_error_is_reported_cleanly(self):
+        with patch("cli.commands.watchlist.WatchlistManager", lambda: WatchlistManager(db_path=self.db_path)):
+            result = self.runner.invoke(watchlist_app, ["group", "rename", "default", "其他"])
+        self.assertEqual(1, result.exit_code, result.output)
+        self.assertIn("Cannot rename the reserved", result.output)
+        self.assertIn("'default'", result.output)
 
 
 if __name__ == "__main__":

@@ -59,7 +59,6 @@ def watchlist_list(
         help="Filter by tags (comma-separated, any match)."),
     json_output: bool = typer.Option(False, "--json", help="Output as JSON."),
 ) -> None:
-    import json
     wl = WatchlistManager()
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
     entries = wl.list_tickers(group=group, tags=tag_list)
@@ -111,13 +110,21 @@ def watchlist_group_cmd(
         if not name:
             _console.print("[red]Group name required[/red]")
             raise typer.Exit(code=1)
-        removed = wl.remove_group(name)
+        try:
+            removed = wl.remove_group(name)
+        except ValueError as exc:
+            _console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
         _console.print(f"Removed {removed} group(s)")
     elif action == "rename":
         if not name or not new_name:
             _console.print("[red]Both old and new name required[/red]")
             raise typer.Exit(code=1)
-        wl.rename_group(name, new_name)
+        try:
+            wl.rename_group(name, new_name)
+        except ValueError as exc:
+            _console.print(f"[red]{exc}[/red]")
+            raise typer.Exit(code=1)
         _console.print(f"Renamed '{name}' to '{new_name}'")
     else:
         _console.print(f"[red]Unknown action '{action}'. Use add|remove|rename|list[/red]")

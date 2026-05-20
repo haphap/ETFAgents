@@ -139,9 +139,13 @@ class WatchlistManager:
             if tags:
                 tag_conditions = []
                 for tag in tags:
-                    tag_conditions.append("w.tags LIKE ? ESCAPE '\\'")
-                    escaped = tag.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-                    params.append(f'%"{escaped}"%')
+                    tag_conditions.append(
+                        "EXISTS ("
+                        "SELECT 1 FROM json_each(CASE WHEN json_valid(w.tags) THEN w.tags ELSE '[]' END) "
+                        "WHERE value = ?"
+                        ")"
+                    )
+                    params.append(tag)
                 conditions.append("(" + " OR ".join(tag_conditions) + ")")
             if conditions:
                 query += " WHERE " + " AND ".join(conditions)
@@ -149,7 +153,10 @@ class WatchlistManager:
             rows = conn.execute(query, params).fetchall()
         results = []
         for r in rows:
-            parsed_tags = json.loads(r["tags"]) if r["tags"] else []
+            try:
+                parsed_tags = json.loads(r["tags"]) if r["tags"] else []
+            except (json.JSONDecodeError, TypeError):
+                parsed_tags = []
             results.append({
                 "ticker": r["ticker"],
                 "name": r["name"],
