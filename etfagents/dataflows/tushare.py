@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Callable, Iterable
@@ -30,6 +31,8 @@ _SUFFIX_MAP = {
 }
 
 _A_SHARE_EXCHANGES = {"SH", "SZ", "BJ"}
+_TUSHARE_QUERY_MAX_ATTEMPTS = 3
+_TUSHARE_QUERY_BACKOFF_SECONDS = (0.5, 1.5)
 
 
 def _parse_date(date_str: str) -> datetime:
@@ -195,16 +198,75 @@ def _get_pro_client():
         raise DataVendorUnavailable(f"Failed to initialize tushare client: {exc}") from exc
 
 
+def _is_transient_tushare_error(exc: BaseException) -> bool:
+    """Return True for network-like failures that are worth retrying."""
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    transient_text = (
+        "connection aborted",
+        "connection reset",
+        "connectionreseterror",
+        "read timed out",
+        "timed out",
+        "timeout",
+        "temporarily unavailable",
+        "remote end closed connection",
+        "bad gateway",
+        "service unavailable",
+        "gateway timeout",
+    )
+
+    while stack:
+        current = stack.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        if isinstance(current, (ConnectionError, TimeoutError)):
+            return True
+        if isinstance(current, OSError) and getattr(current, "errno", None) in {104, 110, 111}:
+            return True
+        message = str(current).lower()
+        if any(marker in message for marker in transient_text):
+            return True
+        for nested in (*getattr(current, "args", ()), getattr(current, "__cause__", None), getattr(current, "__context__", None)):
+            if isinstance(nested, BaseException):
+                stack.append(nested)
+    return False
+
+
 def _query_pro(api_name: str, **params) -> pd.DataFrame:
     client = _get_pro_client()
     clean_params = {key: value for key, value in params.items() if value is not None}
-    try:
-        return client.query(api_name, **clean_params)
-    except Exception as exc:
-        ticker = clean_params.get("ts_code", "")
+    ticker = clean_params.get("ts_code", "")
+    last_exc: Exception | None = None
+    attempts_executed = 0
+    for attempt in range(1, _TUSHARE_QUERY_MAX_ATTEMPTS + 1):
+        try:
+            return client.query(api_name, **clean_params)
+        except Exception as exc:
+            last_exc = exc
+            attempts_executed = attempt
+            if attempt >= _TUSHARE_QUERY_MAX_ATTEMPTS or not _is_transient_tushare_error(exc):
+                break
+            delay = _TUSHARE_QUERY_BACKOFF_SECONDS[min(attempt - 1, len(_TUSHARE_QUERY_BACKOFF_SECONDS) - 1)]
+            logger.warning(
+                "Transient Tushare query '%s' failure for '%s'; retrying in %.1fs (%d/%d): %s",
+                api_name,
+                ticker or "unknown",
+                delay,
+                attempt + 1,
+                _TUSHARE_QUERY_MAX_ATTEMPTS,
+                exc,
+            )
+            time.sleep(delay)
+    if last_exc is not None:
         raise DataVendorUnavailable(
-            f"Tushare query '{api_name}' failed for '{ticker or 'unknown'}': {exc}"
-        ) from exc
+            f"Tushare query '{api_name}' failed for '{ticker or 'unknown'}' after "
+            f"{attempts_executed} attempt(s): {last_exc}"
+        ) from last_exc
+    raise DataVendorUnavailable(
+        f"Tushare query '{api_name}' failed for '{ticker or 'unknown'}': unknown error"
+    )
 
 
 def _to_csv_with_header(
