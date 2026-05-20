@@ -231,18 +231,27 @@ class F2QuarantineCorruptSnapshotTests(unittest.TestCase):
 
         remaining = list(kind_dir.glob("2026-01-01.json"))
         self.assertEqual(len(remaining), 0)
+        quarantined = list(kind_dir.glob("2026-01-01.json.corrupt.*"))
+        self.assertEqual(len(quarantined), 1)
 
 
 class F4PromptVersionTests(unittest.TestCase):
-    def test_config_hash_includes_prompt_version(self):
-        from etfagents.backtest.cache import BacktestSignalStore, BACKTEST_SIGNAL_PROMPT_VERSION
+    def test_bumping_prompt_version_invalidates_config_hash(self):
+        import etfagents.backtest.cache as cache_mod
+        from etfagents.backtest.cache import BacktestSignalStore
+
         store = BacktestSignalStore(
             config=copy.deepcopy(DEFAULT_CONFIG),
             selected_analysts=["market_flow"],
         )
         hash_v1 = store._config_hash()
-        self.assertIsInstance(hash_v1, str)
-        self.assertEqual(len(hash_v1), 16)
+        original = cache_mod.BACKTEST_SIGNAL_PROMPT_VERSION
+        try:
+            cache_mod.BACKTEST_SIGNAL_PROMPT_VERSION = original + 1
+            hash_v2 = store._config_hash()
+            self.assertNotEqual(hash_v1, hash_v2)
+        finally:
+            cache_mod.BACKTEST_SIGNAL_PROMPT_VERSION = original
 
 
 class F1AtomicWriteTests(unittest.TestCase):
@@ -254,7 +263,7 @@ class F1AtomicWriteTests(unittest.TestCase):
 
     def test_put_creates_valid_json_file(self):
         from etfagents.backtest.cache import BacktestSignalStore
-        from etfagents.dataflows.config import set_config, get_backtest_context
+        from etfagents.dataflows.config import set_config
 
         tempdir = tempfile.TemporaryDirectory()
         config = copy.deepcopy(DEFAULT_CONFIG)
@@ -274,6 +283,31 @@ class F1AtomicWriteTests(unittest.TestCase):
         self.assertTrue(cache_path.exists())
         data = json.loads(cache_path.read_text(encoding="utf-8"))
         self.assertEqual(data["rating"], "BUY")
+        tempdir.cleanup()
+
+    def test_put_mid_write_failure_leaves_no_partial_file(self):
+        from etfagents.backtest.cache import BacktestSignalStore
+        from etfagents.dataflows.config import set_config
+
+        tempdir = tempfile.TemporaryDirectory()
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["results_dir"] = tempdir.name
+        set_config(config)
+
+        store = BacktestSignalStore(
+            config=config,
+            selected_analysts=["market_flow"],
+        )
+
+        with patch.object(store, 'is_enabled', return_value=True):
+            with patch("json.dump", side_effect=ValueError("simulated write failure")):
+                with self.assertRaises(ValueError):
+                    store.put("510300.SH", "2026-01-01", {"rating": "BUY"})
+
+        cache_path = store._cache_path("510300.SH", "2026-01-01")
+        self.assertFalse(cache_path.exists())
+        tmp_files = list(cache_path.parent.glob("*.tmp")) if cache_path.parent.is_dir() else []
+        self.assertEqual(len(tmp_files), 0)
         tempdir.cleanup()
 
 

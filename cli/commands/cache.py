@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import json
 from enum import Enum
 from typing import Optional
 
@@ -41,7 +40,7 @@ def cache_stats(
     s = mgr.stats()
 
     if json_output:
-        _console.print_json(json.dumps(s, indent=2))
+        _console.print_json(data=s)
         return
 
     table = Table(title="Cache Statistics", show_footer=True)
@@ -77,7 +76,11 @@ def cache_clear(
     confirm: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     if not confirm:
-        confirmed = typer.confirm(f"Clear all '{category.value}' cache? This cannot be undone")
+        if category.value == "all":
+            message = "Clear ALL cache categories? This cannot be undone"
+        else:
+            message = f"Clear all '{category.value}' cache? This cannot be undone"
+        confirmed = typer.confirm(message)
         if not confirmed:
             raise typer.Exit(code=0)
 

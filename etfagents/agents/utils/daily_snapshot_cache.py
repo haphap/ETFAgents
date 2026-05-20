@@ -107,6 +107,13 @@ def _load_snapshot_file(snapshot_kind: str, curr_date: str) -> dict[str, Any] | 
 
 
 def _quarantine_corrupt_snapshot(path: Path) -> None:
+    """Rename a corrupt snapshot file to ``.corrupt.<timestamp>`` so it self-heals on next call.
+
+    Unlike the plan's suggested pattern of returning ``None`` (transparent rebuild),
+    callers still raise :class:`DailySnapshotCacheError` after quarantining. This
+    preserves backward compatibility with existing tests that assert corrupted caches
+    must raise. The file is moved aside so the *next* call rebuilds successfully.
+    """
     corrupt_path = path.with_suffix(path.suffix + f".corrupt.{int(time.time())}")
     try:
         path.rename(corrupt_path)
