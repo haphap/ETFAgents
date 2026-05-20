@@ -87,22 +87,23 @@ def _normalize_trader_config_logic_heading(text: str) -> str:
 
     lines = content.splitlines()
     for index, line in enumerate(lines):
-        match = re.match(r"^(\s*)一、\s*(.+?)\s*$", line)
+        match = re.match(r"^(\s*(?:#{1,6}\s*)?)一、\s*(.+?)\s*$", line)
         if not match:
             if line.strip():
                 break
             continue
 
+        heading_prefix = match.group(1)
         heading_text = match.group(2).strip()
         if heading_text == "配置逻辑":
             return content
 
-        lines[index] = f"{match.group(1)}一、配置逻辑"
+        lines[index] = f"{heading_prefix}一、配置逻辑"
         if heading_text not in {"ETF配置逻辑", "配置核心逻辑"}:
             next_idx = index + 1
             while next_idx < len(lines) and not lines[next_idx].strip():
                 next_idx += 1
-            if next_idx >= len(lines) or re.match(r"^\s*二、", lines[next_idx]):
+            if next_idx >= len(lines) or re.match(r"^\s*(?:#{1,6}\s*)?二、", lines[next_idx]):
                 lines[index + 1:index + 1] = [heading_text, ""]
         return collapse_blank_lines("\n".join(lines))
 
