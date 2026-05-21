@@ -1,9 +1,19 @@
 import tempfile
 import unittest
 from pathlib import Path
+from io import StringIO
 from unittest.mock import patch
 
-from etfagents.detail import _parse_csv_last_row, _parse_csv_rows, get_etf_detail, get_etf_history_reports
+import etfagents.dataflows.interface
+from rich.console import Console
+
+from etfagents.detail import (
+    _parse_csv_first_row,
+    _parse_csv_last_row,
+    _parse_csv_rows,
+    get_etf_detail,
+    get_etf_history_reports,
+)
 
 
 class CsvParsingTests(unittest.TestCase):
@@ -36,6 +46,14 @@ class CsvParsingTests(unittest.TestCase):
         rows = _parse_csv_rows(csv_text, limit=2)
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[0]["symbol"], "600519")
+
+    def test_parse_csv_rows_with_zero_limit(self):
+        csv_text = (
+            "# Holdings\n"
+            "symbol,stk_name,stk_mkv_ratio\n"
+            "600519,贵州茅台,5.23\n"
+        )
+        self.assertEqual(_parse_csv_rows(csv_text, limit=0), [])
 
     def test_parse_csv_rows_empty(self):
         self.assertEqual(_parse_csv_rows(""), [])
@@ -74,6 +92,24 @@ class CsvParsingTests(unittest.TestCase):
             "510300.SH,20260520,4.128\n"
         )
         row = _parse_csv_last_row(csv_text)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["unit_nav"], "4.128")
+        self.assertEqual(row["end_date"], "20260520")
+
+    def test_parse_csv_first_row_returns_newest_row(self):
+        csv_text = (
+            "# ETF NAV for 510300.SH\n"
+            "# Total records: 2\n"
+            "\n"
+            "# Key snapshot\n"
+            "Ticker: 510300.SH\n"
+            "Unit NAV: 4.128\n"
+            "\n"
+            "ts_code,end_date,unit_nav\n"
+            "510300.SH,20260520,4.128\n"
+            "510300.SH,20260519,4.125\n"
+        )
+        row = _parse_csv_first_row(csv_text)
         self.assertIsNotNone(row)
         self.assertEqual(row["unit_nav"], "4.128")
         self.assertEqual(row["end_date"], "20260520")
@@ -117,8 +153,7 @@ class GetEtfDetailTests(unittest.TestCase):
     )
 
     @patch("etfagents.dataflows.interface.route_to_vendor")
-    @patch("etfagents.dataflows.config.get_config", return_value=True)
-    def test_full_detail(self, _mock_cfg, mock_vendor):
+    def test_full_detail(self, mock_vendor):
         def _vendor_side_effect(method, *args, **kwargs):
             return {
                 "get_etf_price_data": self.PRICE_CSV,
@@ -146,22 +181,7 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertIsNotNone(result["share_change_pct"])
 
     @patch("etfagents.dataflows.interface.route_to_vendor")
-    @patch("etfagents.dataflows.config.set_config")
-    @patch("etfagents.dataflows.config.get_config", return_value=None)
-    def test_set_config_called_when_no_config(self, mock_get_cfg, mock_set_cfg, mock_vendor):
-        mock_vendor.side_effect = lambda method, *a, **kw: {
-            "get_etf_price_data": self.PRICE_CSV,
-            "get_etf_nav": self.NAV_CSV,
-            "get_etf_info": self.INFO_CSV,
-            "get_etf_holdings": self.HOLDINGS_CSV,
-            "get_etf_share": self.SHARE_CSV,
-        }[method]
-        get_etf_detail("510300.SH", curr_date="2026-05-20")
-        mock_set_cfg.assert_called_once()
-
-    @patch("etfagents.dataflows.interface.route_to_vendor")
-    @patch("etfagents.dataflows.config.get_config", return_value=True)
-    def test_graceful_degradation_on_vendor_failure(self, _mock_cfg, mock_vendor):
+    def test_graceful_degradation_on_vendor_failure(self, mock_vendor):
         mock_vendor.side_effect = Exception("API down")
         result = get_etf_detail("INVALID.TICKER", curr_date="2026-05-20")
         self.assertEqual(result["ticker"], "INVALID.TICKER")
@@ -169,8 +189,7 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertIsNone(result["close"])
 
     @patch("etfagents.dataflows.interface.route_to_vendor")
-    @patch("etfagents.dataflows.config.get_config", return_value=True)
-    def test_non_a_share_ticker(self, _mock_cfg, mock_vendor):
+    def test_non_a_share_ticker(self, mock_vendor):
         def _vendor_side_effect(method, *args, **kwargs):
             if method == "get_etf_info":
                 return self.INFO_CSV.replace("a_share", "us")
@@ -183,8 +202,7 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertEqual(result["market"], "us")
 
     @patch("etfagents.dataflows.interface.route_to_vendor")
-    @patch("etfagents.dataflows.config.get_config", return_value=True)
-    def test_premium_discount_calculation(self, _mock_cfg, mock_vendor):
+    def test_premium_discount_calculation(self, mock_vendor):
         def _vendor_side_effect(method, *args, **kwargs):
             if method == "get_etf_price_data":
                 return self.PRICE_CSV
@@ -198,8 +216,7 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertAlmostEqual(result["premium_discount_bps"], -19.38, places=1)
 
     @patch("etfagents.dataflows.interface.route_to_vendor")
-    @patch("etfagents.dataflows.config.get_config", return_value=True)
-    def test_holdings_empty_when_no_data(self, _mock_cfg, mock_vendor):
+    def test_holdings_empty_when_no_data(self, mock_vendor):
         def _vendor_side_effect(method, *args, **kwargs):
             if method == "get_etf_info":
                 return self.INFO_CSV
@@ -208,6 +225,24 @@ class GetEtfDetailTests(unittest.TestCase):
         mock_vendor.side_effect = _vendor_side_effect
         result = get_etf_detail("510300.SH", curr_date="2026-05-20")
         self.assertIsNone(result["holdings"])
+
+    @patch("etfagents.dataflows.interface.route_to_vendor")
+    def test_share_change_allows_zero_latest_share(self, mock_vendor):
+        def _vendor_side_effect(method, *args, **kwargs):
+            if method == "get_etf_share":
+                return (
+                    "# ETF share\n"
+                    "\n"
+                    "ts_code,end_date,fd_share\n"
+                    "510300.SH,20260520,0\n"
+                    "510300.SH,20260519,122.5\n"
+                )
+            return "No data found."
+
+        mock_vendor.side_effect = _vendor_side_effect
+        result = get_etf_detail("510300.SH", curr_date="2026-05-20")
+        self.assertEqual(result["fund_share"], 0.0)
+        self.assertEqual(result["share_change_pct"], -100.0)
 
 
 class GetEtfHistoryReportsTests(unittest.TestCase):
@@ -254,6 +289,42 @@ class DetailCliTests(unittest.TestCase):
         result = runner.invoke(app, ["detail", "--help"])
         self.assertEqual(0, result.exit_code, result.output)
         self.assertIn("ticker", result.output.lower())
+
+    @patch("cli.commands.detail.get_etf_history_reports")
+    @patch("cli.commands.detail.get_etf_detail")
+    def test_detail_renders_rating_as_plain_text(self, mock_get_detail, mock_get_history):
+        mock_get_detail.return_value = {
+            "ticker": "510300.SH",
+            "name": "沪深300ETF",
+            "market": "a_share",
+            "latest_date": "20260520",
+            "open": None,
+            "high": None,
+            "low": None,
+            "close": 4.12,
+            "pct_chg": None,
+            "volume": None,
+            "amount": None,
+            "unit_nav": None,
+            "nav_date": None,
+            "premium_discount_bps": None,
+            "fund_share": None,
+            "share_change_pct": None,
+            "holdings": None,
+            "fund_type": None,
+            "establish_date": None,
+            "manager": None,
+            "benchmark": None,
+        }
+        mock_get_history.return_value = [{"date": "2026-05-20", "rating": "[bold]BUY[/bold]", "size_kb": 1.0}]
+
+        from cli.commands import detail as detail_module
+
+        output = StringIO()
+        with patch.object(detail_module, "_console", Console(file=output, force_terminal=False, width=120)):
+            detail_module.detail("510300.SH")
+
+        self.assertIn("[bold]BUY[/bold]", output.getvalue())
 
 
 if __name__ == "__main__":

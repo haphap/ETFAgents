@@ -6,7 +6,6 @@ import csv
 import io
 import logging
 import re
-import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -54,9 +53,14 @@ def _parse_csv_rows(csv_text: str, limit: int | None = None) -> list[dict[str, s
     data_text = "\n".join(lines[header_idx:])
     reader = csv.DictReader(io.StringIO(data_text))
     rows = list(reader)
-    if limit:
-        rows = rows[:limit]
+    if limit is not None:
+        rows = rows[: max(limit, 0)]
     return rows
+
+
+def _parse_csv_first_row(csv_text: str) -> dict[str, str] | None:
+    rows = _parse_csv_rows(csv_text, limit=1)
+    return rows[0] if rows else None
 
 
 def _parse_csv_last_row(csv_text: str) -> dict[str, str] | None:
@@ -79,13 +83,7 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
     Each API is called independently; failures do not block others.
     Missing fields default to None.
     """
-    from etfagents.dataflows.config import get_config, set_config
     from etfagents.dataflows.interface import route_to_vendor
-    from etfagents.default_config import DEFAULT_CONFIG
-    import copy
-
-    if not get_config():
-        set_config(copy.deepcopy(DEFAULT_CONFIG))
 
     if curr_date is None:
         curr_date = date.today().isoformat()
@@ -133,7 +131,7 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
     # 2. NAV data
     try:
         csv_text = route_to_vendor("get_etf_nav", ticker, curr_date)
-        row = _parse_csv_last_row(csv_text)
+        row = _parse_csv_first_row(csv_text)
         if row:
             result["unit_nav"] = _safe_float(row.get("unit_nav"))
             nav_d = row.get("end_date") or row.get("nav_date")
@@ -185,7 +183,7 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
             result["fund_share"] = _safe_float(latest.get("fd_share") or latest.get("fund_share"))
             if len(rows) >= 2:
                 prev_share = _safe_float(rows[1].get("fd_share") or rows[1].get("fund_share"))
-                if result["fund_share"] and prev_share and prev_share != 0:
+                if result["fund_share"] is not None and prev_share is not None and prev_share != 0:
                     result["share_change_pct"] = round(
                         (result["fund_share"] - prev_share) / prev_share * 100, 2
                     )

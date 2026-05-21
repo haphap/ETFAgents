@@ -151,7 +151,7 @@ def detail(
             rating_style = "green" if rating in _GREEN_RATINGS else "red" if rating in _RED_RATINGS else "yellow"
             history_table.add_row(
                 r.get("date", ""),
-                f"[{rating_style}]{rating}[/{rating_style}]",
+                Text(str(rating), style=rating_style),
                 f"{r.get('size_kb', 0):.1f} KB",
             )
     else:
