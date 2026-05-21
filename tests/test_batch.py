@@ -1,3 +1,4 @@
+import time
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -119,6 +120,37 @@ class AnalyzeCandidatePoolCallbackTests(unittest.TestCase):
         self.assertEqual(len(callbacks), 1)
         self.assertEqual(callbacks[0][0], "510300.SH")
         self.assertNotIsInstance(callbacks[0][3], Exception)
+
+    @patch("etfagents.graph.etf_graph.BacktestSignalStore")
+    @patch.object(EtfAgentsGraph, "propagate")
+    def test_callback_timing_per_ticker_delta_not_cumulative(self, mock_propagate, _mock_cache_cls):
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = None
+        _mock_cache_cls.return_value = mock_cache
+        mock_propagate.return_value = ({"final_allocation_decision": "Rating: HOLD"}, "HOLD")
+
+        fake_t = [100.0]
+        step = [30.0, 150.0]
+
+        def _fake_time():
+            if step:
+                fake_t[0] += step.pop(0)
+            return fake_t[0]
+
+        with patch("time.time", side_effect=_fake_time):
+            graph = _make_graph()
+            completed_times: list[float] = []
+            results = graph.analyze_candidate_pool(
+                ["510300.SH", "159915.SZ"],
+                "2026-05-20",
+                per_ticker_callback=lambda t, i, n, r: completed_times.append(time.time()),
+            )
+
+        self.assertEqual(len(completed_times), 2)
+        delta_1 = completed_times[0] - 100.0
+        delta_2 = completed_times[1] - completed_times[0]
+        self.assertAlmostEqual(delta_1, 30.0)
+        self.assertAlmostEqual(delta_2, 150.0)
 
 
 if __name__ == "__main__":

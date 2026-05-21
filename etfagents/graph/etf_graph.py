@@ -1,6 +1,6 @@
 import copy
 import re
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Callable, Dict, TYPE_CHECKING
 
 from langgraph.prebuilt import ToolNode
 
@@ -205,7 +205,7 @@ class EtfAgentsGraph(TradingAgentsGraph):
         trade_date: str,
         *,
         force_refresh: bool = False,
-        per_ticker_callback: Any | None = None,
+        per_ticker_callback: Callable[[str, int, int, Any], None] | None = None,
     ) -> list[dict[str, object]]:
         """Analyze a candidate pool sequentially and rank it by final allocation rating.
 

@@ -2496,11 +2496,25 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
         # Per-ticker progress tracking
         _batch_results: list[dict] = []
         _batch_errors: list[tuple[str, str]] = []
+        _ticker_elapsed: dict[str, float] = {}
         _batch_start = time.time()
+        _last_completed = _batch_start
+
+        _GREEN_RATINGS = {"BUY", "OVERWEIGHT", "买入", "增持"}
+        _RED_RATINGS = {"SELL", "UNDERWEIGHT", "卖出", "减持"}
+
+        def _format_elapsed(seconds: float) -> str:
+            if seconds < 60:
+                return f"{seconds:.0f}s"
+            return f"{int(seconds // 60)}m{int(seconds % 60)}s"
 
         def _on_ticker_done(ticker: str, idx: int, total: int, result_or_error: Any) -> None:
-            elapsed = time.time() - _batch_start
-            elapsed_str = f"{elapsed:.0f}s" if elapsed < 60 else f"{int(elapsed // 60)}m{int(elapsed % 60)}s"
+            nonlocal _last_completed
+            now = time.time()
+            elapsed = now - _last_completed
+            _last_completed = now
+            elapsed_str = _format_elapsed(elapsed)
+            _ticker_elapsed[ticker] = elapsed
             if isinstance(result_or_error, Exception):
                 _batch_errors.append((ticker, str(result_or_error)))
                 console.print(f"[{idx + 1}/{total}] [red]{ticker} ─ FAILED[/red] ({result_or_error})")
@@ -2537,18 +2551,21 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
             summary_table.add_column("Time", style="dim", justify="right")
             for item in ranked_candidates:
                 rating = item.get("rating", "-")
-                rating_style = "green" if rating in ("BUY", "OVERWEIGHT") else "red" if rating in ("SELL", "UNDERWEIGHT") else "yellow"
+                rating_style = "green" if rating in _GREEN_RATINGS else "red" if rating in _RED_RATINGS else "yellow"
+                elapsed_str = _format_elapsed(_ticker_elapsed.get(item["ticker"], 0.0))
                 summary_table.add_row(
                     item["ticker"],
                     f"[{rating_style}]{rating}[/{rating_style}]",
                     f"{item.get('suggested_weight_pct', 0.0):.1f}%",
-                    "",
+                    elapsed_str,
                 )
             for ticker, error in _batch_errors:
-                summary_table.add_row(ticker, "[red]FAILED[/red]", "-", "-")
+                elapsed_str = _format_elapsed(_ticker_elapsed.get(ticker, 0.0))
+                summary_table.add_row(ticker, "[red]FAILED[/red]", "-", elapsed_str)
             console.print(summary_table)
 
-        console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
+        total_elapsed = time.time() - _batch_start
+        console.print(f"\n[bold cyan]Analysis Complete![/bold cyan] (total: {_format_elapsed(total_elapsed)})\n")
         local_report_file = save_candidate_pool_report(
             ranked_candidates,
             selections["analysis_date"],
