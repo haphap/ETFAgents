@@ -390,10 +390,14 @@ class PaperTradingTests(unittest.TestCase):
             self.engine.register("bob", "pass")
         except Exception:
             raise unittest.SkipTest("bcrypt not available")
-        self.engine.buy("510300.SH", 500, user_id="alice")
-        self.engine.buy("159915.SZ", 300, user_id="bob")
-        pos_alice = self.engine.get_positions(user_id="alice")
-        pos_bob = self.engine.get_positions(user_id="bob")
+        self._session_write("alice")
+        engine2 = PaperTradingEngine(db_path=self.db_path)
+        engine2.buy("510300.SH", 500, user_id="alice")
+        self._session_write("bob")
+        engine3 = PaperTradingEngine(db_path=self.db_path)
+        engine3.buy("159915.SZ", 300, user_id="bob")
+        pos_alice = engine3.get_positions(user_id="alice")
+        pos_bob = engine3.get_positions(user_id="bob")
         self.assertEqual(len(pos_alice), 1)
         self.assertEqual(pos_alice[0]["ticker"], "510300.SH")
         self.assertEqual(len(pos_bob), 1)
@@ -405,10 +409,55 @@ class PaperTradingTests(unittest.TestCase):
             self.engine.register("bob", "pass")
         except Exception:
             raise unittest.SkipTest("bcrypt not available")
-        self.engine.buy("510300.SH", 500, user_id="alice")
+        self._session_write("alice")
+        engine2 = PaperTradingEngine(db_path=self.db_path)
+        engine2.buy("510300.SH", 500, user_id="alice")
         # bob should still have full cash
-        acc_bob = self.engine.get_account(user_id="bob")
+        acc_bob = engine2.get_account(user_id="bob")
         self.assertEqual(acc_bob["cash"], 1_000_000.0)
+
+    # ------------------------------------------------ auth enforcement
+
+    def test_buy_with_user_requires_login(self):
+        try:
+            self.engine.register("alice", "pass")
+        except Exception:
+            raise unittest.SkipTest("bcrypt not available")
+        with self.assertRaises(PermissionError):
+            self.engine.buy("510300.SH", 100, user_id="alice")
+
+    def test_buy_with_user_requires_matching_login(self):
+        try:
+            self.engine.register("alice", "pass")
+            self.engine.register("bob", "pass")
+        except Exception:
+            raise unittest.SkipTest("bcrypt not available")
+        self._session_write("bob")
+        engine2 = PaperTradingEngine(db_path=self.db_path)
+        with self.assertRaises(PermissionError):
+            engine2.buy("510300.SH", 100, user_id="alice")
+
+    def test_sell_with_user_requires_login(self):
+        try:
+            self.engine.register("alice", "pass")
+        except Exception:
+            raise unittest.SkipTest("bcrypt not available")
+        self._session_write("alice")
+        engine2 = PaperTradingEngine(db_path=self.db_path)
+        engine2.buy("510300.SH", 500)
+        self._unlock_t1("alice")
+        self._session_clear()
+        engine3 = PaperTradingEngine(db_path=self.db_path)
+        with self.assertRaises(PermissionError):
+            engine3.sell("510300.SH", 100, user_id="alice")
+
+    def test_reset_with_user_requires_login(self):
+        try:
+            self.engine.register("alice", "pass")
+        except Exception:
+            raise unittest.SkipTest("bcrypt not available")
+        with self.assertRaises(PermissionError):
+            self.engine.reset_account(user_id="alice")
 
     # ---------------------------------------------------- analysis_id
 

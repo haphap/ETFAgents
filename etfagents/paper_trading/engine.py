@@ -112,6 +112,26 @@ class PaperTradingEngine:
             return False
         return bcrypt.checkpw(password.encode(), row["password_hash"].encode())
 
+    def _require_user(self, user_id: str | None) -> str:
+        """Resolve and enforce the user for mutating operations.
+
+        Returns the effective user_id.  If *user_id* is explicitly given
+        and is not "default", the session must match it.
+        """
+        current = self._get_current_user()
+        if user_id is not None and user_id != "default":
+            if current == "default":
+                raise PermissionError(
+                    f"Not logged in.  Run 'etfagents paper login {user_id}' first."
+                )
+            if current != user_id:
+                raise PermissionError(
+                    f"Logged in as '{current}', not '{user_id}'.  "
+                    f"Run 'etfagents paper login {user_id}' first."
+                )
+            return user_id
+        return user_id or current
+
     # ---------------------------------------------------------------- account
 
     def get_account(self, user_id: str | None = None) -> dict:
@@ -154,7 +174,7 @@ class PaperTradingEngine:
 
     def reset_account(self, user_id: str | None = None,
                       initial_cash: float = 1_000_000.0) -> None:
-        uid = user_id or self._get_current_user()
+        uid = self._require_user(user_id)
         # All statements inside a single with-block: sqlite3 commits on clean exit.
         with self._connect() as conn:
             conn.execute(
@@ -175,8 +195,8 @@ class PaperTradingEngine:
 
     def buy(self, ticker: str, quantity: int, user_id: str | None = None,
             analysis_id: str | None = None) -> dict:
+        uid = self._require_user(user_id)
         validate_quantity(quantity)
-        uid = user_id or self._get_current_user()
         self._update_day_barrier(uid)
         price = self._get_current_price(ticker)
         amount = price * quantity
@@ -244,8 +264,8 @@ class PaperTradingEngine:
 
     def sell(self, ticker: str, quantity: int, user_id: str | None = None,
              analysis_id: str | None = None) -> dict:
+        uid = self._require_user(user_id)
         validate_quantity(quantity)
-        uid = user_id or self._get_current_user()
         self._update_day_barrier(uid)
         price = self._get_current_price(ticker)
         amount = price * quantity
@@ -590,4 +610,3 @@ class PaperTradingEngine:
                 (user_id, ticker),
             ).fetchone()
         return pos["available_qty"] if pos else 0
-
