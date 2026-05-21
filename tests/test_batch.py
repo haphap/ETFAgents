@@ -153,5 +153,55 @@ class AnalyzeCandidatePoolCallbackTests(unittest.TestCase):
         self.assertAlmostEqual(delta_2, 150.0)
 
 
+class BatchCliRegressionTests(unittest.TestCase):
+    def test_climain_imports_any_without_nameerror(self):
+        import cli.main
+        self.assertIn("Any", dir(cli.main) or "Any")
+
+    @patch("cli.main.save_candidate_pool_report")
+    @patch("cli.main.display_candidate_pool_report")
+    @patch("cli.main.EtfAgentsGraph")
+    @patch("cli.main._preflight_local_backend")
+    @patch("cli.main.typer.prompt", side_effect=KeyboardInterrupt)
+    @patch("cli.main.get_user_selections")
+    def test_candidate_pool_branch_defines_callback(self, mock_setup, mock_prompt, mock_preflight, mock_graph_cls, mock_save, mock_display):
+        from cli.main import app
+        from typer.testing import CliRunner
+        from types import SimpleNamespace
+
+        analyst = SimpleNamespace(value="market_flow")
+        mock_setup.return_value = {
+            "analysis_mode": "candidate_pool",
+            "tickers": ["510300.SH"],
+            "analysis_date": "2026-05-20",
+            "shallow_thinker": "gpt-4o-mini",
+            "deep_thinker": "gpt-4o",
+            "backend_url": "https://api.openai.com/v1",
+            "llm_provider": "openai",
+            "analysts": [analyst],
+            "output_language": "English",
+            "research_depth_name": "",
+            "research_depth": 2,
+            "google_thinking_level": None,
+            "openai_reasoning_effort": None,
+            "anthropic_effort": None,
+        }
+        mock_graph = MagicMock()
+        mock_graph.analyze_candidate_pool.return_value = [
+            {"ticker": "510300.SH", "rating": "BUY", "score": "4", "suggested_weight_pct": 100.0,
+             "final_allocation_decision": "Rating: BUY"},
+        ]
+        mock_graph_cls.return_value = mock_graph
+        mock_save.return_value = MagicMock(resolve=lambda: "/tmp/report.md")
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["analyze"])
+
+        mock_graph.analyze_candidate_pool.assert_called_once()
+        cb = mock_graph.analyze_candidate_pool.call_args[1].get("per_ticker_callback")
+        self.assertIsNotNone(cb)
+        cb("510300.SH", 0, 1, {"rating": "BUY", "suggested_weight_pct": 100.0})
+
+
 if __name__ == "__main__":
     unittest.main()
