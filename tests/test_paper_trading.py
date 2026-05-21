@@ -518,6 +518,33 @@ class PaperTradingTests(unittest.TestCase):
         pos = self.engine.get_positions()
         self.assertTrue(pos[0]["name"])  # should have some name
 
+    # ------------------------------------------ package-level API contract
+
+    def test_package_level_suggest_order_from_signal(self):
+        """suggest_order_from_signal must be importable and callable."""
+        from etfagents.paper_trading import suggest_order_from_signal
+        state = {
+            "portfolio_backtest_signal": {
+                "ticker": "510300.SH",
+                "decision_date": "2026-05-21",
+                "source": "portfolio_manager",
+                "source_section": "positioning_recommendation",
+                "rating": "BUY",
+                "target_weight_pct": 35.0,
+                "target_weight_min_pct": 35.0,
+                "target_weight_max_pct": 35.0,
+            }
+        }
+        with patch.object(PaperTradingEngine, "SESSION_PATH", self.session_path):
+            with patch.object(PaperTradingEngine, "DB_PATH", self.db_path):
+                suggestion = suggest_order_from_signal(
+                    "510300.SH", state, db_path=self.db_path,
+                )
+        self.assertIsNotNone(suggestion)
+        self.assertEqual(suggestion["ticker"], "510300.SH")
+        self.assertEqual(suggestion["side"], "buy")
+        self.assertGreaterEqual(suggestion["quantity"], 100)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -12,10 +12,12 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import bcrypt
+
+from etfagents.dataflows.exceptions import DataVendorUnavailable
 from etfagents.default_config import DEFAULT_CONFIG
 from etfagents.paper_trading.rules import (
     calc_commission,
-    estimate_trade_cost,
     validate_quantity,
 )
 
@@ -39,13 +41,6 @@ class PaperTradingEngine:
     # ------------------------------------------------------------------ auth
 
     def register(self, username: str, password: str) -> None:
-        try:
-            import bcrypt
-        except ImportError:
-            raise RuntimeError(
-                "bcrypt is required for password-protected accounts. "
-                "Install it with: pip install bcrypt>=4.0"
-            )
         if not username or not username.strip():
             raise ValueError("Username cannot be empty")
         if username == "default":
@@ -86,10 +81,15 @@ class PaperTradingEngine:
         logger.info("User '%s' logged in", username)
         return True
 
-    def logout(self) -> None:
+    def logout(self) -> str:
+        """Remove session file. Returns the username that was logged out, or empty string."""
         if self.SESSION_PATH.exists():
+            username = self._get_current_user()
             self.SESSION_PATH.unlink()
-            logger.info("Logged out")
+            logger.info("Logged out '%s'", username)
+            return username
+        logger.debug("No active session to clear")
+        return ""
 
     def _get_current_user(self) -> str:
         session_path = self.SESSION_PATH
@@ -104,13 +104,6 @@ class PaperTradingEngine:
     def _verify_password(self, username: str, password: str) -> bool:
         if username == "default":
             return True
-        try:
-            import bcrypt
-        except ImportError:
-            raise RuntimeError(
-                "bcrypt is required for password-protected accounts. "
-                "Install it with: pip install bcrypt>=4.0"
-            )
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT password_hash FROM users WHERE username = ?",
@@ -131,6 +124,7 @@ class PaperTradingEngine:
                 (uid,),
             ).fetchone()
         if row is None:
+            logger.debug("No account row for user '%s', returning synthetic defaults", uid)
             return {
                 "cash": 1_000_000.0,
                 "realized_pnl": 0.0,
@@ -162,6 +156,7 @@ class PaperTradingEngine:
     def reset_account(self, user_id: str | None = None,
                       initial_cash: float = 1_000_000.0) -> None:
         uid = user_id or self._get_current_user()
+        # All statements inside a single with-block: sqlite3 commits on clean exit.
         with self._connect() as conn:
             conn.execute("DELETE FROM trades WHERE user_id = ?", (uid,))
             conn.execute("DELETE FROM positions WHERE user_id = ?", (uid,))
@@ -373,7 +368,8 @@ class PaperTradingEngine:
         account = self.get_account(uid)
         try:
             price = self._get_current_price(ticker)
-        except Exception:
+        except (DataVendorUnavailable, RuntimeError):
+            logger.warning("Cannot fetch price for %s, skipping suggestion", ticker)
             return None
         target_value = account["total_assets"] * signal.target_weight_pct / 100
         current_value = self._position_market_value(ticker, uid)
@@ -423,7 +419,7 @@ class PaperTradingEngine:
         if not get_config():
             set_config(copy.deepcopy(DEFAULT_CONFIG))
         today = date.today().isoformat()
-        start = (date.today() - timedelta(days=5)).isoformat()
+        start = (date.today() - timedelta(days=30)).isoformat()
         csv_text = route_to_vendor("get_etf_price_data", ticker, start, today)
         if not csv_text:
             raise RuntimeError(f"No price data returned for {ticker}")
@@ -437,6 +433,8 @@ class PaperTradingEngine:
         return close
 
     def _update_day_barrier(self, user_id: str) -> None:
+        # Uses server-local date.today(); for A-share users on UTC servers
+        # this may roll over mid-trading-day. Acceptable for paper trading.
         today = date.today().isoformat()
         if self._last_date.get(user_id) == today:
             return

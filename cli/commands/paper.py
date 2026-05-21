@@ -49,8 +49,11 @@ def paper_login(
     """Login to paper trading account."""
     engine = _engine()
     if username == "default":
-        engine.logout()
-        console.print("[green]Switched to default account (no session).[/green]")
+        logged_out = engine.logout()
+        if logged_out:
+            console.print(f"[green]Logged out from '{logged_out}'. Using default account.[/green]")
+        else:
+            console.print("[dim]Switched to default account.[/dim]")
         return
     pw = questionary.password("Password:").ask()
     if pw is None:
@@ -67,8 +70,11 @@ def paper_login(
 def paper_logout():
     """Logout from paper trading account."""
     engine = _engine()
-    engine.logout()
-    console.print("[green]Logged out. Using default account.[/green]")
+    logged_out = engine.logout()
+    if logged_out:
+        console.print(f"[green]Logged out from '{logged_out}'. Using default account.[/green]")
+    else:
+        console.print("[dim]No active session. Already using default account.[/dim]")
 
 
 @paper_app.command("account")
