@@ -10,7 +10,6 @@ from rich.columns import Columns
 from rich.text import Text
 
 from etfagents.detail import get_etf_detail, get_etf_history_reports
-from etfagents.default_config import DEFAULT_CONFIG
 
 _console = Console()
 
@@ -132,7 +131,7 @@ def detail(
     # History reports
     from etfagents.dataflows.config import get_config
     config = get_config()
-    results_dir = (config if config is not None else DEFAULT_CONFIG).get("results_dir", "")
+    results_dir = config.get("results_dir", "")
     history = get_etf_history_reports(ticker, results_dir)
 
     history_table = Table(
