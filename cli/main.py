@@ -2498,7 +2498,7 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
         _batch_errors: list[tuple[str, str]] = []
         _ticker_elapsed: dict[str, float] = {}
         _batch_start = time.time()
-        _last_completed = _batch_start
+        _last_completed: float | None = None
 
         _GREEN_RATINGS = {"BUY", "OVERWEIGHT", "买入", "增持"}
         _RED_RATINGS = {"SELL", "UNDERWEIGHT", "卖出", "减持"}
@@ -2511,6 +2511,8 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
         def _on_ticker_done(ticker: str, idx: int, total: int, result_or_error: Any) -> None:
             nonlocal _last_completed
             now = time.time()
+            if _last_completed is None:
+                _last_completed = now
             elapsed = now - _last_completed
             _last_completed = now
             elapsed_str = _format_elapsed(elapsed)
@@ -2538,7 +2540,7 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
             raise typer.Exit(code=1)
 
         # Batch summary comparison table
-        if ranked_candidates:
+        if ranked_candidates or _batch_errors:
             summary_table = Table(
                 title="Candidate Pool Summary",
                 show_header=True,
