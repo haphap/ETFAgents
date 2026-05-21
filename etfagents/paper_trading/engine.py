@@ -8,6 +8,7 @@ import logging
 import os
 import sqlite3
 import tempfile
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,6 @@ from typing import Any
 import bcrypt
 
 from etfagents.dataflows.exceptions import DataVendorUnavailable
-from etfagents.default_config import DEFAULT_CONFIG
 from etfagents.paper_trading.rules import (
     calc_commission,
     validate_quantity,
@@ -33,7 +33,7 @@ class PaperTradingEngine:
 
     def __init__(self, db_path: Path | None = None, config: dict | None = None):
         self._db = db_path or self.DB_PATH
-        self._config = config or copy.deepcopy(DEFAULT_CONFIG)
+        self._config = copy.deepcopy(config) if config is not None else None
         self._ensure_schema()
         self._ensure_session_consistency()
 
@@ -142,18 +142,22 @@ class PaperTradingEngine:
                 "FROM account WHERE user_id = ?",
                 (uid,),
             ).fetchone()
-        if row is None:
-            logger.debug("No account row for user '%s', returning synthetic defaults", uid)
-            return {
-                "cash": 1_000_000.0,
-                "realized_pnl": 0.0,
-                "total_commission": 0.0,
-                "market_value": 0.0,
-                "total_assets": 1_000_000.0,
-                "unrealized_pnl": 0.0,
-                "updated_at": "",
-                "user_id": uid,
-            }
+            if row is None:
+                user = conn.execute(
+                    "SELECT username FROM users WHERE username = ?",
+                    (uid,),
+                ).fetchone()
+                if user is None:
+                    raise RuntimeError(f"Account not found for user '{uid}'. Register first.")
+                conn.execute(
+                    "INSERT OR IGNORE INTO account (user_id) VALUES (?)",
+                    (uid,),
+                )
+                row = conn.execute(
+                    "SELECT cash, realized_pnl, total_commission, updated_at "
+                    "FROM account WHERE user_id = ?",
+                    (uid,),
+                ).fetchone()
         cash = row["cash"]
         realized_pnl = row["realized_pnl"]
         total_commission = row["total_commission"]
@@ -383,23 +387,28 @@ class PaperTradingEngine:
         signal = BacktestSignal(**signal_dict) if signal_dict else None
         if not signal or signal.target_weight_pct is None:
             return None
+        signal_ticker = signal.ticker or ticker
+        if signal_ticker != ticker:
+            raise ValueError(
+                f"Signal ticker '{signal_ticker}' does not match requested ticker '{ticker}'"
+            )
 
         uid = user_id or self._get_current_user()
         account = self.get_account(uid)
         try:
-            price = self._get_current_price(ticker)
+            price = self._get_current_price(signal_ticker)
         except (DataVendorUnavailable, RuntimeError):
-            logger.warning("Cannot fetch price for %s, skipping suggestion", ticker)
+            logger.warning("Cannot fetch price for %s, skipping suggestion", signal_ticker)
             return None
         target_value = account["total_assets"] * signal.target_weight_pct / 100
-        current_value = self._position_market_value(ticker, uid)
+        current_value = self._position_market_value(signal_ticker, uid)
         delta_value = target_value - current_value
 
         if delta_value > 0:
             qty = int(delta_value / price / 100) * 100
             if qty >= 100:
                 return {
-                    "ticker": ticker,
+                    "ticker": signal_ticker,
                     "side": "buy",
                     "quantity": qty,
                     "price": price,
@@ -408,11 +417,11 @@ class PaperTradingEngine:
                 }
         elif delta_value < 0:
             qty = int(abs(delta_value) / price / 100) * 100
-            avail = self._available_qty(ticker, uid)
+            avail = self._available_qty(signal_ticker, uid)
             qty = min(qty, avail)
             if qty >= 100:
                 return {
-                    "ticker": ticker,
+                    "ticker": signal_ticker,
                     "side": "sell",
                     "quantity": qty,
                     "price": price,
@@ -433,14 +442,27 @@ class PaperTradingEngine:
 
     # --------------------------------------------------------------- internal
 
+    @contextmanager
+    def _vendor_config_context(self):
+        if self._config is None:
+            yield
+            return
+
+        from etfagents.dataflows.config import get_config, set_config
+
+        previous_config = get_config()
+        set_config(self._config)
+        try:
+            yield
+        finally:
+            set_config(previous_config)
+
     def _get_current_price(self, ticker: str) -> float:
-        from etfagents.dataflows.config import set_config, get_config
         from etfagents.dataflows.interface import route_to_vendor
-        if not get_config():
-            set_config(copy.deepcopy(DEFAULT_CONFIG))
         today = date.today().isoformat()
         start = (date.today() - timedelta(days=30)).isoformat()
-        csv_text = route_to_vendor("get_etf_price_data", ticker, start, today)
+        with self._vendor_config_context():
+            csv_text = route_to_vendor("get_etf_price_data", ticker, start, today)
         if not csv_text:
             raise RuntimeError(f"No price data returned for {ticker}")
         from etfagents.detail import _parse_csv_last_row, _safe_float
@@ -476,12 +498,10 @@ class PaperTradingEngine:
 
     def _auto_fill_name(self, ticker: str) -> str:
         try:
-            from etfagents.dataflows.config import set_config, get_config
             from etfagents.dataflows.interface import route_to_vendor
-            if not get_config():
-                set_config(copy.deepcopy(DEFAULT_CONFIG))
             today_iso = date.today().isoformat()
-            csv_text = route_to_vendor("get_etf_info", ticker, today_iso)
+            with self._vendor_config_context():
+                csv_text = route_to_vendor("get_etf_info", ticker, today_iso)
             if not csv_text or "No ETF profile" in csv_text:
                 return ticker
             import csv as csv_mod

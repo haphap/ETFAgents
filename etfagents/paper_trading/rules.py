@@ -11,7 +11,7 @@ def calc_commission(amount: float) -> float:
 
 
 def calc_stamp_duty(amount: float) -> float:
-    return 0.0
+    return amount * STAMP_DUTY_RATE
 
 
 def validate_quantity(quantity: int) -> None:

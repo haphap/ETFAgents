@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from etfagents.paper_trading.engine import PaperTradingEngine
 from etfagents.paper_trading.rules import (

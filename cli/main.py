@@ -2891,10 +2891,12 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
             selections["ticker"],
             results_dir,
         )
+        analysis_id = str(local_report_file.resolve())
         console.print(
             f"[green]✓ Local report saved:[/green] {local_report_file.resolve()}"
         )
     except Exception as e:
+        analysis_id = None
         console.print(f"[red]Error saving local report: {e}[/red]")
 
     # Prompt to export an additional copy
@@ -2933,12 +2935,13 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
                 )
                 if suggestion:
                     side_label = (
-                        "BUY" if suggestion["side"] == "buy"
+                        _localize_cli_label("BUY", "买入")
+                        if suggestion["side"] == "buy"
                         else _localize_cli_label("SELL", "卖出")
                     )
                     console.print(
                         Panel(
-                            f"{suggestion['side'].upper()} {suggestion['ticker']} "
+                            f"{side_label} {suggestion['ticker']} "
                             f"{suggestion['quantity']} shares "
                             f"(@ {suggestion['price']:.3f}, "
                             f"target weight {suggestion['target_weight_pct']:.1f}%)",
@@ -2953,7 +2956,10 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
                         _localize_cli_label("Execute this trade?", "执行此交易？")
                     ).ask()
                     if execute:
-                        result = engine._execute_suggestion(suggestion)
+                        result = engine._execute_suggestion(
+                            suggestion,
+                            analysis_id=analysis_id,
+                        )
                         summary = (
                             f"{result['side'].upper()} {result['ticker']} "
                             f"{result['quantity']} shares @ {result['price']:.3f}"

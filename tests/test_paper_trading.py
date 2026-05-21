@@ -3,7 +3,9 @@
 import json
 import os
 import sqlite3
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -23,6 +25,20 @@ def _make_price_csv(close: float = 4.12, trade_date: str = "20260521") -> str:
         "trade_date,open,high,low,close,pct_chg,vol,amount\n"
         f"{trade_date},4.00,4.15,3.95,{close},1.50,1000000,4120000\n"
     )
+
+
+def _mock_backtest_signals_module():
+    module = types.ModuleType("etfagents.backtest.signals")
+
+    class BacktestSignal:
+        def __init__(self, **kwargs):
+            self.__dict__.update(kwargs)
+
+    module.BacktestSignal = BacktestSignal
+    module.build_state_backtest_signal = lambda state: state.get("portfolio_backtest_signal")
+    package = types.ModuleType("etfagents.backtest")
+    package.signals = module
+    return package, module
 
 
 class RulesTests(unittest.TestCase):
@@ -147,20 +163,14 @@ class PaperTradingTests(unittest.TestCase):
         self.assertEqual(self.engine._get_current_user(), "default")
 
     def test__get_current_user_with_session(self):
-        try:
-            self.engine.register("alice", "pass")
-        except Exception:
-            raise unittest.SkipTest("bcrypt not available")
+        self.engine.register("alice", "pass")
         self._session_write("alice")
         engine2 = PaperTradingEngine(db_path=self.db_path)
         self.assertEqual(engine2._get_current_user(), "alice")
 
     @patch("builtins.input", return_value="")
     def test_register_user_stores_bcrypt_hash(self, _mock_input):
-        try:
-            self.engine.register("alice", "secret123")
-        except Exception:
-            return  # bcrypt may not be available
+        self.engine.register("alice", "secret123")
         with sqlite3.connect(str(self.db_path)) as conn:
             row = conn.execute(
                 "SELECT password_hash FROM users WHERE username = 'alice'"
@@ -169,10 +179,7 @@ class PaperTradingTests(unittest.TestCase):
         self.assertIn("$2b$", row[0])  # bcrypt hash prefix
 
     def test_register_duplicate_raises(self):
-        try:
-            self.engine.register("alice", "pass")
-        except Exception:
-            return
+        self.engine.register("alice", "pass")
         with self.assertRaises(ValueError):
             self.engine.register("alice", "other")
 
@@ -181,18 +188,12 @@ class PaperTradingTests(unittest.TestCase):
             self.engine.register("default", "pass")
 
     def test_login_wrong_password(self):
-        try:
-            self.engine.register("bob", "correct")
-        except Exception:
-            return
+        self.engine.register("bob", "correct")
         ok = self.engine.login("bob", "wrong")
         self.assertFalse(ok)
 
     def test_login_correct_password(self):
-        try:
-            self.engine.register("bob", "correct")
-        except Exception:
-            return
+        self.engine.register("bob", "correct")
         engine2 = PaperTradingEngine(db_path=self.db_path)
         engine2.SESSION_PATH = self.session_path
         ok = engine2.login("bob", "correct")
@@ -204,10 +205,7 @@ class PaperTradingTests(unittest.TestCase):
         self.assertTrue(ok)
 
     def test_logout_removes_session(self):
-        try:
-            self.engine.register("alice", "pass")
-        except Exception:
-            raise unittest.SkipTest("bcrypt not available")
+        self.engine.register("alice", "pass")
         self._session_write("alice")
         engine2 = PaperTradingEngine(db_path=self.db_path)
         self.assertTrue(self.session_path.exists())
@@ -385,11 +383,8 @@ class PaperTradingTests(unittest.TestCase):
     # ------------------------------------------------------- multi-user
 
     def test_multi_user_isolation(self):
-        try:
-            self.engine.register("alice", "pass")
-            self.engine.register("bob", "pass")
-        except Exception:
-            raise unittest.SkipTest("bcrypt not available")
+        self.engine.register("alice", "pass")
+        self.engine.register("bob", "pass")
         self._session_write("alice")
         engine2 = PaperTradingEngine(db_path=self.db_path)
         engine2.buy("510300.SH", 500, user_id="alice")
@@ -404,11 +399,8 @@ class PaperTradingTests(unittest.TestCase):
         self.assertEqual(pos_bob[0]["ticker"], "159915.SZ")
 
     def test_multi_user_accounts_separate(self):
-        try:
-            self.engine.register("alice", "pass")
-            self.engine.register("bob", "pass")
-        except Exception:
-            raise unittest.SkipTest("bcrypt not available")
+        self.engine.register("alice", "pass")
+        self.engine.register("bob", "pass")
         self._session_write("alice")
         engine2 = PaperTradingEngine(db_path=self.db_path)
         engine2.buy("510300.SH", 500, user_id="alice")
@@ -419,29 +411,20 @@ class PaperTradingTests(unittest.TestCase):
     # ------------------------------------------------ auth enforcement
 
     def test_buy_with_user_requires_login(self):
-        try:
-            self.engine.register("alice", "pass")
-        except Exception:
-            raise unittest.SkipTest("bcrypt not available")
+        self.engine.register("alice", "pass")
         with self.assertRaises(PermissionError):
             self.engine.buy("510300.SH", 100, user_id="alice")
 
     def test_buy_with_user_requires_matching_login(self):
-        try:
-            self.engine.register("alice", "pass")
-            self.engine.register("bob", "pass")
-        except Exception:
-            raise unittest.SkipTest("bcrypt not available")
+        self.engine.register("alice", "pass")
+        self.engine.register("bob", "pass")
         self._session_write("bob")
         engine2 = PaperTradingEngine(db_path=self.db_path)
         with self.assertRaises(PermissionError):
             engine2.buy("510300.SH", 100, user_id="alice")
 
     def test_sell_with_user_requires_login(self):
-        try:
-            self.engine.register("alice", "pass")
-        except Exception:
-            raise unittest.SkipTest("bcrypt not available")
+        self.engine.register("alice", "pass")
         self._session_write("alice")
         engine2 = PaperTradingEngine(db_path=self.db_path)
         engine2.buy("510300.SH", 500)
@@ -452,10 +435,7 @@ class PaperTradingTests(unittest.TestCase):
             engine3.sell("510300.SH", 100, user_id="alice")
 
     def test_reset_with_user_requires_login(self):
-        try:
-            self.engine.register("alice", "pass")
-        except Exception:
-            raise unittest.SkipTest("bcrypt not available")
+        self.engine.register("alice", "pass")
         with self.assertRaises(PermissionError):
             self.engine.reset_account(user_id="alice")
 
@@ -566,6 +546,19 @@ class PaperTradingTests(unittest.TestCase):
         self.assertEqual(result["side"], "sell")
         self.assertEqual(result["quantity"], 300)
 
+    def test_execute_suggestion_stores_analysis_id(self):
+        suggestion = {
+            "ticker": "510300.SH", "side": "buy",
+            "quantity": 500, "price": 4.12,
+            "target_weight_pct": 25.0, "rating": "OVERWEIGHT",
+        }
+        self.engine._execute_suggestion(
+            suggestion,
+            analysis_id="/reports/510300.SH/20260521/report.md",
+        )
+        trades = self.engine.get_trades()
+        self.assertEqual(trades[0]["analysis_id"], "/reports/510300.SH/20260521/report.md")
+
     # -------------------------------------------------------- session consistency
 
     def test_session_consistency_clears_invalid_user(self):
@@ -580,6 +573,32 @@ class PaperTradingTests(unittest.TestCase):
         self.engine.buy("510300.SH", 500)
         pos = self.engine.get_positions()
         self.assertTrue(pos[0]["name"])  # should have some name
+
+    def test_get_account_unknown_user_raises(self):
+        with self.assertRaises(RuntimeError):
+            self.engine.get_account(user_id="alice")
+
+    def test_get_current_price_uses_engine_config(self):
+        self._price_patcher.stop()
+        observed = {}
+        config = {"tool_vendors": {"get_etf_price_data": "custom_vendor"}}
+
+        def fake_route_to_vendor(*args, **kwargs):
+            from etfagents.dataflows.config import get_config
+
+            observed["tool_vendor"] = get_config()["tool_vendors"]["get_etf_price_data"]
+            return _make_price_csv()
+
+        try:
+            interface = types.ModuleType("etfagents.dataflows.interface")
+            interface.route_to_vendor = fake_route_to_vendor
+            with patch.dict(sys.modules, {"etfagents.dataflows.interface": interface}):
+                engine = PaperTradingEngine(db_path=self.db_path, config=config)
+                self.assertEqual(engine._get_current_price("510300.SH"), 4.12)
+        finally:
+            self._price_patcher.start()
+
+        self.assertEqual(observed["tool_vendor"], "custom_vendor")
 
     # ------------------------------------------ package-level API contract
 
@@ -607,6 +626,27 @@ class PaperTradingTests(unittest.TestCase):
         self.assertEqual(suggestion["ticker"], "510300.SH")
         self.assertEqual(suggestion["side"], "buy")
         self.assertGreaterEqual(suggestion["quantity"], 100)
+
+    def test_suggest_order_from_signal_rejects_mismatched_ticker(self):
+        state = {
+            "portfolio_backtest_signal": {
+                "ticker": "159915.SZ",
+                "decision_date": "2026-05-21",
+                "source": "portfolio_manager",
+                "source_section": "positioning_recommendation",
+                "rating": "BUY",
+                "target_weight_pct": 35.0,
+                "target_weight_min_pct": 35.0,
+                "target_weight_max_pct": 35.0,
+            }
+        }
+        package, module = _mock_backtest_signals_module()
+        with patch.dict(sys.modules, {
+            "etfagents.backtest": package,
+            "etfagents.backtest.signals": module,
+        }):
+            with self.assertRaises(ValueError):
+                self.engine.suggest_order_from_signal("510300.SH", state)
 
 
 if __name__ == "__main__":
