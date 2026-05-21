@@ -108,6 +108,20 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertIsNotNone(result["share_change_pct"])
 
     @patch("etfagents.dataflows.interface.route_to_vendor")
+    @patch("etfagents.dataflows.config.set_config")
+    @patch("etfagents.dataflows.config.get_config", return_value=None)
+    def test_set_config_called_when_no_config(self, mock_get_cfg, mock_set_cfg, mock_vendor):
+        mock_vendor.side_effect = lambda method, *a, **kw: {
+            "get_etf_price_data": self.PRICE_CSV,
+            "get_etf_nav": self.NAV_CSV,
+            "get_etf_info": self.INFO_CSV,
+            "get_etf_holdings": self.HOLDINGS_CSV,
+            "get_etf_share": self.SHARE_CSV,
+        }[method]
+        get_etf_detail("510300.SH", curr_date="2026-05-20")
+        mock_set_cfg.assert_called_once()
+
+    @patch("etfagents.dataflows.interface.route_to_vendor")
     @patch("etfagents.dataflows.config.get_config", return_value=True)
     def test_graceful_degradation_on_vendor_failure(self, _mock_cfg, mock_vendor):
         mock_vendor.side_effect = Exception("API down")

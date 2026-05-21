@@ -77,6 +77,7 @@ def detail(
         pd_style = "green" if data["premium_discount_bps"] <= 0 else "red"
         price_items.append(f"溢价率: [{pd_style}]{_fmt_bps(data['premium_discount_bps'])}[/{pd_style}]")
     if data.get("fund_share") is not None:
+        # Tushare fd_share is in 亿 (100M) units
         price_items.append(f"份额: {_fmt_float(data['fund_share'], 2)}亿份")
     if data.get("share_change_pct") is not None:
         sc_style = "green" if data["share_change_pct"] >= 0 else "red"
