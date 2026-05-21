@@ -129,13 +129,13 @@ class AnalyzeCandidatePoolCallbackTests(unittest.TestCase):
         _mock_cache_cls.return_value = mock_cache
         mock_propagate.return_value = ({"final_allocation_decision": "Rating: HOLD"}, "HOLD")
 
-        fake_t = [100.0]
+        current_time = [100.0]
         step = [30.0, 150.0]
 
         def _fake_time():
             if step:
-                fake_t[0] += step.pop(0)
-            return fake_t[0]
+                current_time[0] += step.pop(0)
+            return current_time[0]
 
         with patch("time.time", side_effect=_fake_time):
             graph = _make_graph()
@@ -215,8 +215,10 @@ class BatchCliRegressionTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 0)
 
         printed_objects = [call.args[0] for call in mock_print.call_args_list if call.args]
-        startup_panel = next(obj for obj in printed_objects if isinstance(obj, Panel))
-        summary_table = next(obj for obj in printed_objects if isinstance(obj, Table))
+        startup_panel = next((obj for obj in printed_objects if isinstance(obj, Panel)), None)
+        summary_table = next((obj for obj in printed_objects if isinstance(obj, Table)), None)
+        self.assertIsNotNone(startup_panel)
+        self.assertIsNotNone(summary_table)
         self.assertEqual(startup_panel.title, "候选池分析")
         self.assertEqual([column.header for column in summary_table.columns], ["代码", "评级", "权重", "耗时"])
 
@@ -340,9 +342,10 @@ class BatchCliRegressionTests(unittest.TestCase):
         mock_graph.analyze_candidate_pool.assert_called_once()
         self.assertEqual(result.exit_code, 0)
         printed_lines = [call.args[0] for call in mock_print.call_args_list if call.args and isinstance(call.args[0], str)]
+        progress_lines = [line for line in printed_lines if line.startswith("[")]
         self.assertIn("[1/2] [green]510300.SH[/green] ─ [yellow]BUY[/yellow] · Score 4 · 30s", printed_lines)
         self.assertIn("[2/2] [green]159915.SZ[/green] ─ [yellow]BUY[/yellow] · Score 4 · 2m30s", printed_lines)
-        self.assertFalse(any("50.0%" in line for line in printed_lines[:2]))
+        self.assertFalse(any("50.0%" in line for line in progress_lines))
 
 
 if __name__ == "__main__":
