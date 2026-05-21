@@ -79,6 +79,9 @@ app.add_typer(cache_app, name="cache")
 from cli.commands.watchlist import watchlist_app
 app.add_typer(watchlist_app, name="watchlist")
 
+from cli.commands.detail import detail as detail_command
+app.command(name="detail")(detail_command)
+
 
 def save_backtest_result(result, output_dir):
     from etfagents.backtest import save_backtest_result as _save_backtest_result
