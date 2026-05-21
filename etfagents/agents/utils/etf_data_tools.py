@@ -743,9 +743,27 @@ def _series_latest_and_pct(series: pd.Series, curr_date: str, days_back: int) ->
     return latest, (latest / previous - 1) * 100
 
 
+def _filter_tushare_futures_contract_catalog(
+    contracts: pd.DataFrame | None,
+    start_api: str,
+    end_api: str,
+) -> pd.DataFrame:
+    if contracts is None or contracts.empty:
+        return pd.DataFrame()
+    catalog = contracts.copy()
+    if "list_date" in catalog.columns:
+        catalog = catalog[catalog["list_date"].astype(str) <= end_api]
+    if "delist_date" in catalog.columns:
+        catalog = catalog[catalog["delist_date"].astype(str) >= start_api]
+    if catalog.empty:
+        return pd.DataFrame()
+    if "delist_date" in catalog.columns:
+        catalog = catalog.sort_values("delist_date")
+    return catalog
+
+
 @lru_cache(maxsize=64)
-def _load_tushare_futures_main_frame(
-    fut_code: str,
+def _load_tushare_futures_contract_catalog(
     exchange: str,
     curr_date: str,
     look_back_days: int = 240,
@@ -757,28 +775,60 @@ def _load_tushare_futures_main_frame(
         contracts = _query_pro(
             "fut_basic",
             exchange=exchange,
+            fields="ts_code,symbol,name,fut_code,list_date,delist_date",
+        )
+    except DataVendorUnavailable:
+        return pd.DataFrame()
+    return _filter_tushare_futures_contract_catalog(contracts, start_api, end_api)
+
+
+def _load_tushare_futures_contract_catalog_for_code(
+    fut_code: str,
+    exchange: str,
+    start_api: str,
+    end_api: str,
+) -> pd.DataFrame:
+    try:
+        contracts = _query_pro(
+            "fut_basic",
+            exchange=exchange,
             fut_code=fut_code,
             fields="ts_code,symbol,name,list_date,delist_date",
         )
     except DataVendorUnavailable:
         return pd.DataFrame()
-    if contracts is None or contracts.empty:
+    return _filter_tushare_futures_contract_catalog(contracts, start_api, end_api)
+
+
+@lru_cache(maxsize=64)
+def _load_tushare_futures_daily_exchange_frame(
+    exchange: str,
+    curr_date: str,
+    look_back_days: int = 240,
+) -> pd.DataFrame | None:
+    start_dt = _parse_trade_date(curr_date) - timedelta(days=look_back_days)
+    try:
+        frame = _query_pro(
+            "fut_daily",
+            exchange=exchange,
+            start_date=start_dt.strftime("%Y%m%d"),
+            end_date=_parse_trade_date(curr_date).strftime("%Y%m%d"),
+            fields="ts_code,trade_date,close,settle,vol,oi",
+        )
+    except DataVendorUnavailable:
+        return None
+    if frame is None:
         return pd.DataFrame()
+    return frame
 
-    catalog = contracts.copy()
-    if "list_date" in catalog.columns:
-        catalog = catalog[catalog["list_date"].astype(str) <= end_api]
-    if "delist_date" in catalog.columns:
-        catalog = catalog[catalog["delist_date"].astype(str) >= start_api]
-    if catalog.empty:
-        return pd.DataFrame()
 
-    if "delist_date" in catalog.columns:
-        catalog = catalog.sort_values("delist_date")
-    catalog = catalog.tail(12)
-
+def _load_tushare_futures_daily_contract_frames(
+    ts_codes: list[str],
+    start_api: str,
+    end_api: str,
+) -> list[pd.DataFrame]:
     frames: list[pd.DataFrame] = []
-    for ts_code in catalog.get("ts_code", pd.Series(dtype=str)).dropna().astype(str).tolist():
+    for ts_code in ts_codes:
         try:
             frame = _query_pro(
                 "fut_daily",
@@ -792,6 +842,46 @@ def _load_tushare_futures_main_frame(
         if frame is None or frame.empty:
             continue
         frames.append(frame)
+    return frames
+
+
+@lru_cache(maxsize=64)
+def _load_tushare_futures_main_frame(
+    fut_code: str,
+    exchange: str,
+    curr_date: str,
+    look_back_days: int = 240,
+) -> pd.DataFrame:
+    start_dt = _parse_trade_date(curr_date) - timedelta(days=look_back_days)
+    start_api = start_dt.strftime("%Y%m%d")
+    end_api = _parse_trade_date(curr_date).strftime("%Y%m%d")
+    catalog = _load_tushare_futures_contract_catalog(exchange, curr_date, look_back_days)
+    if "fut_code" in catalog.columns:
+        catalog = catalog[catalog["fut_code"].astype(str).str.upper() == fut_code.upper()]
+    else:
+        catalog = pd.DataFrame()
+    if catalog.empty:
+        catalog = _load_tushare_futures_contract_catalog_for_code(
+            fut_code,
+            exchange,
+            start_api,
+            end_api,
+        )
+    if catalog.empty:
+        return pd.DataFrame()
+    if "delist_date" in catalog.columns:
+        catalog = catalog.sort_values("delist_date")
+    catalog = catalog.tail(12)
+
+    ts_codes = catalog.get("ts_code", pd.Series(dtype=str)).dropna().astype(str).tolist()
+    batched = _load_tushare_futures_daily_exchange_frame(exchange, curr_date, look_back_days)
+    frames: list[pd.DataFrame] = []
+    if batched is not None and not batched.empty and {"ts_code", "trade_date"}.issubset(batched.columns):
+        filtered = batched[batched["ts_code"].astype(str).isin(ts_codes)]
+        if not filtered.empty:
+            frames.append(filtered)
+    if not frames:
+        frames = _load_tushare_futures_daily_contract_frames(ts_codes, start_api, end_api)
     if not frames:
         return pd.DataFrame()
 
@@ -820,6 +910,27 @@ def _load_tushare_futures_main_frame(
 
 
 @lru_cache(maxsize=64)
+def _load_tushare_warehouse_exchange_frame(
+    exchange: str,
+    curr_date: str,
+    look_back_days: int = 240,
+) -> pd.DataFrame | None:
+    start_dt = _parse_trade_date(curr_date) - timedelta(days=look_back_days)
+    try:
+        frame = _query_pro(
+            "fut_wsr",
+            exchange=exchange,
+            start_date=start_dt.strftime("%Y%m%d"),
+            end_date=_parse_trade_date(curr_date).strftime("%Y%m%d"),
+        )
+    except DataVendorUnavailable:
+        return None
+    if frame is None:
+        return pd.DataFrame()
+    return frame
+
+
+@lru_cache(maxsize=64)
 def _load_tushare_warehouse_series(
     symbol: str,
     exchange: str,
@@ -827,16 +938,22 @@ def _load_tushare_warehouse_series(
     look_back_days: int = 240,
 ) -> pd.Series:
     start_dt = _parse_trade_date(curr_date) - timedelta(days=look_back_days)
-    try:
-        frame = _query_pro(
-            "fut_wsr",
-            symbol=symbol,
-            exchange=exchange,
-            start_date=start_dt.strftime("%Y%m%d"),
-            end_date=_parse_trade_date(curr_date).strftime("%Y%m%d"),
-        )
-    except DataVendorUnavailable:
-        return pd.Series(dtype=float)
+    frame = _load_tushare_warehouse_exchange_frame(exchange, curr_date, look_back_days)
+    if frame is not None and not frame.empty and "symbol" in frame.columns:
+        frame = frame[frame["symbol"].astype(str).str.upper() == symbol.upper()]
+        if frame.empty:
+            return pd.Series(dtype=float)
+    if frame is None or frame.empty or "symbol" not in frame.columns:
+        try:
+            frame = _query_pro(
+                "fut_wsr",
+                symbol=symbol,
+                exchange=exchange,
+                start_date=start_dt.strftime("%Y%m%d"),
+                end_date=_parse_trade_date(curr_date).strftime("%Y%m%d"),
+            )
+        except DataVendorUnavailable:
+            return pd.Series(dtype=float)
     if frame is None or frame.empty:
         return pd.Series(dtype=float)
     if "trade_date" not in frame.columns or "vol" not in frame.columns:

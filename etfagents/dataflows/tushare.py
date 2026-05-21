@@ -248,7 +248,7 @@ def _query_pro(api_name: str, **params) -> pd.DataFrame:
             if attempt >= _TUSHARE_QUERY_MAX_ATTEMPTS or not _is_transient_tushare_error(exc):
                 break
             delay = _TUSHARE_QUERY_BACKOFF_SECONDS[min(attempt - 1, len(_TUSHARE_QUERY_BACKOFF_SECONDS) - 1)]
-            logger.warning(
+            logger.debug(
                 "Transient Tushare query '%s' failure for '%s'; retrying in %.1fs (%d/%d): %s",
                 api_name,
                 ticker or "unknown",

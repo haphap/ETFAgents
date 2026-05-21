@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from etfagents.agents.utils import etf_data_tools
 from etfagents.agents.utils.etf_data_tools import (
     _build_commodity_snapshot,
     _build_macro_snapshot,
@@ -20,6 +21,13 @@ def _series(points):
 
 
 class MacroDataToolsTests(unittest.TestCase):
+    def setUp(self):
+        etf_data_tools._load_tushare_futures_contract_catalog.cache_clear()
+        etf_data_tools._load_tushare_futures_daily_exchange_frame.cache_clear()
+        etf_data_tools._load_tushare_futures_main_frame.cache_clear()
+        etf_data_tools._load_tushare_warehouse_exchange_frame.cache_clear()
+        etf_data_tools._load_tushare_warehouse_series.cache_clear()
+
     @patch.dict(os.environ, {"FRED_API_KEY": "test-key"}, clear=False)
     @patch("etfagents.agents.utils.etf_data_tools.requests.get")
     def test_load_fred_series_parses_official_api_observations(self, mock_get):
@@ -126,6 +134,8 @@ class MacroDataToolsTests(unittest.TestCase):
     def test_tushare_futures_main_frame_returns_empty_when_trade_date_missing(self, mock_query_pro):
         mock_query_pro.side_effect = [
             pd.DataFrame({"ts_code": ["AU2406.SHF"], "list_date": ["20240101"], "delist_date": ["20240630"]}),
+            pd.DataFrame({"ts_code": ["AU2406.SHF"], "list_date": ["20240101"], "delist_date": ["20240630"]}),
+            pd.DataFrame({"close": [1.0], "oi": [2.0], "vol": [3.0]}),
             pd.DataFrame({"close": [1.0], "oi": [2.0], "vol": [3.0]}),
         ]
 
@@ -139,26 +149,18 @@ class MacroDataToolsTests(unittest.TestCase):
             pd.DataFrame(
                 {
                     "ts_code": ["AU2406.SHF", "AU2408.SHF"],
+                    "fut_code": ["AU", "AU"],
                     "list_date": ["20240101", "20240101"],
                     "delist_date": ["20240630", "20240830"],
                 }
             ),
             pd.DataFrame(
                 {
-                    "ts_code": ["AU2406.SHF", "AU2406.SHF"],
-                    "trade_date": ["20240429", "20240430"],
-                    "close": [100.0, 101.0],
-                    "oi": [1000.0, 900.0],
-                    "vol": [200.0, 150.0],
-                }
-            ),
-            pd.DataFrame(
-                {
-                    "ts_code": ["AU2408.SHF", "AU2408.SHF"],
-                    "trade_date": ["20240429", "20240430"],
-                    "close": [102.0, 103.0],
-                    "oi": [1200.0, 1300.0],
-                    "vol": [250.0, 260.0],
+                    "ts_code": ["AU2406.SHF", "AU2406.SHF", "AU2408.SHF", "AU2408.SHF"],
+                    "trade_date": ["20240429", "20240430", "20240429", "20240430"],
+                    "close": [100.0, 101.0, 102.0, 103.0],
+                    "oi": [1000.0, 900.0, 1200.0, 1300.0],
+                    "vol": [200.0, 150.0, 250.0, 260.0],
                 }
             ),
         ]
@@ -169,12 +171,65 @@ class MacroDataToolsTests(unittest.TestCase):
         self.assertEqual(list(frame["ts_code"]), ["AU2408.SHF", "AU2408.SHF"])
 
     @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_tushare_futures_main_frame_reuses_exchange_level_batches(self, mock_query_pro):
+        mock_query_pro.side_effect = [
+            pd.DataFrame(
+                {
+                    "ts_code": ["AU2406.SHF", "CU2406.SHF"],
+                    "fut_code": ["AU", "CU"],
+                    "list_date": ["20240101", "20240101"],
+                    "delist_date": ["20240630", "20240630"],
+                }
+            ),
+            pd.DataFrame(
+                {
+                    "ts_code": ["AU2406.SHF", "CU2406.SHF"],
+                    "trade_date": ["20240430", "20240430"],
+                    "close": [101.0, 70100.0],
+                    "oi": [900.0, 1200.0],
+                    "vol": [150.0, 260.0],
+                }
+            ),
+        ]
+
+        au_frame = _load_tushare_futures_main_frame.__wrapped__("AU", "SHFE", "2024-04-30", 120)
+        cu_frame = _load_tushare_futures_main_frame.__wrapped__("CU", "SHFE", "2024-04-30", 120)
+
+        self.assertEqual(list(au_frame["ts_code"]), ["AU2406.SHF"])
+        self.assertEqual(list(cu_frame["ts_code"]), ["CU2406.SHF"])
+        self.assertEqual(mock_query_pro.call_count, 2)
+        self.assertEqual(mock_query_pro.call_args_list[0].kwargs["exchange"], "SHFE")
+        self.assertNotIn("fut_code", mock_query_pro.call_args_list[0].kwargs)
+        self.assertEqual(mock_query_pro.call_args_list[1].args[0], "fut_daily")
+        self.assertEqual(mock_query_pro.call_args_list[1].kwargs["exchange"], "SHFE")
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
     def test_tushare_warehouse_series_returns_empty_when_trade_date_missing(self, mock_query_pro):
-        mock_query_pro.return_value = pd.DataFrame({"vol": [10.0]})
+        mock_query_pro.return_value = pd.DataFrame({"symbol": ["AU"], "vol": [10.0]})
 
         series = _load_tushare_warehouse_series.__wrapped__("AU", "SHFE", "2026-04-30", 120)
 
         self.assertTrue(series.empty)
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_tushare_warehouse_series_reuses_exchange_level_batches(self, mock_query_pro):
+        mock_query_pro.return_value = pd.DataFrame(
+            {
+                "symbol": ["AU", "CU"],
+                "trade_date": ["20240430", "20240430"],
+                "vol": [10.0, 30.0],
+            }
+        )
+
+        au_series = _load_tushare_warehouse_series.__wrapped__("AU", "SHFE", "2024-04-30", 120)
+        cu_series = _load_tushare_warehouse_series.__wrapped__("CU", "SHFE", "2024-04-30", 120)
+
+        self.assertEqual(list(au_series), [10.0])
+        self.assertEqual(list(cu_series), [30.0])
+        self.assertEqual(mock_query_pro.call_count, 1)
+        self.assertEqual(mock_query_pro.call_args.kwargs["exchange"], "SHFE")
+        self.assertNotIn("symbol", mock_query_pro.call_args.kwargs)
+
 
     @patch("etfagents.agents.utils.etf_data_tools._load_tushare_warehouse_series")
     @patch("etfagents.agents.utils.etf_data_tools._load_tushare_futures_main_frame")
