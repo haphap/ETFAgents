@@ -16,6 +16,11 @@ The project coordinates specialist analyst agents, a bull/bear research debate, 
 - **Layered analyst report validation** with static structural checks first, then an optional structured-output LLM judge / refine pass
 - **Checkpoint/resume support** for long-running runs
 - **Cache management** with `etfagents cache stats/cleanup/clear` across API, signal, snapshot, and checkpoint categories
+- **ETF watchlist** with SQLite-backed groups and tags, usable from `analyze` and `backtest`
+- **Smart model recommendation** with capability-level rating and research-depth-aware model selection
+- **ETF detail panel** with Rich rendering of price, NAV, holdings, fund info, and historical reports
+- **Batch candidate-pool analysis** with sequential per-ticker progress, comparison table, and color-coded ratings
+- **Paper trading simulation** with multi-user support (bcrypt auth), A-share ETF rules (T+1, commission, lot size), and post-analysis trade suggestions
 - **Layered agent memory** with latest-analysis continuity, resolved lessons, and reusable method reminders
 - **English and Chinese output** for reports and final decisions
 
@@ -97,6 +102,14 @@ Or run directly from source:
 python -m cli.main
 ```
 
+### Interactive Analysis
+
+The CLI walks through ticker selection, analysis date, LLM provider, model choice, research depth, output language, and analyst selection, then streams the graph execution live in the terminal.
+
+```bash
+etfagents analyze
+```
+
 Enable checkpointing for resumable runs:
 
 ```bash
@@ -104,19 +117,7 @@ etfagents analyze --checkpoint
 etfagents analyze --clear-checkpoints --checkpoint
 ```
 
-The CLI walks through ticker selection, analysis date, LLM provider, model choices, research depth, output language, and analyst selection, then streams the graph execution live in the terminal.
-
-Run a candidate-pool backtest from the CLI:
-
-```bash
-etfagents backtest \
-  --tickers 510300.SH,159915.SZ \
-  --start-date 2026-01-02 \
-  --end-date 2026-03-31 \
-  --execution-timing same_close
-```
-
-Manage cached data:
+### Cache Management (`etfagents cache`)
 
 ```bash
 etfagents cache stats                    # Show cache statistics (4 categories)
@@ -125,6 +126,146 @@ etfagents cache cleanup --days 7         # Remove entries older than 7 days
 etfagents cache cleanup --days 0         # Clear all cached entries
 etfagents cache clear --type signals     # Clear signal cache only
 etfagents cache clear --type all --yes   # Clear everything (skip prompt)
+```
+
+### Watchlist (`etfagents watchlist`)
+
+Manage ETF tickers with groups and tags in a SQLite database (`~/.etfagents/watchlist.db`):
+
+```bash
+# Add tickers to the default group
+etfagents watchlist add 510300.SH,159915.SZ
+
+# Add to a named group (auto-created)
+etfagents watchlist add 513100.SH --group tech --tags china,internet
+
+# Add with notes
+etfagents watchlist add 518880.SH --notes "Gold ETF"
+
+# List all watchlist entries
+etfagents watchlist list
+
+# List with filters
+etfagents watchlist list --group tech
+etfagents watchlist list --tags china,internet
+etfagents watchlist list --json
+
+# Remove tickers
+etfagents watchlist remove 510300.SH
+etfagents watchlist remove 159915.SZ --group tech
+
+# Group management
+etfagents watchlist group list
+etfagents watchlist group add tech
+etfagents watchlist group rename tech technology
+etfagents watchlist group remove tech
+```
+
+Use watchlist groups directly in analysis and backtests:
+
+```bash
+etfagents analyze --watchlist tech
+etfagents backtest --watchlist tech --start-date 2026-01-02 --end-date 2026-03-31
+```
+
+### ETF Detail (`etfagents detail`)
+
+Show a comprehensive Rich panel for an ETF:
+
+```bash
+etfagents detail 510300.SH
+etfagents detail 159915.SZ --date 2026-05-18
+```
+
+Displays: latest price, NAV, premium/discount, fund share changes, top 10 holdings, fund type, manager, benchmark, and historical analysis reports from the results directory.
+
+### Candidate-Pool (Batch) Analysis
+
+Enter multiple tickers or use a watchlist group to run sequential analysis across a pool:
+
+```bash
+etfagents analyze --watchlist my_pool
+```
+
+The CLI shows:
+- A startup panel with tickers, date, analysts, and progress
+- Per-ticker progress lines: `[N/3] TICKER ─ RATING · Score N · time`
+- A batch summary comparison table after completion (ticker, rating, weight, elapsed time)
+- Color-coded ratings (green for BUY/OVERWEIGHT, red for SELL/UNDERWEIGHT)
+
+### Backtest
+
+Run a candidate-pool backtest:
+
+```bash
+etfagents backtest \
+  --tickers 510300.SH,159915.SZ \
+  --start-date 2026-01-02 \
+  --end-date 2026-03-31 \
+  --execution-timing same_close \
+  --top-k 3 \
+  --benchmark-tickers equal_weight_pool \
+  --rebalance-interval-days 21
+
+etfagents backtest \
+  --watchlist tech \
+  --start-date 2026-01-02 \
+  --end-date 2026-03-31 \
+  --force-refresh
+```
+
+### Paper Trading (`etfagents paper`)
+
+Multi-user paper trading simulation with A-share ETF rules:
+
+```bash
+# Register and login
+etfagents paper register alice
+etfagents paper login alice
+
+# Check account
+etfagents paper account
+etfagents paper account --json
+
+# Trade (lot size = 100, commission 0.025% / min ¥5, no stamp duty)
+etfagents paper buy 510300.SH 1000
+etfagents paper buy 159915.SZ 500 --analysis-id /reports/r1
+
+# View positions with live P&L
+etfagents paper positions
+etfagents paper positions --json
+
+# Sell (T+1: shares bought today cannot be sold until next day)
+etfagents paper sell 510300.SH 500
+
+# Trade history
+etfagents paper history
+etfagents paper history --limit 50
+
+# Reset account
+etfagents paper reset --yes --cash 2000000
+
+# Multi-user isolation
+etfagents paper register bob
+etfagents paper buy 510300.SH 500 --user bob
+
+# Logout / switch
+etfagents paper logout
+etfagents paper login default   # uses default (no-password) account
+```
+
+After a single-ticker `analyze` run with a BUY or OVERWEIGHT rating, the CLI offers a post-analysis paper trade suggestion:
+
+```
+Paper Trade Suggestion: BUY 510300.SH 8500 shares (@ 4.120, target weight 35.0%)
+Execute this trade? (Y/n)
+```
+
+### Memory
+
+```bash
+etfagents memory promote-playbook --id <entry-id>
+etfagents memory promote-playbook --id <entry-id> --expires-days 30 --max-active 20
 ```
 
 ## Python Usage
@@ -160,6 +301,64 @@ backtest = graph.backtest_candidate_pool(
 print(backtest.metrics.cumulative_return)
 ```
 
+Other Python APIs:
+
+```python
+# Cache management
+from etfagents.cache_manager import CacheManager
+cm = CacheManager()
+print(cm.stats())          # {"api": {...}, "signals": {...}, ...}
+cm.cleanup(max_age_days=30)
+cm.clear(category="all")
+
+# Watchlist
+from etfagents.watchlist import WatchlistManager
+wl = WatchlistManager()
+wl.add("510300.SH", group="tech", tags=["china"], notes="CSI 300 ETF")
+wl.add("159915.SZ", group="tech")
+tickers = wl.get_tickers_for_analysis("tech")
+# ["510300.SH", "159915.SZ"]
+
+# ETF detail
+from etfagents.detail import get_etf_detail
+detail = get_etf_detail("510300.SH")
+print(detail["close"], detail["name"], detail["premium_discount_bps"])
+
+# Paper trading engine
+from etfagents.paper_trading import PaperTradingEngine
+engine = PaperTradingEngine()
+engine.register("alice", "mypassword")
+engine.buy("510300.SH", 1000, user_id="alice")
+engine.sell("510300.SH", 500, user_id="alice")
+positions = engine.get_positions(user_id="alice")
+account = engine.get_account(user_id="alice")
+
+# Signal → order suggestion
+suggestion = engine.suggest_order_from_signal("510300.SH", final_state)
+if suggestion:
+    engine._execute_suggestion(suggestion)
+```
+
+## Smart Model Recommendation
+
+The interactive CLI (Step 5: Research Depth) triggers capability-based model selection:
+
+| Depth | Debate Rounds | Risk Rounds | Target Capability |
+|-------|---------------|-------------|-------------------|
+| Quick / 快速 | 1 | 1 | Balanced |
+| Standard / 标准 | 2 | 1 | Capable |
+| Deep / 深入 | 3 | 2 | Strong |
+
+```python
+from etfagents.llm_clients.model_catalog import get_depth_config, recommend_models
+
+depth_config = get_depth_config("标准")
+# {"debate_rounds": 2, "risk_rounds": 1, ...}
+
+models = recommend_models("标准", "openai")
+# {"quick": "gpt-5.4-mini", "deep": "gpt-5.4"}
+```
+
 There is also a thin script example:
 
 ```bash
@@ -173,12 +372,16 @@ Saved backtest artifacts now include `summary.md`, `report.html`, `nav_chart.svg
 
 ```text
 cli/                  Interactive CLI entrypoint and terminal UI
-cli/commands/         CLI subcommand modules (cache, etc.)
+cli/commands/         CLI subcommand modules (cache, watchlist, detail, paper)
 etfagents/agents/     Analyst, researcher, trader, risk, and manager agents
+etfagents/backtest/   Backtrader engine, candidate-pool runner, signal cache
 etfagents/cache_manager.py  Unified cache statistics and cleanup
 etfagents/dataflows/  Data vendor integrations and routing
 etfagents/graph/      LangGraph orchestration, setup, replay, checkpoints
-etfagents/llm_clients/Provider abstraction and model handling
+etfagents/llm_clients/Provider abstraction and model catalog
+etfagents/paper_trading/ Paper trading engine, A-share ETF rules, session auth
+etfagents/detail.py   ETF detail data aggregation
+etfagents/watchlist.py SQLite-backed watchlist manager
 tests/                Unit test suite
 main.py               Minimal programmatic example
 ```
