@@ -156,7 +156,7 @@ class AnalyzeCandidatePoolCallbackTests(unittest.TestCase):
 class BatchCliRegressionTests(unittest.TestCase):
     def test_climain_imports_any_without_nameerror(self):
         import cli.main
-        self.assertIn("Any", dir(cli.main) or "Any")
+        self.assertIn("Any", dir(cli.main))
 
     @patch("cli.main.save_candidate_pool_report")
     @patch("cli.main.display_candidate_pool_report")
@@ -290,7 +290,14 @@ class BatchCliRegressionTests(unittest.TestCase):
         from typer.testing import CliRunner
         from types import SimpleNamespace
 
-        fake_clock = iter([1000.0, 1030.0, 1180.0, 1200.0])
+        fake_clock = iter(
+            [
+                1000.0,  # batch start
+                1030.0,  # first ticker completes
+                1180.0,  # second ticker completes
+                1200.0,  # final batch duration
+            ]
+        )
         mock_time.time.side_effect = lambda: next(fake_clock)
 
         analyst = SimpleNamespace(value="market_flow")
