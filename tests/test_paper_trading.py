@@ -110,6 +110,20 @@ class PaperTradingTests(unittest.TestCase):
         if self.session_path.exists():
             self.session_path.unlink()
 
+    def _unlock_t1(self, uid: str = None):
+        """Simulate a new day: set last_unlock_date to yesterday and unlock positions."""
+        if uid is None:
+            uid = self.default_uid
+        with sqlite3.connect(str(self.db_path)) as conn:
+            conn.execute(
+                "UPDATE account SET last_unlock_date = '2000-01-01' WHERE user_id = ?",
+                (uid,),
+            )
+            conn.execute(
+                "UPDATE positions SET available_qty = quantity WHERE user_id = ?",
+                (uid,),
+            )
+
     # ----------------------------------------------------------------- auth
 
     def test_default_user_exists(self):
@@ -257,8 +271,7 @@ class PaperTradingTests(unittest.TestCase):
     def test_sell_basic(self):
         self.engine.buy("510300.SH", 1000)
         # Need to unlock T+1 to sell
-        self.engine._last_date[self.default_uid] = "2000-01-01"
-        self.engine._update_day_barrier(self.default_uid)
+        self._unlock_t1()
         result = self.engine.sell("510300.SH", 500)
         self.assertEqual(result["side"], "sell")
         self.assertEqual(result["quantity"], 500)
@@ -270,8 +283,7 @@ class PaperTradingTests(unittest.TestCase):
 
     def test_sell_updates_account(self):
         self.engine.buy("510300.SH", 1000)
-        self.engine._last_date[self.default_uid] = "2000-01-01"
-        self.engine._update_day_barrier(self.default_uid)
+        self._unlock_t1()
         self.engine.sell("510300.SH", 500)
         acc = self.engine.get_account()
         # cash: 1000000 - 4125 (buy) + 2060 - 5 (sell) = 997930
@@ -280,16 +292,14 @@ class PaperTradingTests(unittest.TestCase):
 
     def test_sell_zeroes_position_when_fully_sold(self):
         self.engine.buy("510300.SH", 500)
-        self.engine._last_date[self.default_uid] = "2000-01-01"
-        self.engine._update_day_barrier(self.default_uid)
+        self._unlock_t1()
         self.engine.sell("510300.SH", 500)
         pos = self.engine.get_positions()
         self.assertEqual(len(pos), 0)
 
     def test_sell_insufficient_shares_raises(self):
         self.engine.buy("510300.SH", 200)
-        self.engine._last_date[self.default_uid] = "2000-01-01"
-        self.engine._update_day_barrier(self.default_uid)
+        self._unlock_t1()
         with self.assertRaises(ValueError):
             self.engine.sell("510300.SH", 500)
 
@@ -309,14 +319,21 @@ class PaperTradingTests(unittest.TestCase):
         """After day barrier, available_qty equals quantity."""
         self.engine.buy("510300.SH", 500)
         # Simulate next day
-        self.engine._last_date[self.default_uid] = "2000-01-01"
-        self.engine._update_day_barrier(self.default_uid)
+        self._unlock_t1()
         pos = self.engine.get_positions()
         self.assertEqual(pos[0]["available_qty"], 500)
         # Sell should now work
         self.engine.sell("510300.SH", 500)
         pos = self.engine.get_positions()
         self.assertEqual(len(pos), 0)
+
+    def test_t1_restriction_survives_restart(self):
+        """Shares bought today stay locked after a process restart on the same day."""
+        self.engine.buy("510300.SH", 500)
+        # Simulate a fresh engine instance (process restart) against the same DB
+        engine2 = PaperTradingEngine(db_path=self.db_path)
+        with self.assertRaises(ValueError):
+            engine2.sell("510300.SH", 100)
 
     # ------------------------------------------------------------- positions
 
@@ -338,8 +355,7 @@ class PaperTradingTests(unittest.TestCase):
 
     def test_history(self):
         self.engine.buy("510300.SH", 500)
-        self.engine._last_date[self.default_uid] = "2000-01-01"
-        self.engine._update_day_barrier(self.default_uid)
+        self._unlock_t1()
         self.engine.sell("510300.SH", 300)
         trades = self.engine.get_trades()
         self.assertEqual(len(trades), 2)
@@ -432,8 +448,7 @@ class PaperTradingTests(unittest.TestCase):
 
     def test_suggest_order_from_signal_sell(self):
         self.engine.buy("510300.SH", 30000)
-        self.engine._last_date[self.default_uid] = "2000-01-01"
-        self.engine._update_day_barrier(self.default_uid)
+        self._unlock_t1()
         state = {
             "portfolio_backtest_signal": {
                 "ticker": "510300.SH",
@@ -492,8 +507,7 @@ class PaperTradingTests(unittest.TestCase):
 
     def test_execute_sell_suggestion(self):
         self.engine.buy("510300.SH", 1000)
-        self.engine._last_date[self.default_uid] = "2000-01-01"
-        self.engine._update_day_barrier(self.default_uid)
+        self._unlock_t1()
         suggestion = {
             "ticker": "510300.SH", "side": "sell",
             "quantity": 300, "price": 4.12,

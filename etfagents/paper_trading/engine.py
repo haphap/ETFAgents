@@ -34,7 +34,6 @@ class PaperTradingEngine:
     def __init__(self, db_path: Path | None = None, config: dict | None = None):
         self._db = db_path or self.DB_PATH
         self._config = config or copy.deepcopy(DEFAULT_CONFIG)
-        self._last_date: dict[str, str] = {}
         self._ensure_schema()
         self._ensure_session_consistency()
 
@@ -158,8 +157,10 @@ class PaperTradingEngine:
         uid = user_id or self._get_current_user()
         # All statements inside a single with-block: sqlite3 commits on clean exit.
         with self._connect() as conn:
-            conn.execute("DELETE FROM trades WHERE user_id = ?", (uid,))
-            conn.execute("DELETE FROM positions WHERE user_id = ?", (uid,))
+            conn.execute(
+                "DELETE FROM trades WHERE user_id = ?", (uid,))
+            conn.execute(
+                "DELETE FROM positions WHERE user_id = ?", (uid,))
             conn.execute(
                 "INSERT INTO account (user_id, cash, realized_pnl, total_commission) "
                 "VALUES (?, ?, 0.0, 0.0) "
@@ -168,7 +169,6 @@ class PaperTradingEngine:
                 "total_commission=excluded.total_commission, updated_at=datetime('now')",
                 (uid, initial_cash),
             )
-        self._last_date.pop(uid, None)
         logger.info("Account '%s' reset to %.2f", uid, initial_cash)
 
     # ------------------------------------------------------------------ trade
@@ -433,17 +433,26 @@ class PaperTradingEngine:
         return close
 
     def _update_day_barrier(self, user_id: str) -> None:
-        # Uses server-local date.today(); for A-share users on UTC servers
-        # this may roll over mid-trading-day. Acceptable for paper trading.
+        # Persists the last unlock date in account.last_unlock_date.
+        # On a new calendar day, all positions unlock (available_qty = quantity).
+        # Same-day process restarts will NOT re-unlock because the DB date
+        # matches today — preserving the T+1 guarantee across restarts.
         today = date.today().isoformat()
-        if self._last_date.get(user_id) == today:
-            return
         with self._connect() as conn:
+            row = conn.execute(
+                "SELECT last_unlock_date FROM account WHERE user_id = ?",
+                (user_id,),
+            ).fetchone()
+            if row and row["last_unlock_date"] == today:
+                return
             conn.execute(
                 "UPDATE positions SET available_qty = quantity WHERE user_id = ?",
                 (user_id,),
             )
-        self._last_date[user_id] = today
+            conn.execute(
+                "UPDATE account SET last_unlock_date = ? WHERE user_id = ?",
+                (today, user_id),
+            )
 
     def _auto_fill_name(self, ticker: str) -> str:
         try:
@@ -489,6 +498,7 @@ class PaperTradingEngine:
                     total_commission REAL   NOT NULL DEFAULT 0.0,
                     created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
                     updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+                    last_unlock_date TEXT,
                     UNIQUE(user_id)
                 );
 
@@ -522,6 +532,13 @@ class PaperTradingEngine:
                 CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(user_id, ticker);
                 CREATE INDEX IF NOT EXISTS idx_trades_created ON trades(user_id, created_at DESC);
             """)
+            # Migration: add last_unlock_date to existing databases
+            try:
+                conn.execute(
+                    "ALTER TABLE account ADD COLUMN last_unlock_date TEXT"
+                )
+            except sqlite3.OperationalError:
+                pass
             conn.execute(
                 "INSERT OR IGNORE INTO account (user_id) VALUES ('default')"
             )
