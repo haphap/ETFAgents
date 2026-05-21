@@ -161,10 +161,72 @@ class BatchCliRegressionTests(unittest.TestCase):
     @patch("cli.main.save_candidate_pool_report")
     @patch("cli.main.display_candidate_pool_report")
     @patch("cli.main.EtfAgentsGraph")
+    @patch("cli.main.console.print")
+    @patch("cli.main.get_output_language", return_value="Chinese")
     @patch("cli.main._preflight_local_backend")
     @patch("cli.main.typer.prompt", return_value="N")
     @patch("cli.main.get_user_selections")
-    def test_candidate_pool_branch_defines_callback(self, mock_setup, mock_prompt, mock_preflight, mock_graph_cls, mock_save, mock_display):
+    def test_candidate_pool_branch_localizes_batch_ui(
+        self,
+        mock_setup,
+        mock_prompt,
+        mock_preflight,
+        _mock_output_language,
+        mock_print,
+        mock_graph_cls,
+        mock_display,
+        mock_save,
+    ):
+        from cli.main import app
+        from rich.panel import Panel
+        from rich.table import Table
+        from typer.testing import CliRunner
+        from types import SimpleNamespace
+
+        analyst = SimpleNamespace(value="market_flow")
+        mock_setup.return_value = {
+            "analysis_mode": "candidate_pool",
+            "tickers": ["510300.SH"],
+            "analysis_date": "2026-05-20",
+            "shallow_thinker": "gpt-4o-mini",
+            "deep_thinker": "gpt-4o",
+            "backend_url": "https://api.openai.com/v1",
+            "llm_provider": "openai",
+            "analysts": [analyst],
+            "output_language": "English",
+            "research_depth_name": "",
+            "research_depth": 2,
+            "google_thinking_level": None,
+            "openai_reasoning_effort": None,
+            "anthropic_effort": None,
+        }
+        mock_graph = MagicMock()
+        mock_graph.analyze_candidate_pool.return_value = [
+            {"ticker": "510300.SH", "rating": "BUY", "score": "4", "suggested_weight_pct": 100.0,
+             "final_allocation_decision": "Rating: BUY"},
+        ]
+        mock_graph_cls.return_value = mock_graph
+        mock_save.return_value = MagicMock(resolve=lambda: "/tmp/report.md")
+
+        runner = CliRunner()
+        result = runner.invoke(app, ["analyze"])
+
+        mock_graph.analyze_candidate_pool.assert_called_once()
+        self.assertEqual(result.exit_code, 0)
+
+        printed_objects = [call.args[0] for call in mock_print.call_args_list if call.args]
+        startup_panel = next(obj for obj in printed_objects if isinstance(obj, Panel))
+        summary_table = next(obj for obj in printed_objects if isinstance(obj, Table))
+        self.assertEqual(startup_panel.title, "候选池分析")
+        self.assertEqual([column.header for column in summary_table.columns], ["代码", "评级", "权重", "耗时"])
+
+    @patch("cli.main.save_candidate_pool_report")
+    @patch("cli.main.display_candidate_pool_report")
+    @patch("cli.main.EtfAgentsGraph")
+    @patch("cli.main._preflight_local_backend")
+    @patch("cli.main.typer.prompt", return_value="N")
+    @patch("cli.main.get_user_selections")
+    def test_candidate_pool_branch_defines_callback(self, mock_setup, mock_prompt, mock_preflight, mock_graph_cls, mock_display, mock_save):
         from cli.main import app
         from typer.testing import CliRunner
         from types import SimpleNamespace
@@ -198,24 +260,37 @@ class BatchCliRegressionTests(unittest.TestCase):
         result = runner.invoke(app, ["analyze"])
 
         mock_graph.analyze_candidate_pool.assert_called_once()
+        self.assertEqual(result.exit_code, 0)
         cb = mock_graph.analyze_candidate_pool.call_args[1].get("per_ticker_callback")
         self.assertIsNotNone(cb)
-        cb("510300.SH", 0, 1, {"rating": "BUY", "suggested_weight_pct": 100.0})
+        cb("510300.SH", 0, 1, {"rating": "BUY", "score": "4", "suggested_weight_pct": 100.0})
 
     @patch("cli.main.save_candidate_pool_report")
     @patch("cli.main.display_candidate_pool_report")
     @patch("cli.main.EtfAgentsGraph")
+    @patch("cli.main.console.print")
+    @patch("cli.main.get_output_language", return_value="English")
     @patch("cli.main._preflight_local_backend")
     @patch("cli.main.typer.prompt", return_value="N")
     @patch("cli.main.get_user_selections")
     @patch("cli.main.time")
-    def test_candidate_pool_callback_timing_uses_per_ticker_delta(self, mock_time, mock_setup, mock_prompt, mock_preflight, mock_graph_cls, mock_save, mock_display):
+    def test_candidate_pool_callback_timing_uses_per_ticker_delta(
+        self,
+        mock_time,
+        mock_setup,
+        mock_prompt,
+        mock_preflight,
+        _mock_output_language,
+        mock_print,
+        mock_graph_cls,
+        mock_display,
+        mock_save,
+    ):
         from cli.main import app
         from typer.testing import CliRunner
         from types import SimpleNamespace
 
         fake_clock = iter([1000.0, 1030.0, 1180.0, 1200.0])
-        mock_time.time.side_effect = lambda: next(fake_clock)
         mock_time.time.side_effect = lambda: next(fake_clock)
 
         analyst = SimpleNamespace(value="market_flow")
@@ -236,12 +311,15 @@ class BatchCliRegressionTests(unittest.TestCase):
             "anthropic_effort": None,
         }
 
-        captured_elapsed: list[float] = []
-
         def _fake_analyze(tickers, date, per_ticker_callback=None):
             if per_ticker_callback:
                 for i, t in enumerate(tickers):
-                    per_ticker_callback(t, i, len(tickers), {"rating": "BUY", "suggested_weight_pct": 50.0})
+                    per_ticker_callback(
+                        t,
+                        i,
+                        len(tickers),
+                        {"rating": "BUY", "score": "4", "suggested_weight_pct": 50.0},
+                    )
             return [{"ticker": t, "rating": "BUY", "score": "4", "suggested_weight_pct": 50.0} for t in tickers]
 
         mock_graph = MagicMock()
@@ -253,6 +331,11 @@ class BatchCliRegressionTests(unittest.TestCase):
         result = runner.invoke(app, ["analyze"])
 
         mock_graph.analyze_candidate_pool.assert_called_once()
+        self.assertEqual(result.exit_code, 0)
+        printed_lines = [call.args[0] for call in mock_print.call_args_list if call.args and isinstance(call.args[0], str)]
+        self.assertIn("[1/2] [green]510300.SH[/green] ─ [yellow]BUY[/yellow] · Score 4 · 30s", printed_lines)
+        self.assertIn("[2/2] [green]159915.SZ[/green] ─ [yellow]BUY[/yellow] · Score 4 · 2m30s", printed_lines)
+        self.assertFalse(any("50.0%" in line for line in printed_lines[:2]))
 
 
 if __name__ == "__main__":

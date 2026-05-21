@@ -2484,21 +2484,31 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
         results_dir.mkdir(parents=True, exist_ok=True)
 
         # Startup panel
-        analyst_labels = ", ".join(ANALYST_AGENT_NAMES.get(a, a) for a in selected_analyst_keys)
-        startup_content = (
-            f"[bold]Tickers:[/bold] {', '.join(selections['tickers'])}\n"
-            f"[bold]Date:[/bold] {selections['analysis_date']}\n"
-            f"[bold]Analysts:[/bold] {analyst_labels}\n"
-            f"[bold]Progress:[/bold] sequential (0/{len(selections['tickers'])})"
+        analyst_labels = ", ".join(
+            _localize_cli_role_title(ANALYST_AGENT_NAMES.get(a, a))
+            for a in selected_analyst_keys
         )
-        console.print(Panel(startup_content, title="Candidate Pool Analysis", border_style="cyan", padding=(1, 2)))
+        startup_content = (
+            f"[bold]{_localize_cli_label('Tickers', '代码')}:[/bold] {', '.join(selections['tickers'])}\n"
+            f"[bold]{_localize_cli_label('Date', '日期')}:[/bold] {selections['analysis_date']}\n"
+            f"[bold]{_localize_cli_label('Analysts', '分析师')}:[/bold] {analyst_labels}\n"
+            f"[bold]{_localize_cli_label('Progress', '进度')}:[/bold] "
+            f"{_localize_cli_label('sequential', '顺序执行')} (0/{len(selections['tickers'])})"
+        )
+        console.print(
+            Panel(
+                startup_content,
+                title=_localize_cli_label("Candidate Pool Analysis", "候选池分析"),
+                border_style="cyan",
+                padding=(1, 2),
+            )
+        )
 
         # Per-ticker progress tracking
-        _batch_results: list[dict] = []
         _batch_errors: list[tuple[str, str]] = []
         _ticker_elapsed: dict[str, float] = {}
         _batch_start = time.time()
-        _last_completed: float | None = None
+        _last_completed = _batch_start
 
         _GREEN_RATINGS = {"BUY", "OVERWEIGHT", "买入", "增持"}
         _RED_RATINGS = {"SELL", "UNDERWEIGHT", "卖出", "减持"}
@@ -2511,22 +2521,23 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
         def _on_ticker_done(ticker: str, idx: int, total: int, result_or_error: Any) -> None:
             nonlocal _last_completed
             now = time.time()
-            if _last_completed is None:
-                _last_completed = now
             elapsed = now - _last_completed
             _last_completed = now
             elapsed_str = _format_elapsed(elapsed)
             _ticker_elapsed[ticker] = elapsed
             if isinstance(result_or_error, Exception):
                 _batch_errors.append((ticker, str(result_or_error)))
-                console.print(f"[{idx + 1}/{total}] [red]{ticker} ─ FAILED[/red] ({result_or_error})")
+                console.print(
+                    f"[{idx + 1}/{total}] [red]{ticker} ─ "
+                    f"{_localize_cli_label('FAILED', '失败')}[/red] ({result_or_error})"
+                )
             else:
-                _batch_results.append(result_or_error)
                 rating = result_or_error.get("rating", "?")
-                weight = result_or_error.get("suggested_weight_pct", 0.0)
+                score = result_or_error.get("score", "?")
                 console.print(
                     f"[{idx + 1}/{total}] [green]{ticker}[/green] ─ "
-                    f"[yellow]{rating}[/yellow] · {weight:.1f}% · {elapsed_str}"
+                    f"[yellow]{rating}[/yellow] · "
+                    f"{_localize_cli_label('Score', '分数')} {score} · {elapsed_str}"
                 )
 
         try:
@@ -2542,15 +2553,15 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
         # Batch summary comparison table
         if ranked_candidates or _batch_errors:
             summary_table = Table(
-                title="Candidate Pool Summary",
+                title=_localize_cli_label("Candidate Pool Summary", "候选池汇总"),
                 show_header=True,
                 header_style="bold cyan",
                 show_lines=True,
             )
-            summary_table.add_column("Ticker", style="cyan")
-            summary_table.add_column("Rating", style="yellow")
-            summary_table.add_column("Weight", style="green", justify="right")
-            summary_table.add_column("Time", style="dim", justify="right")
+            summary_table.add_column(_localize_cli_label("Ticker", "代码"), style="cyan")
+            summary_table.add_column(_localize_cli_label("Rating", "评级"), style="yellow")
+            summary_table.add_column(_localize_cli_label("Weight", "权重"), style="green", justify="right")
+            summary_table.add_column(_localize_cli_label("Time", "耗时"), style="dim", justify="right")
             for item in ranked_candidates:
                 rating = item.get("rating", "-")
                 rating_style = "green" if rating in _GREEN_RATINGS else "red" if rating in _RED_RATINGS else "yellow"
