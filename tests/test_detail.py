@@ -1,11 +1,12 @@
+from io import StringIO
 import tempfile
 import unittest
 from pathlib import Path
-from io import StringIO
 from unittest.mock import patch
 
 import etfagents.dataflows.interface
 from rich.console import Console
+from rich.text import Text
 
 from etfagents.detail import (
     _parse_csv_first_row,
@@ -321,9 +322,23 @@ class DetailCliTests(unittest.TestCase):
         from cli.commands import detail as detail_module
 
         output = StringIO()
-        with patch.object(detail_module, "_console", Console(file=output, force_terminal=False, width=120)):
+        original_add_row = detail_module.Table.add_row
+        captured_rating_cells = []
+
+        def _capturing_add_row(table, *cells, **kwargs):
+            if getattr(table, "title", None) == "历史分析报告" and len(cells) >= 2:
+                captured_rating_cells.append(cells[1])
+            return original_add_row(table, *cells, **kwargs)
+
+        with (
+            patch.object(detail_module, "_console", Console(file=output, force_terminal=False, width=120)),
+            patch.object(detail_module.Table, "add_row", autospec=True, side_effect=_capturing_add_row),
+        ):
             detail_module.detail("510300.SH")
 
+        self.assertTrue(captured_rating_cells)
+        self.assertIsInstance(captured_rating_cells[0], Text)
+        self.assertEqual(captured_rating_cells[0].plain, "[bold]BUY[/bold]")
         self.assertIn("[bold]BUY[/bold]", output.getvalue())
 
 

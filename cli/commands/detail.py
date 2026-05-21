@@ -131,7 +131,8 @@ def detail(
 
     # History reports
     from etfagents.dataflows.config import get_config
-    results_dir = (get_config() or DEFAULT_CONFIG).get("results_dir", "")
+    config = get_config()
+    results_dir = (config if config is not None else DEFAULT_CONFIG).get("results_dir", "")
     history = get_etf_history_reports(ticker, results_dir)
 
     history_table = Table(

@@ -54,7 +54,7 @@ def _parse_csv_rows(csv_text: str, limit: int | None = None) -> list[dict[str, s
     reader = csv.DictReader(io.StringIO(data_text))
     rows = list(reader)
     if limit is not None:
-        rows = rows[: max(limit, 0)]
+        rows = rows[:limit] if limit > 0 else []
     return rows
 
 
