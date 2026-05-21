@@ -2483,28 +2483,70 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
         )
         results_dir.mkdir(parents=True, exist_ok=True)
 
-        console.print(
-            f"\n[bold cyan]{_localize_cli_label('Candidate pool analysis started', '候选池分析已开始')}[/bold cyan]"
+        # Startup panel
+        analyst_labels = ", ".join(ANALYST_AGENT_NAMES.get(a, a) for a in selected_analyst_keys)
+        startup_content = (
+            f"[bold]Tickers:[/bold] {', '.join(selections['tickers'])}\n"
+            f"[bold]Date:[/bold] {selections['analysis_date']}\n"
+            f"[bold]Analysts:[/bold] {analyst_labels}\n"
+            f"[bold]Progress:[/bold] sequential (0/{len(selections['tickers'])})"
         )
-        console.print(
-            f"[green]{_localize_cli_label('Tickers', '标的')}:[/green] {', '.join(selections['tickers'])}"
-        )
-        console.print(
-            f"[green]{_localize_cli_label('Analysts', '分析师')}:[/green] "
-            + ", ".join(ANALYST_AGENT_NAMES.get(a, a) for a in selected_analyst_keys)
-        )
+        console.print(Panel(startup_content, title="Candidate Pool Analysis", border_style="cyan", padding=(1, 2)))
+
+        # Per-ticker progress tracking
+        _batch_results: list[dict] = []
+        _batch_errors: list[tuple[str, str]] = []
+        _batch_start = time.time()
+
+        def _on_ticker_done(ticker: str, idx: int, total: int, result_or_error: Any) -> None:
+            elapsed = time.time() - _batch_start
+            elapsed_str = f"{elapsed:.0f}s" if elapsed < 60 else f"{int(elapsed // 60)}m{int(elapsed % 60)}s"
+            if isinstance(result_or_error, Exception):
+                _batch_errors.append((ticker, str(result_or_error)))
+                console.print(f"[{idx + 1}/{total}] [red]{ticker} ─ FAILED[/red] ({result_or_error})")
+            else:
+                _batch_results.append(result_or_error)
+                rating = result_or_error.get("rating", "?")
+                weight = result_or_error.get("suggested_weight_pct", 0.0)
+                console.print(
+                    f"[{idx + 1}/{total}] [green]{ticker}[/green] ─ "
+                    f"[yellow]{rating}[/yellow] · {weight:.1f}% · {elapsed_str}"
+                )
 
         try:
-            with console.status(
-                _localize_cli_label("Ranking ETF candidates...", "正在对 ETF 候选池进行排序...")
-            ):
-                ranked_candidates = graph.analyze_candidate_pool(
-                    selections["tickers"],
-                    selections["analysis_date"],
-                )
+            ranked_candidates = graph.analyze_candidate_pool(
+                selections["tickers"],
+                selections["analysis_date"],
+                per_ticker_callback=_on_ticker_done,
+            )
         except Exception as exc:
             console.print(f"\n[red]{_format_runtime_failure(exc, selections)}[/red]")
             raise typer.Exit(code=1)
+
+        # Batch summary comparison table
+        if ranked_candidates:
+            summary_table = Table(
+                title="Candidate Pool Summary",
+                show_header=True,
+                header_style="bold cyan",
+                show_lines=True,
+            )
+            summary_table.add_column("Ticker", style="cyan")
+            summary_table.add_column("Rating", style="yellow")
+            summary_table.add_column("Weight", style="green", justify="right")
+            summary_table.add_column("Time", style="dim", justify="right")
+            for item in ranked_candidates:
+                rating = item.get("rating", "-")
+                rating_style = "green" if rating in ("BUY", "OVERWEIGHT") else "red" if rating in ("SELL", "UNDERWEIGHT") else "yellow"
+                summary_table.add_row(
+                    item["ticker"],
+                    f"[{rating_style}]{rating}[/{rating_style}]",
+                    f"{item.get('suggested_weight_pct', 0.0):.1f}%",
+                    "",
+                )
+            for ticker, error in _batch_errors:
+                summary_table.add_row(ticker, "[red]FAILED[/red]", "-", "-")
+            console.print(summary_table)
 
         console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
         local_report_file = save_candidate_pool_report(
