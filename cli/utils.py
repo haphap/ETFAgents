@@ -159,7 +159,7 @@ def select_research_depth_name() -> str:
     choice = questionary.select(
         "Research depth / 研究深度:",
         choices=[
-            {"name": f"{d} ({_depth_desc(d)})", "value": d}
+            questionary.Choice(f"{d} ({_depth_desc(d)})", value=d)
             for d in depths
         ],
         default="标准",
