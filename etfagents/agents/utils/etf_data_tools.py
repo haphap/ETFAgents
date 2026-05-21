@@ -800,6 +800,27 @@ def _load_tushare_futures_contract_catalog_for_code(
     return _filter_tushare_futures_contract_catalog(contracts, start_api, end_api)
 
 
+def _load_tushare_warehouse_symbol_frame(
+    symbol: str,
+    exchange: str,
+    start_api: str,
+    end_api: str,
+) -> pd.DataFrame:
+    try:
+        frame = _query_pro(
+            "fut_wsr",
+            symbol=symbol,
+            exchange=exchange,
+            start_date=start_api,
+            end_date=end_api,
+        )
+    except DataVendorUnavailable:
+        return pd.DataFrame()
+    if frame is None:
+        return pd.DataFrame()
+    return frame
+
+
 @lru_cache(maxsize=64)
 def _load_tushare_futures_daily_exchange_frame(
     exchange: str,
@@ -880,6 +901,10 @@ def _load_tushare_futures_main_frame(
         filtered = batched[batched["ts_code"].astype(str).isin(ts_codes)]
         if not filtered.empty:
             frames.append(filtered)
+        present_codes = set(filtered.get("ts_code", pd.Series(dtype=str)).dropna().astype(str))
+        missing_codes = [ts_code for ts_code in ts_codes if ts_code not in present_codes]
+        if missing_codes:
+            frames.extend(_load_tushare_futures_daily_contract_frames(missing_codes, start_api, end_api))
     if not frames:
         frames = _load_tushare_futures_daily_contract_frames(ts_codes, start_api, end_api)
     if not frames:
@@ -938,22 +963,24 @@ def _load_tushare_warehouse_series(
     look_back_days: int = 240,
 ) -> pd.Series:
     start_dt = _parse_trade_date(curr_date) - timedelta(days=look_back_days)
+    start_api = start_dt.strftime("%Y%m%d")
+    end_api = _parse_trade_date(curr_date).strftime("%Y%m%d")
     frame = _load_tushare_warehouse_exchange_frame(exchange, curr_date, look_back_days)
     if frame is not None and not frame.empty and "symbol" in frame.columns:
-        frame = frame[frame["symbol"].astype(str).str.upper() == symbol.upper()]
+        exchange_frame = frame
+        frame = exchange_frame[exchange_frame["symbol"].astype(str).str.upper() == symbol.upper()]
         if frame.empty:
             return pd.Series(dtype=float)
+        if "trade_date" in exchange_frame.columns and "trade_date" in frame.columns:
+            exchange_dates = pd.to_datetime(exchange_frame["trade_date"], errors="coerce").dropna()
+            symbol_dates = pd.to_datetime(frame["trade_date"], errors="coerce").dropna()
+            if not exchange_dates.empty and not symbol_dates.empty:
+                if symbol_dates.min() > exchange_dates.min() or symbol_dates.max() < exchange_dates.max():
+                    fallback = _load_tushare_warehouse_symbol_frame(symbol, exchange, start_api, end_api)
+                    if not fallback.empty:
+                        frame = fallback
     if frame is None or frame.empty or "symbol" not in frame.columns:
-        try:
-            frame = _query_pro(
-                "fut_wsr",
-                symbol=symbol,
-                exchange=exchange,
-                start_date=start_dt.strftime("%Y%m%d"),
-                end_date=_parse_trade_date(curr_date).strftime("%Y%m%d"),
-            )
-        except DataVendorUnavailable:
-            return pd.Series(dtype=float)
+        frame = _load_tushare_warehouse_symbol_frame(symbol, exchange, start_api, end_api)
     if frame is None or frame.empty:
         return pd.Series(dtype=float)
     if "trade_date" not in frame.columns or "vol" not in frame.columns:
