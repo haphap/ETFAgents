@@ -129,7 +129,8 @@ def detail(
         holdings_table.add_row("[dim]No holdings data[/dim]", "", "")
 
     # History reports
-    results_dir = DEFAULT_CONFIG.get("results_dir", "")
+    from etfagents.dataflows.config import get_config
+    results_dir = (get_config() or DEFAULT_CONFIG).get("results_dir", "")
     history = get_etf_history_reports(ticker, results_dir)
 
     history_table = Table(
@@ -142,9 +143,11 @@ def detail(
     history_table.add_column("Size", style="dim", justify="right")
 
     if history:
-        for r in history:
+        _GREEN_RATINGS = {"BUY", "OVERWEIGHT", "买入", "增持"}
+        _RED_RATINGS = {"SELL", "UNDERWEIGHT", "卖出", "减持"}
+        for r in history[:20]:
             rating = r.get("rating") or "-"
-            rating_style = "green" if rating in ("BUY", "OVERWEIGHT") else "red" if rating in ("SELL", "UNDERWEIGHT") else "yellow"
+            rating_style = "green" if rating in _GREEN_RATINGS else "red" if rating in _RED_RATINGS else "yellow"
             history_table.add_row(
                 r.get("date", ""),
                 f"[{rating_style}]{rating}[/{rating_style}]",

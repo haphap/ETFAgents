@@ -6,25 +6,33 @@ import csv
 import io
 import logging
 import os
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-def _parse_csv_last_row(csv_text: str) -> dict[str, str] | None:
+def _parse_csv_rows(csv_text: str, limit: int | None = None) -> list[dict[str, str]]:
+    """Parse CSV text (with # comment preamble) into list of row dicts."""
     if not csv_text or csv_text.startswith("No "):
-        return None
+        return []
     clean = []
     for line in csv_text.splitlines():
         stripped = line.strip()
         if stripped and not stripped.startswith("#"):
             clean.append(line)
     if not clean:
-        return None
+        return []
     reader = csv.DictReader(io.StringIO("\n".join(clean)))
     rows = list(reader)
+    if limit:
+        rows = rows[:limit]
+    return rows
+
+
+def _parse_csv_last_row(csv_text: str) -> dict[str, str] | None:
+    rows = _parse_csv_rows(csv_text)
     return rows[-1] if rows else None
 
 
@@ -74,10 +82,12 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
         "benchmark": None,
     }
 
-    # 1. Price data (uses start_date/end_date range)
+    # 1. Price data (uses start_date/end_date range in yyyy-mm-dd)
     try:
-        start_date = str(int(curr_date.replace("-", "")) - 10000)
-        end_date = curr_date.replace("-", "")
+        end_dt = datetime.strptime(curr_date, "%Y-%m-%d")
+        start_dt = end_dt - timedelta(days=365)
+        start_date = start_dt.strftime("%Y-%m-%d")
+        end_date = curr_date
         csv_text = route_to_vendor("get_etf_price_data", ticker, start_date, end_date)
         row = _parse_csv_last_row(csv_text)
         if row:
@@ -157,24 +167,6 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
     return result
 
 
-def _parse_csv_rows(csv_text: str, limit: int | None = None) -> list[dict[str, str]]:
-    """Parse CSV text (with # comment preamble) into list of row dicts."""
-    if not csv_text or csv_text.startswith("No "):
-        return []
-    clean = []
-    for line in csv_text.splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            clean.append(line)
-    if not clean:
-        return []
-    reader = csv.DictReader(io.StringIO("\n".join(clean)))
-    rows = list(reader)
-    if limit:
-        rows = rows[:limit]
-    return rows
-
-
 def get_etf_history_reports(ticker: str, results_dir: str) -> list[dict]:
     """Scan results directory for historical analysis reports of a ticker.
 
@@ -207,8 +199,9 @@ def get_etf_history_reports(ticker: str, results_dir: str) -> list[dict]:
 
         rating = None
         try:
-            content = report_path.read_text(encoding="utf-8", errors="ignore")[:4000]
-            rating = parse_rating(content)
+            # Read tail of file since ratings tend to live in the conclusion
+            content = report_path.read_text(encoding="utf-8", errors="ignore")
+            rating = parse_rating(content[-4000:])
         except Exception:
             pass
 

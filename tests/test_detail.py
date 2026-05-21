@@ -93,6 +93,8 @@ class GetEtfDetailTests(unittest.TestCase):
         mock_vendor.side_effect = _vendor_side_effect
         result = get_etf_detail("510300.SH", curr_date="2026-05-20")
 
+        mock_vendor.assert_any_call("get_etf_price_data", "510300.SH", "2025-05-20", "2026-05-20")
+
         self.assertEqual(result["ticker"], "510300.SH")
         self.assertEqual(result["name"], "沪深300ETF")
         self.assertEqual(result["market"], "a_share")
