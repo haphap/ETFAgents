@@ -294,7 +294,8 @@ _JUDGE_OUTPUT_GUIDE = (
     "## 输出格式\n"
     "仅输出一个 JSON 对象，不要附带任何前言、标题、markdown 包裹或其他文本。JSON 格式如下：\n"
     '{"score": <int>, "passed": <bool>, "critical_issues": [<str>, ...], '
-    '"missing_elements": [<str>, ...], "general_comment": "<str>"}\n'
+    '"minor_issues": [<str>, ...], "missing_elements": [<str>, ...], '
+    '"general_comment": "<str>"}\n'
 )
 
 _REFINE_PROMPT_TEMPLATE = (
