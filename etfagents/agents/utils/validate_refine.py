@@ -290,7 +290,11 @@ _JUDGE_OUTPUT_GUIDE = (
     "- 9-10：完全满足所有标准，passed=true\n"
     "- 7-8：仅有 minor_issues 而无 critical_issues，passed=true\n"
     "- 6 及以下：存在 critical_issues，passed=false\n"
-    "- 任何结构错误、缺少关键章节、多处无解释术语 → critical_issue → passed=false。\n"
+    "- 任何结构错误、缺少关键章节、多处无解释术语 → critical_issue → passed=false。\n\n"
+    "## 输出格式\n"
+    "仅输出一个 JSON 对象，不要附带任何前言、标题、markdown 包裹或其他文本。JSON 格式如下：\n"
+    '{"score": <int>, "passed": <bool>, "critical_issues": [<str>, ...], '
+    '"missing_elements": [<str>, ...], "general_comment": "<str>"}\n'
 )
 
 _REFINE_PROMPT_TEMPLATE = (
@@ -349,8 +353,6 @@ def _parse_judge_json(text: Any) -> JudgeVerdict | None:
 
 def _safe_extract_llm_text(response: Any) -> str:
     content = getattr(response, "content", response)
-    if not isinstance(content, (str, list, tuple, dict)):
-        return ""
     try:
         return extract_text_content(content)
     except RecursionError:
