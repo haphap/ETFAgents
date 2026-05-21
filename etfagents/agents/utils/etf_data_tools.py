@@ -788,6 +788,7 @@ def _load_tushare_futures_contract_catalog_for_code(
     start_api: str,
     end_api: str,
 ) -> pd.DataFrame:
+    # Rare fallback only; the exchange-level catalog is the cached hot path.
     try:
         contracts = _query_pro(
             "fut_basic",
