@@ -168,8 +168,7 @@ class PaperTradingTests(unittest.TestCase):
         engine2 = PaperTradingEngine(db_path=self.db_path)
         self.assertEqual(engine2._get_current_user(), "alice")
 
-    @patch("builtins.input", return_value="")
-    def test_register_user_stores_bcrypt_hash(self, _mock_input):
+    def test_register_user_stores_bcrypt_hash(self):
         self.engine.register("alice", "secret123")
         with sqlite3.connect(str(self.db_path)) as conn:
             row = conn.execute(
@@ -182,6 +181,9 @@ class PaperTradingTests(unittest.TestCase):
         self.engine.register("alice", "pass")
         with self.assertRaises(ValueError):
             self.engine.register("alice", "other")
+        with sqlite3.connect(str(self.db_path)) as conn:
+            count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        self.assertEqual(count, 2)
 
     def test_register_default_user_raises(self):
         with self.assertRaises(ValueError):
@@ -575,7 +577,10 @@ class PaperTradingTests(unittest.TestCase):
         self.assertTrue(pos[0]["name"])  # should have some name
 
     def test_get_account_unknown_user_raises(self):
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Account not found for user 'alice'\. Register first\.",
+        ):
             self.engine.get_account(user_id="alice")
 
     def test_get_current_price_uses_engine_config(self):

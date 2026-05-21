@@ -158,6 +158,10 @@ class PaperTradingEngine:
                     "FROM account WHERE user_id = ?",
                     (uid,),
                 ).fetchone()
+                if row is None:
+                    raise RuntimeError(
+                        f"Account not found for user '{uid}'. Register first."
+                    )
         cash = row["cash"]
         realized_pnl = row["realized_pnl"]
         total_commission = row["total_commission"]
