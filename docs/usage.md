@@ -251,22 +251,37 @@ Note: enabling memory in backtests makes cache keys depend on memory state, redu
 
 ## Research Depth & Model Recommendation
 
-The interactive CLI (Step 5) offers three research depth levels:
+The interactive CLI (Step 5) offers five research depth levels:
 
-| Depth | Debate | Risk Rounds | Target Capability |
-|-------|--------|-------------|-------------------|
-| Quick / 快速 | 1 | 1 | Balanced |
-| Standard / 标准 | 2 | 1 | Capable |
-| Deep / 深入 | 3 | 2 | Strong |
+| Level | Key | Debate Rounds | Risk Rounds | Min Capability |
+|-------|-----|---------------|-------------|----------------|
+| Fast / 快速 | `快速` | 0 | 0 | Basic (L1) |
+| Basic / 基础 | `基础` | 1 | 0 | Basic (L1) |
+| Standard / 标准 | `标准` | 1 | 1 | Capable (L2) |
+| Deep / 深度 | `深度` | 2 | 2 | Strong (L3) |
+| Full / 全面 | `全面` | 3 | 3 | Strong (L3) w/ reasoning |
 
-The system recommends models based on depth and provider capability ratings. Deeper levels trigger more debate rounds between bull/bear researchers and risk analysts.
+Deeper levels trigger more debate rounds between bull/bear researchers and risk analysts.
 
 ### Configuration Keys
 
 ```python
 config["research_depth_name"] = "标准"
-config["max_debate_rounds"] = 2
+config["max_debate_rounds"] = 1
 config["max_risk_discuss_rounds"] = 1
+```
+
+### Model Catalog Python API
+
+```python
+from etfagents.llm_clients.model_catalog import get_depth_config, recommend_models
+
+depth = get_depth_config("标准")
+# {"min_level": 2, "debate_rounds": 1, "risk_rounds": 1, ...}
+
+models = recommend_models("标准", "openai")
+# {"quick_model": "gpt-5.4-mini", "deep_model": "gpt-5.4",
+#  "quick_reason": "...", "deep_reason": "...", "depth": "标准"}
 ```
 
 ## Report Validation
@@ -414,9 +429,11 @@ print(result.metrics.cumulative_return)
 
 ```python
 from etfagents.cache_manager import CacheManager
-cm = CacheManager()
+from etfagents.default_config import DEFAULT_CONFIG
+import copy
+cm = CacheManager(copy.deepcopy(DEFAULT_CONFIG))
 cm.stats()                          # {"api": {...}, "signals": {...}, ...}
-cm.cleanup(max_age_days=30)
+cm.cleanup(days=30)
 cm.clear(category="signals")
 ```
 
@@ -473,10 +490,11 @@ engine.reset_account(user_id="alice", initial_cash=2_000_000)
 from etfagents.llm_clients.model_catalog import get_depth_config, recommend_models
 
 depth = get_depth_config("标准")
-# {"debate_rounds": 2, "risk_rounds": 1, ...}
+# {"min_level": 2, "debate_rounds": 1, "risk_rounds": 1, ...}
 
 models = recommend_models("标准", "openai")
-# {"quick": "gpt-5.4-mini", "deep": "gpt-5.4"}
+# {"quick_model": "gpt-5.4-mini", "deep_model": "gpt-5.4",
+#  "quick_reason": "...", "deep_reason": "...", "depth": "标准"}
 ```
 
 ### Trading Rules
