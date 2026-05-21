@@ -33,6 +33,7 @@ dependencies = [
     "tushare>=1.4.21",
     "akshare>=1.16.0",
     "python-dotenv>=1.0.0",
+    "bcrypt>=4.0",
 ]
 
 [project.scripts]

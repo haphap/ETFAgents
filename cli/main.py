@@ -79,6 +79,9 @@ app.add_typer(cache_app, name="cache")
 from cli.commands.watchlist import watchlist_app
 app.add_typer(watchlist_app, name="watchlist")
 
+from cli.commands.paper import paper_app
+app.add_typer(paper_app, name="paper")
+
 from cli.commands.detail import detail as detail_command
 app.command(name="detail")(detail_command)
 
@@ -2888,10 +2891,12 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
             selections["ticker"],
             results_dir,
         )
+        analysis_id = str(local_report_file.resolve())
         console.print(
             f"[green]✓ Local report saved:[/green] {local_report_file.resolve()}"
         )
     except Exception as e:
+        analysis_id = None
         console.print(f"[red]Error saving local report: {e}[/red]")
 
     # Prompt to export an additional copy
@@ -2915,6 +2920,64 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
     display_choice = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper()
     if display_choice in ("Y", "YES", ""):
         display_complete_report(final_state)
+
+    # Paper trading suggestion for single-ticker analysis
+    final_decision = get_state_value(final_state, "final_allocation_decision", "")
+    if selections.get("analysis_mode") == "single" and final_decision:
+        from etfagents.agents.utils.rating import parse_rating
+        rating = parse_rating(str(final_decision))
+        if rating in ("BUY", "OVERWEIGHT"):
+            try:
+                from etfagents.paper_trading.engine import PaperTradingEngine
+                engine = PaperTradingEngine()
+                suggestion = engine.suggest_order_from_signal(
+                    selections["ticker"], final_state
+                )
+                if suggestion:
+                    side_label = (
+                        _localize_cli_label("BUY", "买入")
+                        if suggestion["side"] == "buy"
+                        else _localize_cli_label("SELL", "卖出")
+                    )
+                    console.print(
+                        Panel(
+                            f"{side_label} {suggestion['ticker']} "
+                            f"{suggestion['quantity']} shares "
+                            f"(@ {suggestion['price']:.3f}, "
+                            f"target weight {suggestion['target_weight_pct']:.1f}%)",
+                            title=_localize_cli_label(
+                                "Paper Trade Suggestion",
+                                "模拟交易建议"
+                            ),
+                            border_style="yellow",
+                        )
+                    )
+                    execute = questionary.confirm(
+                        _localize_cli_label("Execute this trade?", "执行此交易？")
+                    ).ask()
+                    if execute:
+                        result = engine._execute_suggestion(
+                            suggestion,
+                            analysis_id=analysis_id,
+                        )
+                        summary = (
+                            f"{result['side'].upper()} {result['ticker']} "
+                            f"{result['quantity']} shares @ {result['price']:.3f}"
+                        )
+                        if "pnl" in result:
+                            summary += f" | P&L: {result['pnl']:+.2f}"
+                        console.print(
+                            f"[green]{_localize_cli_label('Trade executed', '交易已执行')}: "
+                            f"{summary}[/green]"
+                        )
+                else:
+                    console.print(
+                        f"[dim]{_localize_cli_label('No trade adjustment needed.', '无需调整仓位。')}[/dim]"
+                    )
+            except Exception as exc:
+                console.print(
+                    f"[dim]{_localize_cli_label('Paper trading unavailable', '模拟交易不可用')}: {exc}[/dim]"
+                )
 
 
 @app.command()
