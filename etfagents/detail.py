@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 import os
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -13,18 +14,45 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+_SUMMARY_LINE_RE = re.compile(r"^[A-Za-z][A-Za-z\s]*:\s")
+
+
 def _parse_csv_rows(csv_text: str, limit: int | None = None) -> list[dict[str, str]]:
-    """Parse CSV text (with # comment preamble) into list of row dicts."""
+    """Parse CSV text with # comment preamble and un-commented summary lines.
+
+    Vendor output via _to_csv_with_header() looks like:
+        # Title
+        # Total records: N
+        # Key snapshot
+        Ticker: 510300.SH          <-- summary line (Label: value)
+        Close: 4.12                <-- summary line
+        trade_date,open,close      <-- real CSV header
+        20260520,4.10,4.12         <-- data row
+    """
     if not csv_text or csv_text.startswith("No "):
         return []
-    clean = []
-    for line in csv_text.splitlines():
+    # Find the first real CSV header: a line containing a comma and
+    # at least one of the expected Tushare column names
+    csv_header_fields = {
+        "trade_date", "ts_code", "symbol", "stk_code", "end_date",
+        "nav_date", "name", "open", "close", "unit_nav", "fd_share",
+        "fund_share", "stk_mkv_ratio", "pct_chg",
+    }
+    header_idx = None
+    lines = csv_text.splitlines()
+    for i, line in enumerate(lines):
         stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            clean.append(line)
-    if not clean:
+        if not stripped or stripped.startswith("#") or _SUMMARY_LINE_RE.match(stripped):
+            continue
+        if "," in stripped:
+            fields = {f.strip().lower() for f in stripped.split(",")}
+            if fields & csv_header_fields:
+                header_idx = i
+                break
+    if header_idx is None:
         return []
-    reader = csv.DictReader(io.StringIO("\n".join(clean)))
+    data_text = "\n".join(lines[header_idx:])
+    reader = csv.DictReader(io.StringIO(data_text))
     rows = list(reader)
     if limit:
         rows = rows[:limit]

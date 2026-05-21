@@ -40,6 +40,44 @@ class CsvParsingTests(unittest.TestCase):
     def test_parse_csv_rows_empty(self):
         self.assertEqual(_parse_csv_rows(""), [])
 
+    def test_parse_csv_rows_with_summary_lines(self):
+        csv_text = (
+            "# ETF price data for 510300.SH\n"
+            "# Total records: 1\n"
+            "# Data retrieved on: 2026-05-21 12:00:00\n"
+            "\n"
+            "# Key snapshot\n"
+            "Ticker: 510300.SH\n"
+            "Trade Date: 20260520\n"
+            "Close: 4.12\n"
+            "Pct Change: +1.25%\n"
+            "\n"
+            "trade_date,open,high,low,close,vol,amount,pct_chg\n"
+            "20260520,4.10,4.15,4.09,4.12,12345,50700,1.25\n"
+        )
+        rows = _parse_csv_rows(csv_text)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["close"], "4.12")
+        self.assertEqual(rows[0]["trade_date"], "20260520")
+
+    def test_parse_csv_last_row_with_summary_lines(self):
+        csv_text = (
+            "# ETF NAV for 510300.SH\n"
+            "# Total records: 2\n"
+            "\n"
+            "# Key snapshot\n"
+            "Ticker: 510300.SH\n"
+            "Unit NAV: 4.128\n"
+            "\n"
+            "ts_code,end_date,unit_nav\n"
+            "510300.SH,20260519,4.125\n"
+            "510300.SH,20260520,4.128\n"
+        )
+        row = _parse_csv_last_row(csv_text)
+        self.assertIsNotNone(row)
+        self.assertEqual(row["unit_nav"], "4.128")
+        self.assertEqual(row["end_date"], "20260520")
+
 
 class GetEtfDetailTests(unittest.TestCase):
     PRICE_CSV = (
