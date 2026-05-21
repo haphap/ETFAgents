@@ -1,5 +1,5 @@
 import copy
-from typing import Optional
+from typing import Any, Optional
 import datetime
 import json
 import typer
@@ -2483,30 +2483,102 @@ def run_analysis(checkpoint: bool = False, memory_mode: str | None = None, watch
         )
         results_dir.mkdir(parents=True, exist_ok=True)
 
-        console.print(
-            f"\n[bold cyan]{_localize_cli_label('Candidate pool analysis started', '候选池分析已开始')}[/bold cyan]"
+        # Startup panel
+        analyst_labels = ", ".join(
+            _localize_cli_role_title(ANALYST_AGENT_NAMES.get(a, a))
+            for a in selected_analyst_keys
+        )
+        startup_content = (
+            f"[bold]{_localize_cli_label('Tickers', '代码')}:[/bold] {', '.join(selections['tickers'])}\n"
+            f"[bold]{_localize_cli_label('Date', '日期')}:[/bold] {selections['analysis_date']}\n"
+            f"[bold]{_localize_cli_label('Analysts', '分析师')}:[/bold] {analyst_labels}\n"
+            f"[bold]{_localize_cli_label('Progress', '进度')}:[/bold] "
+            f"{_localize_cli_label('sequential', '顺序执行')} (0/{len(selections['tickers'])})"
         )
         console.print(
-            f"[green]{_localize_cli_label('Tickers', '标的')}:[/green] {', '.join(selections['tickers'])}"
-        )
-        console.print(
-            f"[green]{_localize_cli_label('Analysts', '分析师')}:[/green] "
-            + ", ".join(ANALYST_AGENT_NAMES.get(a, a) for a in selected_analyst_keys)
+            Panel(
+                startup_content,
+                title=_localize_cli_label("Candidate Pool Analysis", "候选池分析"),
+                border_style="cyan",
+                padding=(1, 2),
+            )
         )
 
-        try:
-            with console.status(
-                _localize_cli_label("Ranking ETF candidates...", "正在对 ETF 候选池进行排序...")
-            ):
-                ranked_candidates = graph.analyze_candidate_pool(
-                    selections["tickers"],
-                    selections["analysis_date"],
+        # Per-ticker progress tracking
+        _batch_errors: list[tuple[str, str]] = []
+        _ticker_elapsed: dict[str, float] = {}
+        _batch_start = time.time()
+        _last_completed = _batch_start
+
+        _GREEN_RATINGS = {"BUY", "OVERWEIGHT", "买入", "增持"}
+        _RED_RATINGS = {"SELL", "UNDERWEIGHT", "卖出", "减持"}
+
+        def _format_elapsed(seconds: float) -> str:
+            if seconds < 60:
+                return f"{seconds:.0f}s"
+            return f"{int(seconds // 60)}m{int(seconds % 60)}s"
+
+        def _on_ticker_done(ticker: str, idx: int, total: int, result_or_error: Any) -> None:
+            nonlocal _last_completed
+            now = time.time()
+            elapsed = now - _last_completed
+            _last_completed = now
+            elapsed_str = _format_elapsed(elapsed)
+            _ticker_elapsed[ticker] = elapsed
+            if isinstance(result_or_error, Exception):
+                _batch_errors.append((ticker, str(result_or_error)))
+                console.print(
+                    f"[{idx + 1}/{total}] [red]{ticker} ─ "
+                    f"{_localize_cli_label('FAILED', '失败')}[/red] ({result_or_error})"
                 )
+            else:
+                rating = result_or_error.get("rating", "?")
+                score = result_or_error.get("score", "?")
+                console.print(
+                    f"[{idx + 1}/{total}] [green]{ticker}[/green] ─ "
+                    f"[yellow]{rating}[/yellow] · "
+                    f"{_localize_cli_label('Score', '分数')} {score} · {elapsed_str}"
+                )
+
+        try:
+            ranked_candidates = graph.analyze_candidate_pool(
+                selections["tickers"],
+                selections["analysis_date"],
+                per_ticker_callback=_on_ticker_done,
+            )
         except Exception as exc:
             console.print(f"\n[red]{_format_runtime_failure(exc, selections)}[/red]")
             raise typer.Exit(code=1)
 
-        console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
+        # Batch summary comparison table
+        if ranked_candidates or _batch_errors:
+            summary_table = Table(
+                title=_localize_cli_label("Candidate Pool Summary", "候选池汇总"),
+                show_header=True,
+                header_style="bold cyan",
+                show_lines=True,
+            )
+            summary_table.add_column(_localize_cli_label("Ticker", "代码"), style="cyan")
+            summary_table.add_column(_localize_cli_label("Rating", "评级"), style="yellow")
+            summary_table.add_column(_localize_cli_label("Weight", "权重"), style="green", justify="right")
+            summary_table.add_column(_localize_cli_label("Time", "耗时"), style="dim", justify="right")
+            for item in ranked_candidates:
+                rating = item.get("rating", "-")
+                rating_style = "green" if rating in _GREEN_RATINGS else "red" if rating in _RED_RATINGS else "yellow"
+                elapsed_str = _format_elapsed(_ticker_elapsed.get(item["ticker"], 0.0))
+                summary_table.add_row(
+                    item["ticker"],
+                    f"[{rating_style}]{rating}[/{rating_style}]",
+                    f"{item.get('suggested_weight_pct', 0.0):.1f}%",
+                    elapsed_str,
+                )
+            for ticker, error in _batch_errors:
+                elapsed_str = _format_elapsed(_ticker_elapsed.get(ticker, 0.0))
+                summary_table.add_row(ticker, "[red]FAILED[/red]", "-", elapsed_str)
+            console.print(summary_table)
+
+        total_elapsed = time.time() - _batch_start
+        console.print(f"\n[bold cyan]Analysis Complete![/bold cyan] (total: {_format_elapsed(total_elapsed)})\n")
         local_report_file = save_candidate_pool_report(
             ranked_candidates,
             selections["analysis_date"],

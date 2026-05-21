@@ -1,6 +1,6 @@
 import copy
 import re
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Callable, Dict, TYPE_CHECKING
 
 from langgraph.prebuilt import ToolNode
 
@@ -205,13 +205,19 @@ class EtfAgentsGraph(TradingAgentsGraph):
         trade_date: str,
         *,
         force_refresh: bool = False,
+        per_ticker_callback: Callable[[str, int, int, Any], None] | None = None,
     ) -> list[dict[str, object]]:
-        """Analyze a candidate pool sequentially and rank it by final allocation rating."""
+        """Analyze a candidate pool sequentially and rank it by final allocation rating.
+
+        Args:
+            per_ticker_callback: Optional callable(ticker, index, total, result_or_error)
+                invoked after each ticker completes (successfully or with error).
+        """
         results: list[dict[str, object]] = []
         selected_report_keys = _selected_analyst_report_keys(
             getattr(self, "selected_analysts", self.DEFAULT_SELECTED_ANALYSTS)
         )
-        for ticker in tickers:
+        for ticker_index, ticker in enumerate(tickers):
             memory_signature = None
             if getattr(self, "config", {}).get("memory_in_backtest"):
                 store = getattr(self, "analysis_memory_store", None)
@@ -228,8 +234,15 @@ class EtfAgentsGraph(TradingAgentsGraph):
                 cached_payload = _sanitize_candidate_payload(dict(cached))
                 if not _has_missing_selected_reports(cached_payload, selected_report_keys):
                     results.append(cached_payload)
+                    if per_ticker_callback:
+                        per_ticker_callback(ticker, ticker_index, len(tickers), cached_payload)
                     continue
-            final_state, rating = self.propagate(ticker, trade_date)
+            try:
+                final_state, rating = self.propagate(ticker, trade_date)
+            except Exception as exc:
+                if per_ticker_callback:
+                    per_ticker_callback(ticker, ticker_index, len(tickers), exc)
+                continue
             result = {
                 "ticker": ticker,
                 "rating": rating,
@@ -292,6 +305,8 @@ class EtfAgentsGraph(TradingAgentsGraph):
                 _cacheable_candidate_payload(result),
             )
             results.append(result)
+            if per_ticker_callback:
+                per_ticker_callback(ticker, ticker_index, len(tickers), result)
         ranked = sorted(
             results,
             key=lambda item: (-int(item["score"]), item["ticker"]),
