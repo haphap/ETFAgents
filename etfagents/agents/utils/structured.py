@@ -8,7 +8,7 @@ from typing import Any, Callable, Optional, TypeAlias, TypeVar
 from pydantic import BaseModel
 
 from etfagents.content_utils import extract_text_content
-from etfagents.agents.utils.agent_utils import get_output_language
+from etfagents.agents.utils.agent_utils import CHINESE_OUTPUT_VALUES, get_output_language
 
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
@@ -123,7 +123,7 @@ def build_prose_only_fallback_prompt(prompt: Any, extra_instruction: str = "") -
 
 
 def _is_chinese_output() -> bool:
-    return get_output_language().strip().lower() in {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
+    return get_output_language().strip().lower() in CHINESE_OUTPUT_VALUES
 
 
 def _format_prompt_source(prompt: StructuredPromptInput) -> str:
@@ -132,9 +132,11 @@ def _format_prompt_source(prompt: StructuredPromptInput) -> str:
     if isinstance(prompt, (list, tuple)):
         chunks: list[str] = []
         for message in prompt:
-            role = str(message.get("role", "message"))
+            if str(message.get("role", "")).lower() == "system":
+                continue
             content = message.get("content", "")
-            chunks.append(f"Message role: {role}\nMessage content:\n{content}")
+            if content:
+                chunks.append(str(content))
         return "\n\n".join(chunks)
     raise TypeError(f"Unsupported structured prompt input: {type(prompt).__name__}")
 
