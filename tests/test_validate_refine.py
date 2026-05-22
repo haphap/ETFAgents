@@ -311,7 +311,6 @@ class ValidationModeTests(unittest.TestCase):
             '"minor_issues": [], "missing_elements": [], "general_comment": "ok"}'
         )
         llm = MagicMock()
-        llm.with_structured_output.side_effect = AttributeError("not supported")
         llm.invoke.return_value = AIMessage(content=passing_payload)
 
         out = validate_and_refine(
@@ -322,6 +321,29 @@ class ValidationModeTests(unittest.TestCase):
         )
         # Judge says pass=true and static is clean → original report retained.
         self.assertEqual(_GOOD_MARKET_REPORT, out)
+        self.assertEqual(1, llm.invoke.call_count)
+        llm.with_structured_output.assert_not_called()
+
+    def test_static_plus_llm_judge_does_not_use_structured_output_binding(self):
+        llm = MagicMock()
+        llm.with_structured_output.side_effect = ValueError("provider returned markdown")
+        llm.invoke.return_value = AIMessage(
+            content=(
+                "## 评审结果\n\n"
+                '{"score": 9, "passed": true, "critical_issues": [], '
+                '"minor_issues": [], "missing_elements": [], "general_comment": "ok"}'
+            )
+        )
+
+        out = validate_and_refine(
+            _GOOD_MARKET_REPORT,
+            llm,
+            _MARKET_SPEC,
+            validation_mode="static_plus_llm",
+        )
+
+        self.assertEqual(_GOOD_MARKET_REPORT, out)
+        llm.with_structured_output.assert_not_called()
         self.assertEqual(1, llm.invoke.call_count)
 
 

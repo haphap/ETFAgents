@@ -5,9 +5,10 @@ Pipeline (per analyst):
   1. Static validation: cheap regex / substring checks driven by ``AnalystReportSpec``.
      Catches missing top sections, missing required tokens, markdown ``#``/``##``
      headings and label-style artifacts deterministically.
-  2. LLM judge: when the chosen mode allows it, the judge runs as a structured
-     output call (Pydantic ``JudgeVerdict``) so we no longer rely on a fragile
-     ``\\{[\\s\\S]*\\}`` regex over a free-text response.
+  2. LLM judge: when the chosen mode allows it, the judge asks for strict JSON
+     through the normal text channel and parses the first balanced object into a
+     Pydantic ``JudgeVerdict``. This avoids provider-specific structured-output
+     wrappers that may reject otherwise usable text responses.
   3. Refine: only invoked when the merged verdict reports issues.
 
 The ``validation_mode`` config flag (``static_only`` / ``static_plus_llm`` /
@@ -35,11 +36,6 @@ from etfagents.agents.utils.report_leads import (
     find_top_sections_missing_leads,
     starts_without_overview_paragraph,
 )
-from etfagents.agents.utils.structured import (
-    bind_structured,
-    invoke_structured_or_freetext_with_result,
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -294,7 +290,12 @@ _JUDGE_OUTPUT_GUIDE = (
     "- 9-10：完全满足所有标准，passed=true\n"
     "- 7-8：仅有 minor_issues 而无 critical_issues，passed=true\n"
     "- 6 及以下：存在 critical_issues，passed=false\n"
-    "- 任何结构错误、缺少关键章节、多处无解释术语 → critical_issue → passed=false。\n"
+    "- 任何结构错误、缺少关键章节、多处无解释术语 → critical_issue → passed=false。\n\n"
+    "## 输出格式\n"
+    "仅输出一个 JSON 对象，不要附带任何前言、标题、markdown 包裹或其他文本。JSON 格式如下：\n"
+    '{"score": <int>, "passed": <bool>, "critical_issues": [<str>, ...], '
+    '"minor_issues": [<str>, ...], "missing_elements": [<str>, ...], '
+    '"general_comment": "<str>"}\n'
 )
 
 _REFINE_PROMPT_TEMPLATE = (
@@ -351,23 +352,23 @@ def _parse_judge_json(text: Any) -> JudgeVerdict | None:
     return None
 
 
+def _safe_extract_llm_text(response: Any) -> str:
+    content = getattr(response, "content", response)
+    try:
+        return extract_text_content(content)
+    except RecursionError:
+        return ""
+
+
 def _run_llm_judge(llm, report: str, spec: AnalystReportSpec) -> JudgeVerdict | None:
-    structured_llm = bind_structured(llm, JudgeVerdict, "Report Judge")
     prompt = _build_judge_prompt(report, spec)
     try:
-        rendered, structured_result = invoke_structured_or_freetext_with_result(
-            structured_llm,
-            llm,
-            prompt,
-            lambda v: v.model_dump_json(),
-            "Report Judge",
-        )
+        response = llm.invoke(prompt)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Judge invocation failed: %s", exc)
         return None
 
-    if isinstance(structured_result, JudgeVerdict):
-        return structured_result
+    rendered = _safe_extract_llm_text(response)
     return _parse_judge_json(rendered)
 
 
@@ -385,7 +386,7 @@ def _run_llm_refine(llm, report: str, verdict: JudgeVerdict) -> str:
     )
     try:
         response = llm.invoke(prompt)
-        return extract_text_content(getattr(response, "content", response)) or ""
+        return _safe_extract_llm_text(response)
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Refine invocation failed: %s", exc)
         return ""

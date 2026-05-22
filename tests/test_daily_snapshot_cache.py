@@ -23,7 +23,10 @@ class SharedSnapshotCacheTests(unittest.TestCase):
         cfg["data_cache_dir"] = self.tempdir.name
         set_config(cfg)
         etf_data_tools._load_cn_schedule_frame.cache_clear()
+        etf_data_tools._load_tushare_futures_contract_catalog.cache_clear()
+        etf_data_tools._load_tushare_futures_daily_exchange_frame.cache_clear()
         etf_data_tools._load_tushare_futures_main_frame.cache_clear()
+        etf_data_tools._load_tushare_warehouse_exchange_frame.cache_clear()
         etf_data_tools._load_tushare_warehouse_series.cache_clear()
 
     def tearDown(self):
@@ -128,7 +131,10 @@ class SharedSnapshotToolIntegrationTests(unittest.TestCase):
         cfg["data_cache_dir"] = self.tempdir.name
         set_config(cfg)
         etf_data_tools._load_cn_schedule_frame.cache_clear()
+        etf_data_tools._load_tushare_futures_contract_catalog.cache_clear()
+        etf_data_tools._load_tushare_futures_daily_exchange_frame.cache_clear()
         etf_data_tools._load_tushare_futures_main_frame.cache_clear()
+        etf_data_tools._load_tushare_warehouse_exchange_frame.cache_clear()
         etf_data_tools._load_tushare_warehouse_series.cache_clear()
 
     def tearDown(self):
