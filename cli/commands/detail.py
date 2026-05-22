@@ -122,7 +122,7 @@ def detail(
         for h in data["holdings"]:
             holdings_table.add_row(
                 h.get("code", ""),
-                h.get("name", ""),
+                h.get("name") or "N/A",
                 _fmt_float(h.get("weight_pct"), 2) if h.get("weight_pct") is not None else "N/A",
             )
     else:

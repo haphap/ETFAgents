@@ -345,6 +345,100 @@ def _append_if_present(
     lines.append(f"{label}: {rendered}")
 
 
+def _clean_scalar_text(value) -> str:
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
+def _portfolio_code_lookup_keys(value) -> set[str]:
+    code = _clean_scalar_text(value).upper()
+    if not code:
+        return set()
+
+    keys = {code}
+    if "." in code:
+        keys.add(code.split(".", 1)[0])
+    elif code.isdigit():
+        keys.add(code.zfill(6))
+
+    try:
+        normalized = _normalize_ts_code(code)
+    except DataVendorUnavailable:
+        return keys
+
+    keys.add(normalized)
+    if "." in normalized:
+        keys.add(normalized.split(".", 1)[0])
+    return keys
+
+
+_stock_basic_name_cache: dict[str, str] | None = None
+
+
+def _stock_basic_name_lookup() -> dict[str, str]:
+    global _stock_basic_name_cache
+    if _stock_basic_name_cache is not None:
+        return _stock_basic_name_cache
+
+    basics = _query_pro("stock_basic", fields="ts_code,symbol,name")
+    if basics.empty:
+        return {}
+
+    lookup: dict[str, str] = {}
+    for _, row in basics.iterrows():
+        name = _clean_scalar_text(row.get("name"))
+        if not name:
+            continue
+        for column in ("ts_code", "symbol"):
+            for key in _portfolio_code_lookup_keys(row.get(column)):
+                lookup.setdefault(key, name)
+    _stock_basic_name_cache = lookup
+    return lookup
+
+
+def _enrich_fund_portfolio_stock_names(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    code_columns = [column for column in ("symbol", "stk_code") if column in df.columns]
+    if not code_columns:
+        return df
+
+    enriched = df.copy()
+    if "stk_name" not in enriched.columns:
+        enriched["stk_name"] = ""
+
+    missing_name = enriched["stk_name"].map(_clean_scalar_text).eq("")
+    if not missing_name.any():
+        return enriched
+
+    try:
+        name_lookup = _stock_basic_name_lookup()
+    except DataVendorUnavailable as exc:
+        logger.debug("Unable to enrich ETF holdings names from stock_basic: %s", exc)
+        return enriched
+
+    if not name_lookup:
+        return enriched
+
+    for index, row in enriched[missing_name].iterrows():
+        for column in code_columns:
+            for key in _portfolio_code_lookup_keys(row.get(column)):
+                name = name_lookup.get(key)
+                if name:
+                    enriched.at[index, "stk_name"] = name
+                    break
+            if _clean_scalar_text(enriched.at[index, "stk_name"]):
+                break
+    return enriched
+
+
 def _safe_ratio(numerator, denominator) -> float | None:
     num = _to_float(numerator)
     den = _to_float(denominator)
@@ -811,6 +905,8 @@ def get_etf_holdings(ticker: str, curr_date: str) -> str:
     df = _sort_descending(df, "end_date", "ann_date", "stk_mkv_ratio")
     if df.empty:
         raise MissingEtfHoldings(f"No ETF holdings data found for '{ts_code}' up to {curr_date}.")
+
+    df = _enrich_fund_portfolio_stock_names(df)
 
     summary_lines: list[str] = []
     latest = df.iloc[0]
