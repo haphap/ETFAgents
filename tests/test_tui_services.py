@@ -11,7 +11,6 @@ from cli.tui.services import (
     IdRegistry,
     PaperTradingViewModel,
     ReportRepository,
-    TickerState,
 )
 
 _textual_modules_after = {m for m in sys.modules if m == "textual" or m.startswith("textual.")}

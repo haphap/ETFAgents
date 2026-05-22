@@ -3,25 +3,14 @@
 from __future__ import annotations
 
 from textual.app import App, ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Vertical
 from textual.screen import Screen
-from textual.widgets import (
-    Button,
-    DataTable,
-    Footer,
-    Header,
-    Label,
-    ListItem,
-    ListView,
-    Markdown,
-    Static,
-)
+from textual.widgets import Button, Footer, Header, Markdown, Static
 
 from cli.tui.services import (
     BacktestViewer,
     PaperTradingViewModel,
     ReportRepository,
-    SECTION_DEFINITIONS,
 )
 
 
@@ -122,7 +111,6 @@ class HelpScreen(Screen):
 |--------|------|
 | `q` | 退出 |
 | `Escape` | 返回上一屏 |
-| `r` | 刷新当前数据 |
 | `?` | 显示本帮助 |
 
 ## 功能
@@ -145,55 +133,25 @@ class HelpScreen(Screen):
 
 class ETFAgentsTuiApp(App):
     CSS = """
-    /* === 基础布局 === */
     #home { align: center middle; height: 100%; }
     #title { text-style: bold; margin: 1 0; }
     .subtitle { color: $text-muted; margin-bottom: 1; }
     .screen-body { height: 1fr; }
     .pane-title { text-style: bold; color: $accent; height: 1; margin: 0 0 1 0; }
     .hint { color: $text-muted; height: 1; margin-top: 1; }
-    .fill-list { height: 1fr; }
-    ListView { width: 100%; }
     Markdown { height: 1fr; }
-    DataTable { height: 1fr; }
 
-    /* === 左侧面板宽度（通过 App CSS class 切换） === */
-    .left-pane  { height: 100%; border: solid $primary; }
-    .right-pane { height: 100%; }
-
-    .panel-narrow .left-pane  { width: 30%; min-width: 30; }
-    .panel-narrow .right-pane { width: 70%; }
-    .panel-normal .left-pane  { width: 35%; min-width: 36; }
-    .panel-normal .right-pane { width: 65%; }
-    .panel-wide .left-pane    { width: 40%; min-width: 42; }
-    .panel-wide .right-pane   { width: 60%; }
-
-    /* === 布局密度（通过 App CSS class 切换） === */
-
-    /* compact */
-    .density-compact .left-pane  { padding: 0; }
-    .density-compact .right-pane { padding: 0; }
-    .density-compact .right-top  { height: 35%; border: round $primary; margin-bottom: 0; }
-    .density-compact .right-bottom { height: 1fr; border: round $primary; }
-
-    /* normal */
-    .density-normal .left-pane  { padding: 0 1; }
-    .density-normal .right-pane { padding: 0 1; }
-    .density-normal .right-top  { height: 35%; border: solid $primary; margin-bottom: 1; }
-    .density-normal .right-bottom { height: 1fr; border: solid $primary; }
-
-    /* spacious */
-    .density-spacious .left-pane  { padding: 1 2; }
-    .density-spacious .right-pane { padding: 1 2; }
-    .density-spacious .right-top  { height: 35%; border: double $primary; margin-bottom: 2; }
-    .density-spacious .right-bottom { height: 1fr; border: double $primary; }
+    /* Two-pane layout — active in M1+ screens */
+    .left-pane  { height: 100%; width: 35%; min-width: 36; border: solid $primary; padding: 0 1; }
+    .right-pane { height: 100%; width: 65%; padding: 0 1; }
+    .right-top    { height: 35%; border: solid $primary; margin-bottom: 1; }
+    .right-bottom { height: 1fr; border: solid $primary; }
     """
 
     BINDINGS = [
         ("q", "quit", "退出"),
         ("escape", "pop_screen", "返回"),
         ("?", "show_help", "帮助"),
-        ("r", "refresh_reports", "刷新报告"),
     ]
 
     def __init__(
@@ -208,9 +166,6 @@ class ETFAgentsTuiApp(App):
         self.paper_view_model = paper_view_model
 
     def on_mount(self) -> None:
-        self.add_class("density-normal")
-        self.add_class("panel-normal")
-
         self.install_screen(HomeScreen(), name="home")
         self.install_screen(
             ResearchAnalysisScreen(),
@@ -237,9 +192,6 @@ class ETFAgentsTuiApp(App):
 
     def action_show_help(self) -> None:
         self.push_screen("help")
-
-    def action_refresh_reports(self) -> None:
-        pass  # screens override this via their own action_refresh_reports
 
 
 def main() -> None:

@@ -5,15 +5,11 @@ This module must NOT import textual.
 
 from __future__ import annotations
 
-import copy
 import csv
-import datetime as _dt
 import json
-import threading
 from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterable, Iterator
+from typing import Any
 
 from etfagents.default_config import DEFAULT_CONFIG
 
@@ -21,6 +17,16 @@ from etfagents.default_config import DEFAULT_CONFIG
 # ---------------------------------------------------------------------------
 # Section definitions (9 sections matching AgentState)
 # ---------------------------------------------------------------------------
+#
+# Mapping convention:
+#   section_id  — stable UI identifier (e.g. "market_flow")
+#   state_key   — AgentState field that holds the section content
+#                 (e.g. "market_flow_report")
+#
+# When AnalysisRunner lands (M2), it will walk SECTION_DEFINITIONS to map
+# stream-chunk keys back to UI section_ids.  detection_keys (for multi-key
+# triggers like research/portfolio_manager) will be added to SectionDef at
+# that time.
 
 ANALYST_KEYS = [
     "market_flow",
@@ -36,7 +42,6 @@ ANALYST_KEYS = [
 class SectionDef:
     section_id: str
     state_key: str
-    detection_keys: tuple[str, ...]
     team: str
     title: str
     disk_paths: tuple[str, ...]
@@ -45,73 +50,52 @@ class SectionDef:
 SECTION_DEFINITIONS: tuple[SectionDef, ...] = (
     SectionDef(
         "market_flow", "market_flow_report",
-        ("market_flow_report",),
         "分析师", "市场与资金流",
         ("reports/market_flow_report.md", "1_analysts/market_flow.md"),
     ),
     SectionDef(
         "catalyst_sentiment", "catalyst_sentiment_report",
-        ("catalyst_sentiment_report",),
         "分析师", "舆情与事件",
         ("reports/catalyst_sentiment_report.md", "1_analysts/catalyst_sentiment.md"),
     ),
     SectionDef(
         "macro_regime", "macro_regime_report",
-        ("macro_regime_report",),
         "分析师", "宏观框架",
         ("reports/macro_regime_report.md", "1_analysts/macro_regime.md"),
     ),
     SectionDef(
         "meso_commodity", "meso_commodity_report",
-        ("meso_commodity_report",),
         "分析师", "中观大宗",
         ("reports/meso_commodity_report.md", "1_analysts/meso_commodity.md"),
     ),
     SectionDef(
         "holdings_industry", "holdings_industry_report",
-        ("holdings_industry_report",),
         "分析师", "持仓行业",
         ("reports/holdings_industry_report.md", "1_analysts/holdings_industry.md"),
     ),
     SectionDef(
         "top_holdings", "top_holdings_report",
-        ("top_holdings_report",),
         "分析师", "头部持仓",
         ("reports/top_holdings_report.md", "1_analysts/top_holdings.md"),
     ),
     SectionDef(
         "research", "research_allocation_plan",
-        ("research_allocation_plan", "investment_debate_state"),
         "研究", "研究团队",
         ("reports/research_allocation_plan.md", "2_research/manager.md"),
     ),
     SectionDef(
         "trader", "trader_allocation_plan",
-        ("trader_allocation_plan",),
         "交易", "交易员",
         ("reports/trader_allocation_plan.md", "3_trading/trader.md"),
     ),
     SectionDef(
         "portfolio_manager", "final_allocation_decision",
-        ("final_allocation_decision", "risk_debate_state"),
         "决策", "投资组合经理",
         ("reports/final_allocation_decision.md", "5_portfolio/decision.md"),
     ),
 )
 
 SECTION_BY_ID = {defn.section_id: defn for defn in SECTION_DEFINITIONS}
-
-
-# ---------------------------------------------------------------------------
-# Ticker state
-# ---------------------------------------------------------------------------
-
-class TickerState(str, Enum):
-    PENDING = "pending"
-    RUNNING = "running"
-    DONE = "done"
-    FAILED = "failed"
-    CANCELLED = "cancelled"
 
 
 # ---------------------------------------------------------------------------
@@ -157,46 +141,6 @@ class IdRegistry:
 
 
 # ---------------------------------------------------------------------------
-# Analysis events (tagged union)
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class TickerStarted:
-    ticker: str
-    total_sections: int
-
-
-@dataclass(frozen=True)
-class SectionDone:
-    ticker: str
-    section_id: str
-    content: str
-    completed: int
-    total: int
-
-
-@dataclass(frozen=True)
-class TickerDone:
-    ticker: str
-    report_path: Path
-    rating: str | None
-
-
-@dataclass(frozen=True)
-class TickerFailed:
-    ticker: str
-    error: str
-
-
-@dataclass(frozen=True)
-class TickerCancelled:
-    ticker: str
-
-
-AnalysisEvent = TickerStarted | SectionDone | TickerDone | TickerFailed | TickerCancelled
-
-
-# ---------------------------------------------------------------------------
 # Report data
 # ---------------------------------------------------------------------------
 
@@ -216,6 +160,9 @@ class ReportRecord:
 class ReportRepository:
     """Scan and read locally saved single-ETF reports.  Thread-safe (read-only + simple cache clear)."""
 
+    # Explicit exclusions for non-underscore-prefixed dirs that aren't ticker
+    # directories.  Dirs starting with "_" (e.g. _candidate_pools) are already
+    # filtered by the startswith("_") check below.
     _SKIP_DIRS = {"backtest", "memory"}
 
     def __init__(self, results_dir: str | Path | None = None):
@@ -338,7 +285,7 @@ class ReportRepository:
             rating = parse_rating(text)
             if rating:
                 return rating
-        except Exception:
+        except (ImportError, ValueError, AttributeError):
             pass
         upper = text.upper()
         for rating in ("OVERWEIGHT", "UNDERWEIGHT", "BUY", "SELL", "HOLD"):
@@ -435,6 +382,11 @@ class BacktestViewer:
         )
 
     def sparkline(self, nav: list[dict[str, str]] | None) -> str:
+        """Build a ▁▂▃▄▅▆▇█ sparkline from nav rows.
+
+        Public so that callers (including tests) can compute sparklines
+        for arbitrary nav data without going through load().
+        """
         if not nav:
             return ""
         values: list[float] = []
