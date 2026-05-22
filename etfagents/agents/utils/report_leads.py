@@ -480,10 +480,11 @@ _OPENING_TERM_EXPLANATION_RE = re.compile(
     r")[^）]{0,140}）"
 )
 _INLINE_TECHNICAL_TERM_EXPLANATION_RE = re.compile(
-    r"(?P<term>(?:EMA|SMA|MACD|RSI|ATR|VWMA|NAV|仓单|升水|贴水|基差|贝塔|久期|溢价|折价|溢折价))"
+    r"(?P<term>(?:EMA|SMA|MACD|RSI|ATR|VWMA|NAV|仓单|升水|贴水|基差|贝塔|久期|溢价|折价|溢折价|"
+    r"多头排列|空头排列|金叉|死叉|发散|背离|顶背离|底背离|放量突破|缩量回踩|均线|布林带))"
     r"（[^）]{0,140}(?:"
     r"是指|指的是|即|也就是|意思是|通俗|简单说|简单来说|用于|用来|衡量|反映|代表|表示|"
-    r"英文|简称|又称|全称|定义|解释|白话|术语|交易含义|移动平均|指数移动|加权|平均线"
+    r"意味着|英文|简称|又称|全称|定义|解释|白话|术语|交易含义|移动平均|指数移动|加权|平均线"
     r")[^）]{0,140}）"
 )
 _DECISION_LABEL_LINE_RE = re.compile(

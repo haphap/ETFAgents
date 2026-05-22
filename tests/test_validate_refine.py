@@ -601,6 +601,18 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertIn("价格站上10日EMA，但需等待成交量确认（最近两日缩量）。", cleaned)
         self.assertNotIn("指数移动平均线", cleaned)
 
+    def test_inline_chinese_market_term_parenthetical_definition_is_removed(self):
+        raw = (
+            "短期结构形成空头排列（即短期均线下穿中长期均线，意味着卖盘占据主导），"
+            "但若成交量收缩（最近两日缩量）则暂不追空。"
+        )
+
+        cleaned = strip_inline_technical_term_explanations(raw)
+
+        self.assertIn("短期结构形成空头排列，但若成交量收缩（最近两日缩量）则暂不追空。", cleaned)
+        self.assertNotIn("短期均线下穿中长期均线", cleaned)
+        self.assertNotIn("卖盘占据主导", cleaned)
+
     def test_clean_generated_report_removes_meso_preamble_glossary_and_action_guide(self):
         raw = (
             "【核心结论与前置指引】\n"

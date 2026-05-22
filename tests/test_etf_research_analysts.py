@@ -620,7 +620,6 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
 
         system_msg = captured["system_message"]
         self.assertIn("overview paragraph that summarizes", system_msg)
-        self.assertIn("标准多头发散形态", system_msg)
         self.assertIn("这意味着什么", system_msg)
         self.assertIn("对交易应该怎么做", system_msg)
         self.assertIn("Use EXACTLY four top-level sections (一、二、三、四)", system_msg)
@@ -633,6 +632,10 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("（二）条件情景推演", system_msg)
         self.assertIn("四、综合结论和指标总览", system_msg)
         self.assertIn("不得再写“指标总览”或“综合结论”独立标题", system_msg)
+        self.assertIn("不得追加括号名词解释或术语定义", system_msg)
+        self.assertNotIn("必须立即用通俗语言解释", system_msg)
+        self.assertNotIn("直接说明交易含义即可", system_msg)
+        self.assertNotIn("标准多头发散形态", system_msg)
         self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
         self.assertIn("核心交易信号", system_msg)
         self.assertIn("结论依据", system_msg)
