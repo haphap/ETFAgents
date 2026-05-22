@@ -85,9 +85,6 @@ app.add_typer(paper_app, name="paper")
 from cli.commands.detail import detail as detail_command
 app.command(name="detail")(detail_command)
 
-from cli.commands.tui import tui as tui_command
-app.command(name="tui")(tui_command)
-
 
 def save_backtest_result(result, output_dir):
     from etfagents.backtest import save_backtest_result as _save_backtest_result
