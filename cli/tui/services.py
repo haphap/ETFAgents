@@ -282,7 +282,7 @@ class ReportRepository:
             return None
         try:
             from etfagents.agents.utils.rating import parse_rating
-            rating = parse_rating(text)
+            rating = parse_rating(text, default="")
             if rating:
                 return rating
         except (ImportError, ValueError, AttributeError):

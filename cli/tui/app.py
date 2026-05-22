@@ -7,11 +7,7 @@ from textual.containers import Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Markdown, Static
 
-from cli.tui.services import (
-    BacktestViewer,
-    PaperTradingViewModel,
-    ReportRepository,
-)
+from cli.tui.services import ReportRepository
 
 
 # ---------------------------------------------------------------------------
@@ -72,10 +68,6 @@ class ReportLibraryScreen(Screen):
 
 
 class BacktestScreen(Screen):
-    def __init__(self, viewer: BacktestViewer) -> None:
-        super().__init__()
-        self.viewer = viewer
-
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Vertical(classes="screen-body"):
@@ -85,10 +77,6 @@ class BacktestScreen(Screen):
 
 
 class PaperTradingScreen(Screen):
-    def __init__(self, view_model: PaperTradingViewModel) -> None:
-        super().__init__()
-        self.view_model = view_model
-
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Vertical(classes="screen-body"):
@@ -157,36 +145,19 @@ class ETFAgentsTuiApp(App):
     def __init__(
         self,
         repository: ReportRepository | None = None,
-        backtest_viewer: BacktestViewer | None = None,
-        paper_view_model: PaperTradingViewModel | None = None,
     ):
         super().__init__()
         self.report_repository = repository or ReportRepository()
-        self.backtest_viewer = backtest_viewer
-        self.paper_view_model = paper_view_model
 
     def on_mount(self) -> None:
         self.install_screen(HomeScreen(), name="home")
-        self.install_screen(
-            ResearchAnalysisScreen(),
-            name="research",
-        )
+        self.install_screen(ResearchAnalysisScreen(), name="research")
         self.install_screen(
             ReportLibraryScreen(repository=self.report_repository),
             name="reports",
         )
-        self.install_screen(
-            BacktestScreen(
-                viewer=self.backtest_viewer or BacktestViewer(),
-            ),
-            name="backtest",
-        )
-        self.install_screen(
-            PaperTradingScreen(
-                view_model=self.paper_view_model or PaperTradingViewModel(),
-            ),
-            name="paper",
-        )
+        self.install_screen(BacktestScreen(), name="backtest")
+        self.install_screen(PaperTradingScreen(), name="paper")
         self.install_screen(HelpScreen(), name="help")
         self.push_screen("home")
 
