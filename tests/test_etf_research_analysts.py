@@ -157,7 +157,10 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertNotIn("## 第一步：数据获取", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
-        self.assertIn("一级标题 -> 1-2句结论段 -> 子章节标题", system_msg)
+        self.assertIn("一级标题 -> 1-2句引导句 -> 子章节标题", system_msg)
+        self.assertIn("开篇帽段负责统领全文", system_msg)
+        self.assertIn("第一章标题后的引导句只负责导入本章", system_msg)
+        self.assertIn("第一章引导句要承接'行业主线与分歧焦点'", system_msg)
         self.assertIn("不得写'本章''本节''本部分''旨在''梳理'", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
         self.assertIs(
@@ -169,7 +172,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         valid_report = (
             "券商行业研究显示煤炭链条盈利预期仍受煤价下行压制，ETF配置应等待需求和库存同步修复。\n\n"
             "一、行业主线与分歧焦点\n"
-            "煤炭链条共识集中在煤价下行对盈利的压制，ETF配置需要等待需求和库存同步修复。\n\n"
+            "券商共识主要来自煤炭价格下行和盈利预测下修，分歧则集中在需求修复节奏与库存去化强度。\n\n"
             "（一）共识主线\n"
             "报告内容。\n\n"
             "二、景气、政策与产业链验证\n"
