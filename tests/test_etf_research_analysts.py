@@ -776,6 +776,29 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("\n\n| 指标 |", normalized)
         self.assertEqual(normalized, normalized_again)
 
+    def test_market_flow_tail_normalizer_removes_duplicate_combined_tail_heading(self):
+        report = (
+            "短期偏空震荡筑底，中期关注1.60元长期均线支撑有效性。\n\n"
+            "一、市场结构与量价诊断\n趋势导语。\n\n"
+            "二、交易确认与执行计划\n执行导语。\n\n"
+            "三、关键价位与条件情景推演\n情景导语。\n\n"
+            "四、综合结论和指标总览\n\n"
+            "短期偏空震荡筑底，资金呈净流出状态，等待右侧企稳信号。\n\n"
+            "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| RSI | 35 | 偏弱 | 左侧寻底 | 站回50改善 |\n\n"
+            "五、综合结论和指标总览。 市场与资金流分析：重复尾部标题。"
+        )
+
+        normalized = _normalize_market_flow_tail_sections(report)
+        normalized_again = _normalize_market_flow_tail_sections(normalized)
+
+        self.assertEqual(1, normalized.count("综合结论和指标总览"))
+        self.assertIn("四、综合结论和指标总览", normalized)
+        self.assertNotIn("五、综合结论和指标总览", normalized)
+        self.assertNotIn("市场与资金流分析：重复尾部标题", normalized)
+        self.assertEqual(normalized, normalized_again)
+
     def test_market_flow_tail_normalizer_converts_inline_conclusion_without_table(self):
         report = (
             "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
