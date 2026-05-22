@@ -182,6 +182,29 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertIsNotNone(result["share_change_pct"])
 
     @patch("etfagents.dataflows.interface.route_to_vendor")
+    def test_holdings_name_does_not_fall_back_to_code(self, mock_vendor):
+        def _vendor_side_effect(method, *args, **kwargs):
+            data = {
+                "get_etf_price_data": self.PRICE_CSV,
+                "get_etf_nav": self.NAV_CSV,
+                "get_etf_info": self.INFO_CSV,
+                "get_etf_holdings": (
+                    "# ETF holdings\n\n"
+                    "symbol,stk_name,stk_mkv_ratio\n"
+                    "600519,,5.23\n"
+                ),
+                "get_etf_share": self.SHARE_CSV,
+            }
+            return data[method]
+
+        mock_vendor.side_effect = _vendor_side_effect
+
+        result = get_etf_detail("510300.SH", curr_date="2026-05-20")
+
+        self.assertEqual(result["holdings"][0]["code"], "600519")
+        self.assertEqual(result["holdings"][0]["name"], "")
+
+    @patch("etfagents.dataflows.interface.route_to_vendor")
     def test_graceful_degradation_on_vendor_failure(self, mock_vendor):
         mock_vendor.side_effect = Exception("API down")
         result = get_etf_detail("INVALID.TICKER", curr_date="2026-05-20")
