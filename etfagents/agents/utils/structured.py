@@ -132,7 +132,7 @@ def _format_prompt_source(prompt: StructuredPromptInput) -> str:
     if isinstance(prompt, (list, tuple)):
         chunks: list[str] = []
         for message in prompt:
-            if str(message.get("role", "")).lower() == "system":
+            if message.get("role", "").lower() == "system":
                 continue
             content = message.get("content", "")
             if content:
