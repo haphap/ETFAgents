@@ -166,7 +166,7 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
             result["holdings"] = [
                 {
                     "code": r.get("symbol") or r.get("stk_code", ""),
-                    "name": r.get("stk_name", ""),
+                    "name": r.get("stk_name") or r.get("symbol") or r.get("stk_code", ""),
                     "weight_pct": _safe_float(r.get("stk_mkv_ratio")),
                 }
                 for r in rows
