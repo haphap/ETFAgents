@@ -6,6 +6,19 @@
 
 v1 采用分阶段落地：先完成主菜单、研究分析队列、研究报告库、回测结果读取、模拟交易查看；后续再增强回测交互、买卖弹窗、更多 Textual pilot 覆盖。
 
+## 执行校准
+
+本计划以根目录 `plan.md` 的当前执行版为准。旧方案中关于 `etfagents/tui/`、独立 `etfagents-tui` 入口、默认安装 `textual/plotext`、多 ETF 并发分析和独立 widget 包的设想暂不作为 v1 要求。
+
+v1 当前工程安排：
+
+- 使用 `etfagents tui`，不新增 `etfagents-tui` console script。
+- 使用 `cli/tui/` 和 `cli/commands/tui.py`，暂不迁到 `etfagents/tui/`。
+- `textual` 作为 `[project.optional-dependencies] tui`，基础安装不拉取 Textual。
+- 不引入 `plotext`；回测图表 v1 使用字符 Sparkline。
+- 多 ETF 分析使用顺序队列；并发推迟到 v1.5/v2，在限流、日志、memory、checkpoint 隔离方案明确后再做。
+- 现有 `etfagents analyze/backtest/paper` 行为保持不变。
+
 ## 关键假设
 
 - 接受新增 `textual` 依赖。**应作为 `[project.optional-dependencies] tui` extra**，而不是默认依赖；非 TUI 用户安装基础包时不应被迫拉入 Textual 及其传递依赖。`etfagents tui` 启动时若 `textual` 未安装，应给出明确的安装提示（`pip install 'etfagents[tui]'`）并保留其他 CLI 命令的可用性。
@@ -19,8 +32,8 @@ v1 采用分阶段落地：先完成主菜单、研究分析队列、研究报�
 
 ### 命令入口与依赖
 
-- `pyproject.toml` 新增 `textual>=0.89.0`。
-- `uv.lock` 已更新 Textual 及其依赖。
+- `pyproject.toml` 新增 `[project.optional-dependencies] tui = ["textual>=0.89.0"]`。
+- `uv.lock` 已更新 Textual extra 及其依赖，Textual 不再是基础依赖。
 - `cli/commands/tui.py` 新增 `tui()` 命令入口。
 - `cli/main.py` 注册 `etfagents tui`。
 - Textual import 延迟到命令执行时，避免影响其他 CLI 命令启动。
@@ -39,7 +52,7 @@ v1 采用分阶段落地：先完成主菜单、研究分析队列、研究报�
 
 - ETF ticker 不直接作为 Textual widget id；统一转换为安全 id 并维护映射。
 - 研究分析和回测通过 Textual thread worker 运行，避免阻塞 UI。
-- UI 当前是可用的 v1 骨架，后续应继续补充交互细节和 pilot 覆盖。
+- UI 当前是可用的 v1 骨架，已有 pilot 覆盖主菜单、报告库、研究分析、回测输入校验和模拟交易账户/持仓展示；后续继续补充交互细节。
 
 ### 服务层
 
@@ -74,20 +87,30 @@ v1 采用分阶段落地：先完成主菜单、研究分析队列、研究报�
 新增 `tests/test_tui_services.py`：
 
 - `ReportRepository`：验证单 ETF 报告扫描、rating 识别、section 读取，并跳过 `_candidate_pools`。
-- `AnalysisRunner`：使用 fake graph stream 验证 section update、ticker done、报告落盘。
-- `BacktestRunner`：验证读取 metrics/nav/orders/trades 并生成 view model。
+- `AnalysisRunner`：使用 fake graph stream 验证 section update、ticker done、report persisted、取消路径和报告落盘。
+- `BacktestRunner`：验证读取 metrics/nav/orders/trades 并生成 view model，坏 artifact 字段级降级。
 - `PaperTradingViewModel`：使用 fake engine 验证账户、持仓、历史和买卖委托。
+- `IdRegistry`：验证 Textual-safe id 的可逆映射和碰撞处理。
+- 文件顶部包含 `assert "textual" not in sys.modules`，防止服务层误导入 Textual。
+
+新增 `tests/test_tui_ui.py`：
+
+- 主菜单跳转。
+- 报告库空状态和刷新后非空状态。
+- 研究分析 fake runner section update。
+- 回测整数输入校验。
+- 模拟交易账户/持仓展示与 P&L 正负颜色。
 
 已执行验证：
 
 ```bash
 uv run python -m unittest tests.test_tui_services -q
-uv run python -m unittest tests.test_tui_services tests.test_paper_trading tests.test_backtrader_engine -q
-uv run python -m py_compile cli/tui/services.py cli/tui/app.py cli/commands/tui.py
+uv run python -m unittest tests.test_tui_services tests.test_tui_ui tests.test_paper_trading tests.test_backtrader_engine -q
+uv run python -m py_compile cli/tui/services.py cli/tui/app.py cli/commands/tui.py tests/test_tui_services.py tests/test_tui_ui.py
 uv run etfagents tui --help
 ```
 
-并完成一个 Textual pilot smoke test：应用可 mount，主菜单可跳转。
+补充验证：导入 `cli.main` 后 `textual` 不应出现在 `sys.modules`。
 
 ## 模块安排
 
@@ -336,4 +359,3 @@ v1 完成标准：
 - Pilot 测试覆盖 4 个 screen 的核心交互路径，不只是 mount。
 - 新增服务层单元测试通过；`tests/test_tui_services.py` 顶部包含 `assert "textual" not in sys.modules` 守卫。
 - `tests.test_paper_trading` 和 `tests.test_backtrader_engine` 回归通过。
-
