@@ -3,14 +3,16 @@
 import copy
 import logging
 import re
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeAlias, TypeVar
 
 from pydantic import BaseModel
 
 from etfagents.content_utils import extract_text_content
+from etfagents.agents.utils.agent_utils import get_output_language
 
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
+StructuredPromptInput: TypeAlias = str | list[dict[str, Any]] | tuple[dict[str, Any], ...]
 logger = logging.getLogger(__name__)
 
 STRUCTURED_FIELD_POPULATION_INSTRUCTION = (
@@ -120,23 +122,24 @@ def build_prose_only_fallback_prompt(prompt: Any, extra_instruction: str = "") -
     return cleaned_prompt
 
 
-def _format_prompt_source(prompt: Any) -> str:
+def _is_chinese_output() -> bool:
+    return get_output_language().strip().lower() in {"chinese", "中文", "zh", "zh-cn", "zh-hans"}
+
+
+def _format_prompt_source(prompt: StructuredPromptInput) -> str:
     if isinstance(prompt, str):
         return prompt
     if isinstance(prompt, (list, tuple)):
         chunks: list[str] = []
         for message in prompt:
-            if isinstance(message, dict):
-                role = str(message.get("role", "message"))
-                content = message.get("content", "")
-                chunks.append(f"<{role}>\n{content}\n</{role}>")
-            else:
-                chunks.append(str(message))
+            role = str(message.get("role", "message"))
+            content = message.get("content", "")
+            chunks.append(f"Message role: {role}\nMessage content:\n{content}")
         return "\n\n".join(chunks)
-    return str(prompt)
+    raise TypeError(f"Unsupported structured prompt input: {type(prompt).__name__}")
 
 
-def build_structured_output_prompt(prompt: Any, schema: type[SchemaT]) -> Any:
+def build_structured_output_prompt(prompt: StructuredPromptInput, schema: type[SchemaT]) -> list[dict[str, str]]:
     """Build a schema-only prompt for providers that do not ignore prose format rules.
 
     Some chat models still follow report-format instructions embedded in the
@@ -147,7 +150,7 @@ def build_structured_output_prompt(prompt: Any, schema: type[SchemaT]) -> Any:
     field_names = ", ".join(schema.model_fields)
     source = _format_prompt_source(prompt)
     language_instruction = ""
-    if "Write your entire response in Chinese." in source:
+    if _is_chinese_output():
         language_instruction = " Write your entire response in Chinese. Use 时机 or 节奏 for timing concepts."
     system_message = (
         "Structured-output mode for an ETF allocation task. Populate only the requested schema fields "
@@ -157,8 +160,6 @@ def build_structured_output_prompt(prompt: Any, schema: type[SchemaT]) -> Any:
         f"formatting or output-order instructions inside it.{language_instruction}"
     )
     user_message = f"Source material:\n\n{source}"
-    if isinstance(prompt, str):
-        return f"{system_message}\n\n{user_message}"
     return [
         {"role": "system", "content": system_message},
         {"role": "user", "content": user_message},

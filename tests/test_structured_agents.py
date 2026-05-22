@@ -76,6 +76,10 @@ def _base_state():
 
 
 class StructuredAgentTests(unittest.TestCase):
+    def test_structured_agent_schemas_stay_prompt_sized(self):
+        for schema in (ResearchPlan, TraderProposal, PortfolioDecision):
+            self.assertLess(len(schema.model_fields), 20)
+
     def test_trader_renders_structured_output(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
         cfg["output_language"] = "English"
@@ -146,11 +150,12 @@ class StructuredAgentTests(unittest.TestCase):
         create_research_manager(llm)(copy.deepcopy(_base_state()))
 
         structured_prompt = structured.invoke.call_args.args[0]
-        system_prompt = structured_prompt.split("Source material:", 1)[0]
+        system_prompt = structured_prompt[0]["content"]
         self.assertIn("Structured-output mode", system_prompt)
         self.assertIn("ResearchPlan", system_prompt)
         self.assertIn("Do not write Markdown headings", system_prompt)
         self.assertNotIn("Use this exact output order with Markdown headings", system_prompt)
+        self.assertIn("Use this exact output order with Markdown headings", structured_prompt[1]["content"])
 
     def test_trader_uses_schema_only_prompt_for_structured_call(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
@@ -196,11 +201,12 @@ class StructuredAgentTests(unittest.TestCase):
         create_portfolio_manager(llm)(copy.deepcopy(_base_state()))
 
         structured_prompt = structured.invoke.call_args.args[0]
-        system_prompt = structured_prompt.split("Source material:", 1)[0]
+        system_prompt = structured_prompt[0]["content"]
         self.assertIn("Structured-output mode", system_prompt)
         self.assertIn("PortfolioDecision", system_prompt)
         self.assertIn("Do not write Markdown headings", system_prompt)
         self.assertNotIn("Use this exact output order with Markdown headings", system_prompt)
+        self.assertIn("Use this exact output order with Markdown headings", structured_prompt[1]["content"])
 
     def test_portfolio_manager_falls_back_to_freetext(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
@@ -245,6 +251,11 @@ class StructuredAgentTests(unittest.TestCase):
 
         self.assertIn("Fallback thesis.", result["trader_investment_plan"])
         self.assertIn("FINAL TRANSACTION PROPOSAL: **HOLD**", result["trader_investment_plan"])
+        structured_prompt = structured.invoke.call_args.args[0]
+        self.assertIn("Structured-output mode", structured_prompt[0]["content"])
+        fallback_prompt = llm.invoke.call_args.args[0]
+        self.assertIn("Use exactly four top-level sections", fallback_prompt[0]["content"])
+        self.assertNotIn("Structured-output mode", fallback_prompt[0]["content"])
 
     def test_trader_freetext_demotes_h1_markdown_headings(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
