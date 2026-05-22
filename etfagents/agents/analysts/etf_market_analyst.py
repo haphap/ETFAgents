@@ -74,6 +74,9 @@ _MARKET_FLOW_REQUIRED_TOP_SECTIONS = {"一", "二", "三"}
 _MARKET_FLOW_COMBINED_TAIL_HEADING = "四、综合结论和指标总览"
 _MARKET_FLOW_TABLE_SEPARATOR_RE = re.compile(r"^\|(?:\s*:?-{3,}:?\s*\|)+\s*$")
 _MARKET_FLOW_CONCLUSION_LABEL_RE = re.compile(r"^\s*综合结论\s*[:：]\s*(.+)$")
+_MARKET_FLOW_COMBINED_TAIL_LINE_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+[、.．]\s*综合结论和指标总览(?:[。.]|\s|$)"
+)
 
 
 def _etf_indicator_catalog() -> str:
@@ -113,6 +116,24 @@ def _find_last_markdown_table(lines: list[str]) -> tuple[int, int] | None:
         last_table = (index, end)
         index = end
     return last_table
+
+
+def _strip_duplicate_market_flow_combined_tail(lines: list[str]) -> list[str]:
+    first_heading_seen = False
+    kept: list[str] = []
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].strip()
+        if stripped == _MARKET_FLOW_COMBINED_TAIL_HEADING:
+            first_heading_seen = True
+            kept.append(lines[index])
+            index += 1
+            continue
+        if first_heading_seen and _MARKET_FLOW_COMBINED_TAIL_LINE_RE.match(stripped):
+            break
+        kept.append(lines[index])
+        index += 1
+    return kept
 
 
 def _normalize_market_flow_tail_sections(report: str) -> str:
@@ -194,6 +215,7 @@ def _normalize_market_flow_tail_sections(report: str) -> str:
             lines.insert(index + 2, match.group(1).strip())
             break
 
+    lines = _strip_duplicate_market_flow_combined_tail(lines)
     return "\n".join(lines).strip()
 
 
