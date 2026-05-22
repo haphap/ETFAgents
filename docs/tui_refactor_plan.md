@@ -8,12 +8,12 @@ v1 采用分阶段落地：先完成主菜单、研究分析队列、研究报�
 
 ## 关键假设
 
-- 接受新增 `textual` 依赖。
+- 接受新增 `textual` 依赖。**应作为 `[project.optional-dependencies] tui` extra**，而不是默认依赖；非 TUI 用户安装基础包时不应被迫拉入 Textual 及其传递依赖。`etfagents tui` 启动时若 `textual` 未安装，应给出明确的安装提示（`pip install 'etfagents[tui]'`）并保留其他 CLI 命令的可用性。
 - TUI 作为新增入口存在，现有 CLI 命令行为不改变。
 - 多 ETF 分析先采用顺序队列，不引入并发。
 - 报告库 v1 只展示单 ETF 报告目录，不纳入 `_candidate_pools` 汇总报告。
 - 回测图表 v1 使用终端字符图和 Sparkline，不新增绘图库。
-- TUI 服务层必须可单元测试，避免测试依赖真实 LLM、Tushare 或 Textual 事件循环。
+- TUI 服务层必须可单元测试，避免测试依赖真实 LLM、Tushare 或 Textual 事件循环。**`tests/test_tui_services.py` 顶部应加 `assert "textual" not in sys.modules` 守卫**，强制服务层与 UI 解耦。
 
 ## 当前已完成工作
 
@@ -50,16 +50,21 @@ v1 采用分阶段落地：先完成主菜单、研究分析队列、研究报�
   - 跳过 `_candidate_pools` 和 `backtest`。
   - 识别 `complete_report.md`、分 section markdown、ticker、date、rating。
   - 支持读取指定 section 内容。
+  - 暴露 `invalidate()` 方法显式让 cache/扫描结果失效；由 `AnalysisRunner` 完成后或用户在 `ReportLibraryScreen` 按 `r` 时调用。
+  - 提供反向映射工具（如 `IdRegistry`）：`register(ticker) -> safe_id`、`resolve(safe_id) -> ticker`、`__contains__`，让 ticker 与 widget id 的映射只在服务层做一次，避免 `app.py` 重复实现字符串转换。
 - `AnalysisRunner`
   - 封装 `EtfAgentsGraph.prepare_run/stream/finalize_run`。
   - 对多 ETF 顺序执行。
-  - 产出 UI 友好的 `AnalysisEvent`：ticker 开始、section 更新、agent 更新、完成、失败。
-  - 分析中实时写入 `reports/{section}.md`。
+  - 维护显式状态机 `dict[str, TickerState]`，状态枚举：`pending / running / section_running / section_done / done / failed / cancelled`。UI 层直接渲染该 map，避免靠"最后一个事件"反推 ticker 进度。
+  - 产出 UI 友好的 `AnalysisEvent`：ticker 开始、section 更新、agent 更新、完成、失败、取消、报告已落盘。
+  - 分析中实时写入 `reports/{section}.md` 时使用原子写（tempfile + `os.replace`），中途取消不会留下半截文件污染 `ReportRepository`。
+  - 支持 `request_cancel()` 接口（基于 `threading.Event`）；stream loop 在每个事件之间检查 cancel flag，发出 `cancelled` 事件后退出当前 ticker 而不杀进程。
+  - 完成（或失败/取消）一个 ticker 后 emit `report_persisted` 事件，由 app 层调用 `ReportRepository.invalidate()`，让报告库 screen 立即看到新结果。
   - 完成后复用现有 `save_report_to_disk()` 保存完整报告；在未安装完整 CLI 依赖的测试环境中提供最小 fallback。
 - `BacktestRunner`
   - 封装 `backtest_candidate_pool()` 和 `save_backtest_result()`。
-  - 支持读取 `summary.md`、`metrics.json`、`nav.csv`、`orders.csv`、`trades.csv`。
-  - 生成简单 Sparkline 供 TUI 展示。
+  - 支持读取 `summary.md`、`metrics.json`、`nav.csv`、`orders.csv`、`trades.csv`。**每个 artifact 单独 try/except**，缺失/损坏时 view model 字段为 None；UI 显示"N/A"或"data unavailable"，单个坏文件不阻塞整个回测视图（参考 PR #48 detail 面板的 per-vendor 降级模式）。
+  - 生成简单 Sparkline 供 TUI 展示；NaV CSV 中的空行/非数字行 skip 掉，不让坏行 raise 整个 view。
 - `PaperTradingViewModel`
   - 封装 `PaperTradingEngine.get_account/get_positions/get_trades/buy/sell`。
   - 为 TUI 提供账户快照和交易委托接口。
@@ -92,7 +97,8 @@ uv run etfagents tui --help
 
 - 只负责 Typer 命令入口。
 - 延迟导入 Textual app。
-- 对 Textual 缺失给出明确错误。
+- 对 Textual 缺失给出明确错误：引导用户运行 `pip install 'etfagents[tui]'`，并提示其他 CLI 命令（`etfagents analyze / backtest / paper`）仍可用。
+- `etfagents tui --help` 文本应说明：TUI 与现有 CLI 命令并存，不替换任何命令；并列出基础命令的对应关系。
 
 不负责：
 
@@ -162,7 +168,9 @@ uv run etfagents tui --help
 v1：
 
 - 显示四个入口：研究分析、研究报告库、回测、模拟交易。
-- 支持 `Escape` 返回上一层，`q` 退出。
+- 支持 `Escape` 返回上一层，`q` 退出，`?` 显示当前 screen 的 keybinding 帮助 panel。
+- `Tab` / `Shift+Tab` 在 screen 内 widget 间循环（确认 Textual 默认行为生效，且每个 screen 进入时焦点初始化正确）。
+- 长内容滚动统一使用 `PgUp/PgDn` + `Home/End`，避免不同 screen 行为不一致。
 
 后续：
 
@@ -242,47 +250,66 @@ v1：
 
 ## Section 标签安排
 
-分析师团队：
+所有 section key 采用 `<namespace>.<name>` 结构，UI 上按 namespace 折叠成树。这样 trader / risk 子项命名风格统一，未来新增 section 不会破坏视觉层级。
 
-- `market_flow_report`：市场与资金流
-- `catalyst_sentiment_report`：舆情与事件
-- `macro_regime_report`：宏观框架
-- `meso_commodity_report`：中观大宗商品
-- `holdings_industry_report`：持仓行业
-- `top_holdings_report`：头部持仓
+分析师团队 (`analyst.*`)：
 
-研究团队：
+- `analyst.market_flow`：市场与资金流
+- `analyst.catalyst_sentiment`：舆情与事件
+- `analyst.macro_regime`：宏观框架
+- `analyst.meso_commodity`：中观大宗商品
+- `analyst.holdings_industry`：持仓行业
+- `analyst.top_holdings`：头部持仓
 
-- `bull`：多头
-- `bear`：空头
-- `research_manager`：研究经理综合结论
+研究团队 (`research.*`)：
 
-交易员：
+- `research.bull`：多头
+- `research.bear`：空头
+- `research.manager`：研究经理综合结论
 
-- `trader_logic`：配置逻辑
-- `trader_execution`：配置执行计划
-- `trader_rebalance`：再平衡与风险控制
-- `trader_bias`：执行倾向
+交易员 (`trader.*`)：
 
-风险管理：
+- `trader.logic`：配置逻辑
+- `trader.execution`：配置执行计划
+- `trader.rebalance`：再平衡与风险控制
+- `trader.bias`：执行倾向
 
-- `aggressive`：激进
-- `neutral`：中性
-- `conservative`：保守
-- `portfolio_manager`：投资组合经理
+风险管理 (`risk.*`)：
 
-结论：
+- `risk.aggressive`：激进
+- `risk.neutral`：中性
+- `risk.conservative`：保守
+- `risk.portfolio_manager`：投资组合经理
 
-- `final_allocation_decision`：最终组合经理决策
+最终结论 (`final.*`)：
+
+- `final.allocation_decision`：最终组合经理决策
+
+旧的扁平 key（如 `market_flow_report`、`aggressive`）通过 `services.SectionDefinition.legacy_key` 字段保留兼容映射，避免破坏已落盘报告的目录结构和文件名。
 
 ## 后续实施顺序
 
-1. 补齐研究分析 screen 的 per-ticker/per-section 状态模型和 UI 刷新。
-2. 增加 Textual pilot 测试：主菜单跳转、报告库选择、研究分析 fake runner 更新正文。
-3. 完善报告库 ticker/date 两级选择。
-4. 完善回测 result view：指标表、调仓表、订单表、交易表、最近结果打开。
-5. 完善模拟交易：交易历史表、买卖弹窗、指定 user。
-6. 评估是否将 `cli/main.py` 中的共享报告保存/格式化 helper 抽到独立模块。
+**v1 production-grade（必须完成才能 close v1）：**
+
+1. 实现显式 `TickerState` 状态机和 per-ticker/per-section 状态模型；UI 直接渲染状态 map，移除"靠最后一个事件反推进度"的 fragile 逻辑。
+2. 实现 `AnalysisRunner.request_cancel()` graceful path 和 atomic file write；配套 pilot 测试验证取消后没有半截 `reports/{section}.md`。
+3. 把 `textual` 移到 `[project.optional-dependencies] tui` extra；验证基础安装时其他 CLI 命令仍可用，并完善 `cli/commands/tui.py` 的安装引导文案。
+4. `ReportRepository.invalidate()` 在分析完成后被自动调用；`ReportLibraryScreen` 提供 `r` 手动刷新键。
+5. 抽离 `_safe_widget_id` 为 `services.IdRegistry`，附 `register/resolve/__contains__` 单测。
+6. Pilot 测试覆盖 4 个 screen 的核心交互路径（不只是 mount）：主菜单跳转、报告库空/非空状态、研究分析 fake runner section update、回测输入校验、模拟交易初始账户配色。
+
+**v1.5（核心可用性增强）：**
+
+7. 完善研究分析 screen 的失败 ticker 错误详情面板和取消队列 UI 操作。
+8. 完善报告库 ticker/date 两级选择，默认选中每个 ticker 最新日期，加搜索框。
+9. 完善回测 result view：指标表、调仓表、订单表、交易表、最近结果打开、输入校验。
+
+**v2（次级增强）：**
+
+10. 完善模拟交易：交易历史表、买卖弹窗、指定 user。
+11. 主菜单状态摘要：报告数量、最近回测时间、当前 paper account。
+12. 评估是否将 `cli/main.py` 中的共享报告保存/格式化 helper 抽到独立模块。
+13. 对 `_candidate_pools` 增加单独 tab，而不是混入单 ETF 报告库。
 
 ## 风险与约束
 
@@ -296,12 +323,17 @@ v1：
 
 v1 完成标准：
 
-- `etfagents tui --help` 可用。
-- TUI 主菜单可进入四个 screen。
-- 研究分析可以接受多个 ticker 并顺序执行 fake runner/真实 runner。
-- 报告库能读取现有单 ETF 报告并展示 section。
-- 回测 runner 能读取本地 artifacts 并生成 view model。
-- 模拟交易 view model 能读取账户、持仓、历史。
-- 新增服务层单元测试通过。
+- `etfagents tui --help` 可用；`textual` 未安装时给出明确的 `pip install 'etfagents[tui]'` 安装提示。
+- TUI 主菜单可进入四个 screen，`Escape / q / ?` 三个全局键全部生效。
+- 研究分析 screen：
+  - 接受多个 ticker 并顺序执行 fake runner / 真实 runner。
+  - 状态机覆盖 7 个状态（pending / running / section_running / section_done / done / failed / cancelled），UI 渲染该 map。
+  - 取消队列的 graceful path 已实现并测试，取消后磁盘上没有半截 `reports/{section}.md`。
+- 报告库能读取现有单 ETF 报告并展示 section；分析完成后 `ReportRepository.invalidate()` 被自动调用，新报告立即可见；`r` 键手动刷新可用。
+- 回测 runner 能读取本地 artifacts 并生成 view model；任一 artifact 缺失或损坏时单字段降级为 None，不阻塞整个视图。
+- 模拟交易 view model 能读取账户、持仓、历史；P&L 数字配色（正 green / 负 red）由 pilot 测试锁定。
+- `textual` 已迁出基础依赖，进入 `[project.optional-dependencies] tui`；基础安装下 `etfagents analyze / backtest / paper` 等命令仍能跑。
+- Pilot 测试覆盖 4 个 screen 的核心交互路径，不只是 mount。
+- 新增服务层单元测试通过；`tests/test_tui_services.py` 顶部包含 `assert "textual" not in sys.modules` 守卫。
 - `tests.test_paper_trading` 和 `tests.test_backtrader_engine` 回归通过。
 

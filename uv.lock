@@ -785,12 +785,16 @@ dependencies = [
     { name = "rich" },
     { name = "setuptools" },
     { name = "stockstats" },
-    { name = "textual" },
     { name = "tqdm" },
     { name = "tushare" },
     { name = "typer" },
     { name = "typing-extensions" },
     { name = "yfinance" },
+]
+
+[package.optional-dependencies]
+tui = [
+    { name = "textual" },
 ]
 
 [package.metadata]
@@ -815,13 +819,14 @@ requires-dist = [
     { name = "rich", specifier = ">=14.0.0" },
     { name = "setuptools", specifier = ">=80.9.0" },
     { name = "stockstats", specifier = ">=0.6.5" },
-    { name = "textual", specifier = ">=0.89.0" },
+    { name = "textual", marker = "extra == 'tui'", specifier = ">=0.89.0" },
     { name = "tqdm", specifier = ">=4.67.1" },
     { name = "tushare", specifier = ">=1.4.21" },
     { name = "typer", specifier = ">=0.21.0" },
     { name = "typing-extensions", specifier = ">=4.14.0" },
     { name = "yfinance", specifier = ">=0.2.63" },
 ]
+provides-extras = ["tui"]
 
 [[package]]
 name = "exceptiongroup"

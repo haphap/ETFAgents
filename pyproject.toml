@@ -24,7 +24,6 @@ dependencies = [
     "redis>=6.2.0",
     "requests>=2.32.4",
     "rich>=14.0.0",
-    "textual>=0.89.0",
     "typer>=0.21.0",
     "setuptools>=80.9.0",
     "stockstats>=0.6.5",
@@ -35,6 +34,11 @@ dependencies = [
     "akshare>=1.16.0",
     "python-dotenv>=1.0.0",
     "bcrypt>=4.0",
+]
+
+[project.optional-dependencies]
+tui = [
+    "textual>=0.89.0",
 ]
 
 [project.scripts]

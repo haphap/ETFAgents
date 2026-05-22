@@ -6,7 +6,11 @@ import copy
 import csv
 import datetime as _dt
 import json
+import os
+import tempfile
+import threading
 from dataclasses import dataclass, field
+from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator
 
@@ -26,34 +30,43 @@ ANALYST_KEYS = [
 @dataclass(frozen=True)
 class SectionDefinition:
     key: str
+    legacy_key: str
     team: str
     title: str
     path_candidates: tuple[str, ...]
 
 
+# Section keys are a compatibility surface for existing on-disk reports.
+# Keep path_candidates backward-compatible when adding or renaming UI sections.
 SECTION_DEFINITIONS: tuple[SectionDefinition, ...] = (
-    SectionDefinition("market_flow_report", "分析师团队", "市场与资金流", ("reports/market_flow_report.md", "1_analysts/market_flow.md")),
-    SectionDefinition("catalyst_sentiment_report", "分析师团队", "舆情与事件", ("reports/catalyst_sentiment_report.md", "1_analysts/catalyst_sentiment.md")),
-    SectionDefinition("macro_regime_report", "分析师团队", "宏观框架", ("reports/macro_regime_report.md", "1_analysts/macro_regime.md")),
-    SectionDefinition("meso_commodity_report", "分析师团队", "中观大宗商品", ("reports/meso_commodity_report.md", "1_analysts/meso_commodity.md")),
-    SectionDefinition("holdings_industry_report", "分析师团队", "持仓行业", ("reports/holdings_industry_report.md", "1_analysts/holdings_industry.md")),
-    SectionDefinition("top_holdings_report", "分析师团队", "头部持仓", ("reports/top_holdings_report.md", "1_analysts/top_holdings.md")),
-    SectionDefinition("bull", "研究团队", "多头", ("2_research/bull.md",)),
-    SectionDefinition("bear", "研究团队", "空头", ("2_research/bear.md",)),
-    SectionDefinition("research_manager", "研究团队", "研究经理综合结论", ("2_research/manager.md", "2_research/rounds.md", "reports/research_allocation_plan.md")),
-    SectionDefinition("trader_logic", "交易员", "配置逻辑", ("3_trading/trader.md", "reports/trader_allocation_plan.md")),
-    SectionDefinition("trader_execution", "交易员", "配置执行计划", ("3_trading/trader.md", "reports/trader_allocation_plan.md")),
-    SectionDefinition("trader_rebalance", "交易员", "再平衡与风险控制", ("3_trading/trader.md", "reports/trader_allocation_plan.md")),
-    SectionDefinition("trader_bias", "交易员", "执行倾向", ("3_trading/trader.md", "reports/trader_allocation_plan.md")),
-    SectionDefinition("aggressive", "风险管理", "激进", ("4_risk/aggressive.md",)),
-    SectionDefinition("neutral", "风险管理", "中性", ("4_risk/neutral.md",)),
-    SectionDefinition("conservative", "风险管理", "保守", ("4_risk/conservative.md",)),
-    SectionDefinition("portfolio_manager", "风险管理", "投资组合经理", ("5_portfolio/decision.md", "reports/final_allocation_decision.md")),
-    SectionDefinition("final_allocation_decision", "结论", "最终组合经理决策", ("5_portfolio/decision.md", "reports/final_allocation_decision.md")),
+    SectionDefinition("analyst.market_flow", "market_flow_report", "分析师团队", "市场与资金流", ("reports/market_flow_report.md", "1_analysts/market_flow.md")),
+    SectionDefinition("analyst.catalyst_sentiment", "catalyst_sentiment_report", "分析师团队", "舆情与事件", ("reports/catalyst_sentiment_report.md", "1_analysts/catalyst_sentiment.md")),
+    SectionDefinition("analyst.macro_regime", "macro_regime_report", "分析师团队", "宏观框架", ("reports/macro_regime_report.md", "1_analysts/macro_regime.md")),
+    SectionDefinition("analyst.meso_commodity", "meso_commodity_report", "分析师团队", "中观大宗商品", ("reports/meso_commodity_report.md", "1_analysts/meso_commodity.md")),
+    SectionDefinition("analyst.holdings_industry", "holdings_industry_report", "分析师团队", "持仓行业", ("reports/holdings_industry_report.md", "1_analysts/holdings_industry.md")),
+    SectionDefinition("analyst.top_holdings", "top_holdings_report", "分析师团队", "头部持仓", ("reports/top_holdings_report.md", "1_analysts/top_holdings.md")),
+    SectionDefinition("research.bull", "bull", "研究团队", "多头", ("2_research/bull.md",)),
+    SectionDefinition("research.bear", "bear", "研究团队", "空头", ("2_research/bear.md",)),
+    SectionDefinition("research.manager", "research_manager", "研究团队", "研究经理综合结论", ("2_research/manager.md", "2_research/rounds.md", "reports/research_allocation_plan.md")),
+    SectionDefinition("trader.logic", "trader_logic", "交易员", "配置逻辑", ("3_trading/trader.md", "reports/trader_allocation_plan.md")),
+    SectionDefinition("trader.execution", "trader_execution", "交易员", "配置执行计划", ("3_trading/trader.md", "reports/trader_allocation_plan.md")),
+    SectionDefinition("trader.rebalance", "trader_rebalance", "交易员", "再平衡与风险控制", ("3_trading/trader.md", "reports/trader_allocation_plan.md")),
+    SectionDefinition("trader.bias", "trader_bias", "交易员", "执行倾向", ("3_trading/trader.md", "reports/trader_allocation_plan.md")),
+    SectionDefinition("risk.aggressive", "aggressive", "风险管理", "激进", ("4_risk/aggressive.md",)),
+    SectionDefinition("risk.neutral", "neutral", "风险管理", "中性", ("4_risk/neutral.md",)),
+    SectionDefinition("risk.conservative", "conservative", "风险管理", "保守", ("4_risk/conservative.md",)),
+    SectionDefinition("risk.portfolio_manager", "portfolio_manager", "风险管理", "投资组合经理", ("5_portfolio/decision.md", "reports/final_allocation_decision.md")),
+    SectionDefinition("final.allocation_decision", "final_allocation_decision", "结论", "最终组合经理决策", ("5_portfolio/decision.md", "reports/final_allocation_decision.md")),
 )
 
 
-STREAM_SECTION_KEYS = {
+SECTION_BY_KEY = {definition.key: definition for definition in SECTION_DEFINITIONS}
+SECTION_BY_LEGACY_KEY = {definition.legacy_key: definition for definition in SECTION_DEFINITIONS}
+SECTION_KEY_ALIASES = {
+    definition.legacy_key: definition.key for definition in SECTION_DEFINITIONS
+}
+
+STREAM_SECTION_KEYS = (
     "market_flow_report",
     "catalyst_sentiment_report",
     "macro_regime_report",
@@ -62,7 +75,68 @@ STREAM_SECTION_KEYS = {
     "top_holdings_report",
     "trader_allocation_plan",
     "final_allocation_decision",
+)
+
+STREAM_SECTION_TO_UI_KEY = {
+    "market_flow_report": "analyst.market_flow",
+    "catalyst_sentiment_report": "analyst.catalyst_sentiment",
+    "macro_regime_report": "analyst.macro_regime",
+    "meso_commodity_report": "analyst.meso_commodity",
+    "holdings_industry_report": "analyst.holdings_industry",
+    "top_holdings_report": "analyst.top_holdings",
+    "research_allocation_plan": "research.manager",
+    "risk_management_plan": "risk.portfolio_manager",
+    "trader_allocation_plan": "trader.execution",
+    "final_allocation_decision": "final.allocation_decision",
 }
+
+
+class TickerState(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SECTION_RUNNING = "section_running"
+    SECTION_DONE = "section_done"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class IdRegistry:
+    """Map arbitrary values to Textual-safe ids without losing reversibility."""
+
+    def __init__(self, prefix: str):
+        self.prefix = prefix
+        self._value_to_id: dict[str, str] = {}
+        self._id_to_value: dict[str, str] = {}
+
+    def register(self, value: str) -> str:
+        if value in self._value_to_id:
+            return self._value_to_id[value]
+        base = self._sanitize(value)
+        candidate = base
+        index = 2
+        while candidate in self._id_to_value:
+            candidate = f"{base}-{index}"
+            index += 1
+        self._value_to_id[value] = candidate
+        self._id_to_value[candidate] = value
+        return candidate
+
+    def resolve(self, item_id: str) -> str:
+        return self._id_to_value[item_id]
+
+    def __contains__(self, item_id: object) -> bool:
+        return isinstance(item_id, str) and item_id in self._id_to_value
+
+    def clear(self) -> None:
+        self._value_to_id.clear()
+        self._id_to_value.clear()
+
+    def _sanitize(self, value: str) -> str:
+        safe = "".join(ch if ch.isalnum() or ch in "_-" else "_" for ch in value)
+        if not safe or safe[0].isdigit():
+            safe = f"{self.prefix}_{safe}"
+        return safe
 
 
 @dataclass
@@ -79,8 +153,14 @@ class ReportRepository:
 
     def __init__(self, results_dir: str | Path | None = None):
         self.results_dir = Path(results_dir or DEFAULT_CONFIG["results_dir"]).expanduser()
+        self._cache: list[ReportRecord] | None = None
+
+    def invalidate(self) -> None:
+        self._cache = None
 
     def list_reports(self) -> list[ReportRecord]:
+        if self._cache is not None:
+            return list(self._cache)
         if not self.results_dir.exists():
             return []
         records: list[ReportRecord] = []
@@ -103,7 +183,8 @@ class ReportRepository:
                         sections=sections,
                     )
                 )
-        return sorted(records, key=lambda item: (item.ticker, item.date), reverse=True)
+        self._cache = sorted(records, key=lambda item: (item.ticker, item.date), reverse=True)
+        return list(self._cache)
 
     def latest_by_ticker(self) -> list[ReportRecord]:
         latest: dict[str, ReportRecord] = {}
@@ -116,7 +197,8 @@ class ReportRepository:
         return [record for record in self.list_reports() if record.ticker == ticker]
 
     def read_section(self, record: ReportRecord, section_key: str) -> str:
-        section_path = record.sections.get(section_key)
+        normalized_key = SECTION_KEY_ALIASES.get(section_key, section_key)
+        section_path = record.sections.get(normalized_key)
         if section_path and section_path.exists():
             return section_path.read_text(encoding="utf-8")
         complete = record.path / "complete_report.md"
@@ -129,6 +211,7 @@ class ReportRepository:
                 candidate = report_dir / relative
                 if candidate.exists():
                     sections[definition.key] = candidate
+                    sections[definition.legacy_key] = candidate
                     break
         return sections
 
@@ -153,7 +236,7 @@ class ReportRepository:
 class AnalysisEvent:
     event_type: str
     ticker: str
-    status: str | None = None
+    status: TickerState | None = None
     section: str | None = None
     content: str | None = None
     current_agent: str | None = None
@@ -161,6 +244,8 @@ class AnalysisEvent:
     total_sections: int | None = None
     error: str | None = None
     report_path: Path | None = None
+    states: dict[str, TickerState] = field(default_factory=dict)
+    section_states: dict[str, dict[str, TickerState]] = field(default_factory=dict)
 
 
 class AnalysisRunner:
@@ -173,6 +258,12 @@ class AnalysisRunner:
     ):
         self.config = copy.deepcopy(config or DEFAULT_CONFIG)
         self.graph_factory = graph_factory
+        self.states: dict[str, TickerState] = {}
+        self.section_states: dict[str, dict[str, TickerState]] = {}
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
 
     def run_queue(
         self,
@@ -183,7 +274,17 @@ class AnalysisRunner:
         date = analysis_date or _dt.date.today().isoformat()
         analysts = list(selected_analysts or ANALYST_KEYS)
         normalized = [ticker.strip().upper() for ticker in tickers if ticker.strip()]
+        self._cancel_event.clear()
+        self.states = {ticker: TickerState.PENDING for ticker in normalized}
+        self.section_states = {
+            ticker: {definition.key: TickerState.PENDING for definition in SECTION_DEFINITIONS}
+            for ticker in normalized
+        }
         for ticker in normalized:
+            if self._cancel_event.is_set():
+                self._set_ticker_state(ticker, TickerState.CANCELLED)
+                yield self._event("ticker_cancelled", ticker, status=TickerState.CANCELLED)
+                continue
             yield from self.run_one(ticker, date, analysts)
 
     def run_one(
@@ -195,48 +296,88 @@ class AnalysisRunner:
         graph = self._make_graph()
         report_dir = Path(self.config["results_dir"]).expanduser() / ticker / analysis_date / "reports"
         report_dir.mkdir(parents=True, exist_ok=True)
-        total_sections = len(STREAM_SECTION_KEYS)
+        total_sections = len(SECTION_DEFINITIONS)
         completed: set[str] = set()
-        yield AnalysisEvent("ticker_started", ticker, status="分析中", total_sections=total_sections, completed_sections=0)
+        if ticker not in self.states:
+            self.states[ticker] = TickerState.PENDING
+        self.section_states.setdefault(
+            ticker,
+            {definition.key: TickerState.PENDING for definition in SECTION_DEFINITIONS},
+        )
+        self._set_ticker_state(ticker, TickerState.RUNNING)
+        yield self._event("ticker_started", ticker, status=TickerState.RUNNING, total_sections=total_sections, completed_sections=0)
         try:
             cli_main = self._cli_main()
             init_state, args, _resumed = graph.prepare_run(ticker, analysis_date)
             accumulated = copy.deepcopy(init_state)
             for chunk in graph.graph.stream(init_state, **args):
+                if self._cancel_event.is_set():
+                    self._set_ticker_state(ticker, TickerState.CANCELLED)
+                    yield self._event("ticker_cancelled", ticker, status=TickerState.CANCELLED)
+                    return
                 self._merge_stream_state(accumulated, chunk, cli_main)
                 for section, content in self._section_updates(chunk, cli_main):
                     if not content:
                         continue
+                    self._set_ticker_state(ticker, TickerState.SECTION_RUNNING)
+                    self._set_section_state(ticker, section, TickerState.SECTION_RUNNING)
                     completed.add(section)
                     self._write_live_section(report_dir, section, content)
-                    yield AnalysisEvent(
+                    self._set_ticker_state(ticker, TickerState.SECTION_DONE)
+                    self._set_section_state(ticker, section, TickerState.SECTION_DONE)
+                    yield self._event(
                         "section_update",
                         ticker,
-                        status="生成中",
+                        status=TickerState.SECTION_DONE,
                         section=section,
                         content=content,
                         completed_sections=len(completed),
                         total_sections=total_sections,
                     )
+                    if self._cancel_event.is_set():
+                        self._set_ticker_state(ticker, TickerState.CANCELLED)
+                        yield self._event("ticker_cancelled", ticker, status=TickerState.CANCELLED)
+                        return
                 current_agent = self._current_agent_from_chunk(chunk)
                 if current_agent:
-                    yield AnalysisEvent("agent_update", ticker, current_agent=current_agent)
+                    yield self._event("agent_update", ticker, current_agent=current_agent)
             graph.finalize_run(analysis_date, accumulated)
             report_path = self._save_report(cli_main, accumulated, ticker, Path(self.config["results_dir"]).expanduser() / ticker / analysis_date)
-            yield AnalysisEvent(
+            self._set_ticker_state(ticker, TickerState.DONE)
+            yield self._event(
                 "ticker_done",
                 ticker,
-                status="完成",
+                status=TickerState.DONE,
                 completed_sections=len(completed),
                 total_sections=total_sections,
                 report_path=report_path,
             )
+            yield self._event("report_persisted", ticker, status=TickerState.DONE, report_path=report_path)
         except Exception as exc:
-            yield AnalysisEvent("ticker_error", ticker, status="失败", error=str(exc))
+            self._set_ticker_state(ticker, TickerState.FAILED)
+            yield self._event("ticker_error", ticker, status=TickerState.FAILED, error=str(exc))
         finally:
             close_run = getattr(graph, "close_run", None)
             if callable(close_run):
                 close_run()
+
+    def _event(self, event_type: str, ticker: str, **kwargs: Any) -> AnalysisEvent:
+        return AnalysisEvent(
+            event_type,
+            ticker,
+            states=dict(self.states),
+            section_states={
+                ticker_key: dict(states)
+                for ticker_key, states in self.section_states.items()
+            },
+            **kwargs,
+        )
+
+    def _set_ticker_state(self, ticker: str, state: TickerState) -> None:
+        self.states[ticker] = state
+
+    def _set_section_state(self, ticker: str, section: str, state: TickerState) -> None:
+        self.section_states.setdefault(ticker, {})[section] = state
 
     def _make_graph(self) -> Any:
         if self.graph_factory is not None:
@@ -267,7 +408,7 @@ class AnalysisRunner:
         for section in STREAM_SECTION_KEYS:
             value = self._get_state_value(cli_main, chunk, section, "")
             if value:
-                yield section, str(value)
+                yield STREAM_SECTION_TO_UI_KEY.get(section, section), str(value)
         debate = chunk.get("investment_debate_state")
         if debate:
             formatted = (
@@ -276,7 +417,7 @@ class AnalysisRunner:
                 else self._format_research_team_history(debate)
             )
             if formatted:
-                yield "research_allocation_plan", formatted
+                yield STREAM_SECTION_TO_UI_KEY["research_allocation_plan"], formatted
         risk = chunk.get("risk_debate_state")
         if risk:
             formatted = (
@@ -285,17 +426,17 @@ class AnalysisRunner:
                 else self._format_risk_management_history(risk)
             )
             if formatted:
-                yield "risk_management_plan", formatted
+                yield STREAM_SECTION_TO_UI_KEY["risk_management_plan"], formatted
             judge = risk.get("judge_decision")
             if judge:
                 if cli_main is not None and hasattr(cli_main, "_format_manager_decision"):
-                    yield "final_allocation_decision", cli_main._format_manager_decision(
+                    yield STREAM_SECTION_TO_UI_KEY["final_allocation_decision"], cli_main._format_manager_decision(
                         judge,
                         risk.get("judge_snapshot_path", ""),
                         show_snapshot_summary=False,
                     )
                 else:
-                    yield "final_allocation_decision", str(judge)
+                    yield STREAM_SECTION_TO_UI_KEY["final_allocation_decision"], str(judge)
 
     def _get_state_value(self, cli_main: Any, state: dict[str, Any], key: str, default: Any) -> Any:
         if cli_main is not None and hasattr(cli_main, "get_state_value"):
@@ -346,7 +487,26 @@ class AnalysisRunner:
         return report_path
 
     def _write_live_section(self, report_dir: Path, section: str, content: str) -> None:
-        (report_dir / f"{section}.md").write_text(str(content), encoding="utf-8")
+        definition = SECTION_BY_KEY.get(section)
+        file_stem = definition.legacy_key if definition else section
+        target = report_dir / f"{file_stem}.md"
+        report_dir.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{target.name}.",
+            suffix=".tmp",
+            dir=str(report_dir),
+            text=True,
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(str(content))
+            os.replace(tmp_name, target)
+        except Exception:
+            try:
+                os.unlink(tmp_name)
+            except OSError:
+                pass
+            raise
 
     def _current_agent_from_chunk(self, chunk: dict[str, Any]) -> str | None:
         for key in ("current_agent", "agent", "sender"):
@@ -359,11 +519,11 @@ class AnalysisRunner:
 @dataclass
 class BacktestViewModel:
     output_dir: Path
-    summary: str
-    metrics: dict[str, Any]
-    nav: list[dict[str, str]]
-    orders: list[dict[str, str]]
-    trades: list[dict[str, str]]
+    summary: str | None
+    metrics: dict[str, Any] | None
+    nav: list[dict[str, str]] | None
+    orders: list[dict[str, str]] | None
+    trades: list[dict[str, str]] | None
     sparkline: str
 
 
@@ -402,18 +562,15 @@ class BacktestRunner:
 
     def load(self, output_dir: str | Path) -> BacktestViewModel:
         path = Path(output_dir)
-        summary_path = path / "summary.md"
-        metrics_path = path / "metrics.json"
         nav = self._read_csv(path / "nav.csv")
-        metrics = json.loads(metrics_path.read_text(encoding="utf-8")) if metrics_path.exists() else {}
         return BacktestViewModel(
             output_dir=path,
-            summary=summary_path.read_text(encoding="utf-8") if summary_path.exists() else "",
-            metrics=metrics,
+            summary=self._read_text(path / "summary.md"),
+            metrics=self._read_json(path / "metrics.json"),
             nav=nav,
             orders=self._read_csv(path / "orders.csv"),
             trades=self._read_csv(path / "trades.csv"),
-            sparkline=self._sparkline(nav),
+            sparkline=self._sparkline(nav or []),
         )
 
     def latest_result(self) -> BacktestViewModel | None:
@@ -438,11 +595,30 @@ class BacktestRunner:
 
         return cli_main
 
-    def _read_csv(self, path: Path) -> list[dict[str, str]]:
+    def _read_text(self, path: Path) -> str | None:
         if not path.exists():
-            return []
-        with path.open(newline="", encoding="utf-8") as handle:
-            return list(csv.DictReader(handle))
+            return None
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+
+    def _read_json(self, path: Path) -> dict[str, Any] | None:
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def _read_csv(self, path: Path) -> list[dict[str, str]] | None:
+        if not path.exists():
+            return None
+        try:
+            with path.open(newline="", encoding="utf-8") as handle:
+                return list(csv.DictReader(handle))
+        except (OSError, csv.Error, UnicodeDecodeError):
+            return None
 
     def _sparkline(self, nav: list[dict[str, str]]) -> str:
         values: list[float] = []

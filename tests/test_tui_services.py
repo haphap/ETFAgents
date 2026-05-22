@@ -1,13 +1,18 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+assert "textual" not in sys.modules
+
 from cli.tui.services import (
     AnalysisRunner,
     BacktestRunner,
+    IdRegistry,
     PaperTradingViewModel,
     ReportRepository,
+    TickerState,
 )
 
 
@@ -32,8 +37,37 @@ class ReportRepositoryTests(unittest.TestCase):
             self.assertEqual(reports[0].ticker, "510300.SH")
             self.assertEqual(reports[0].date, "2026-05-22")
             self.assertEqual(reports[0].rating, "BUY")
+            self.assertEqual(repo.read_section(reports[0], "analyst.market_flow"), "市场正文")
             self.assertEqual(repo.read_section(reports[0], "market_flow_report"), "市场正文")
-            self.assertEqual(repo.read_section(reports[0], "final_allocation_decision"), "最终决策")
+            self.assertEqual(repo.read_section(reports[0], "final.allocation_decision"), "最终决策")
+
+    def test_invalidate_refreshes_cached_report_scan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            repo = ReportRepository(root)
+
+            self.assertEqual(repo.list_reports(), [])
+
+            report_dir = root / "510300.SH" / "2026-05-22"
+            report_dir.mkdir(parents=True)
+            (report_dir / "complete_report.md").write_text("BUY", encoding="utf-8")
+
+            self.assertEqual(repo.list_reports(), [])
+            repo.invalidate()
+            self.assertEqual(len(repo.list_reports()), 1)
+
+
+class IdRegistryTests(unittest.TestCase):
+    def test_register_resolve_and_collision_handling(self):
+        registry = IdRegistry("ticker")
+
+        dotted = registry.register("510300.SH")
+        underscored = registry.register("510300_SH")
+
+        self.assertNotEqual(dotted, underscored)
+        self.assertIn(dotted, registry)
+        self.assertEqual(registry.resolve(dotted), "510300.SH")
+        self.assertEqual(registry.resolve(underscored), "510300_SH")
 
 
 class _FakeStream:
@@ -81,12 +115,35 @@ class AnalysisRunnerTests(unittest.TestCase):
             events = list(runner.run_queue(["510300.SH"], "2026-05-22", ["market_flow"]))
 
             self.assertEqual(events[0].event_type, "ticker_started")
+            self.assertEqual(events[0].states["510300.SH"], TickerState.RUNNING)
             sections = [event.section for event in events if event.event_type == "section_update"]
-            self.assertIn("market_flow_report", sections)
-            self.assertIn("trader_allocation_plan", sections)
-            self.assertEqual(events[-1].event_type, "ticker_done")
+            self.assertIn("analyst.market_flow", sections)
+            self.assertIn("trader.execution", sections)
+            self.assertEqual(events[-2].event_type, "ticker_done")
+            self.assertEqual(events[-1].event_type, "report_persisted")
+            self.assertEqual(events[-1].states["510300.SH"], TickerState.DONE)
             self.assertTrue((Path(tmp) / "510300.SH" / "2026-05-22" / "reports" / "market_flow_report.md").exists())
             self.assertTrue((Path(tmp) / "510300.SH" / "2026-05-22" / "complete_report.md").exists())
+
+    def test_cancel_emits_cancelled_and_leaves_no_temp_section_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = AnalysisRunner(
+                config={"results_dir": tmp},
+                graph_factory=lambda **kwargs: _FakeGraph(**kwargs),
+            )
+            stream = runner.run_queue(["510300.SH"], "2026-05-22", ["market_flow"])
+
+            first = next(stream)
+            second = next(stream)
+            runner.request_cancel()
+            remaining = list(stream)
+
+            self.assertEqual(first.event_type, "ticker_started")
+            self.assertEqual(second.event_type, "section_update")
+            self.assertEqual(remaining[-1].event_type, "ticker_cancelled")
+            self.assertEqual(remaining[-1].states["510300.SH"], TickerState.CANCELLED)
+            report_dir = Path(tmp) / "510300.SH" / "2026-05-22" / "reports"
+            self.assertFalse(list(report_dir.glob("*.tmp")))
 
 
 class BacktestRunnerTests(unittest.TestCase):
@@ -105,6 +162,20 @@ class BacktestRunnerTests(unittest.TestCase):
             self.assertEqual(model.metrics["metrics"]["sharpe_ratio"], 1.2)
             self.assertEqual(len(model.nav), 2)
             self.assertEqual(len(model.orders), 1)
+            self.assertTrue(model.sparkline)
+
+    def test_bad_or_missing_artifacts_degrade_per_field(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp)
+            (output / "metrics.json").write_text("{bad json", encoding="utf-8")
+            (output / "nav.csv").write_text("date,value\n2026-01-01,abc\n2026-01-02,120\n", encoding="utf-8")
+
+            model = BacktestRunner(config={"results_dir": tmp}).load(output)
+
+            self.assertIsNone(model.summary)
+            self.assertIsNone(model.metrics)
+            self.assertIsNone(model.orders)
+            self.assertEqual(len(model.nav), 2)
             self.assertTrue(model.sparkline)
 
 
