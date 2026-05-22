@@ -176,37 +176,41 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         node = create_trader(llm)
         node(self.base_state)
 
-        system_prompt = llm.structured_calls[0][0]["content"]
+        structured_prompt = llm.structured_calls[0]
+        system_prompt = structured_prompt[0]["content"]
+        source_prompt = structured_prompt[1]["content"]
         self.assertIn("Write your entire response in Chinese.", system_prompt)
         self.assertIn("ETF", system_prompt)
         self.assertIn("时机", system_prompt)
-        self.assertIn("关键支撑", system_prompt)
-        self.assertIn("成交量", system_prompt)
-        self.assertIn("份额变化", system_prompt)
-        self.assertIn("若没有上方报告里的具体价位、均线数值、量能基数或份额/溢折价数据，就不要下加仓、减仓或回补指令", system_prompt)
-        self.assertIn("所有执行动作的对象必须是ETF整体仓位或ETF目标权重", system_prompt)
-        self.assertIn("The three sections must open with DIFFERENT sentences", system_prompt)
-        self.assertIn("do not mention sizing, levels, or execution steps", system_prompt)
-        self.assertIn("do not restate the thesis rationale", system_prompt)
-        self.assertIn("failure conditions, rebalance triggers, cut or restore rules", system_prompt)
+        self.assertIn("关键支撑", source_prompt)
+        self.assertIn("成交量", source_prompt)
+        self.assertIn("份额变化", source_prompt)
+        self.assertIn("若没有上方报告里的具体价位、均线数值、量能基数或份额/溢折价数据，就不要下加仓、减仓或回补指令", source_prompt)
+        self.assertIn("所有执行动作的对象必须是ETF整体仓位或ETF目标权重", source_prompt)
+        self.assertIn("The three sections must open with DIFFERENT sentences", source_prompt)
+        self.assertIn("do not mention sizing, levels, or execution steps", source_prompt)
+        self.assertIn("do not restate the thesis rationale", source_prompt)
+        self.assertIn("failure conditions, rebalance triggers, cut or restore rules", source_prompt)
 
     def test_research_manager_prompt_respects_output_language(self):
         llm = _CapturingLLM()
         node = create_research_manager(llm, _EmptyMemory())
         node(self.base_state)
 
-        prompt = llm.structured_calls[0]
-        self.assertIn("Write your entire response in Chinese.", prompt)
-        self.assertIn("多头分析师", prompt)
-        self.assertIn("空头分析师", prompt)
-        self.assertIn("买入", prompt)
-        self.assertIn("持有", prompt)
-        self.assertIn("市场与资金流分析", prompt)
-        self.assertIn("舆情与事件影响分析", prompt)
-        self.assertIn("ETF持仓行业研究", prompt)
-        self.assertIn("ETF头部持仓研究", prompt)
-        self.assertIn("所有执行动作只能针对ETF整体仓位或ETF目标权重", prompt)
-        self.assertIn("催化节奏", prompt)
+        structured_prompt = llm.structured_calls[0]
+        system_prompt = structured_prompt[0]["content"]
+        source_prompt = structured_prompt[1]["content"]
+        self.assertIn("Write your entire response in Chinese.", system_prompt)
+        self.assertIn("多头分析师", source_prompt)
+        self.assertIn("空头分析师", source_prompt)
+        self.assertIn("买入", source_prompt)
+        self.assertIn("持有", source_prompt)
+        self.assertIn("市场与资金流分析", source_prompt)
+        self.assertIn("舆情与事件影响分析", source_prompt)
+        self.assertIn("ETF持仓行业研究", source_prompt)
+        self.assertIn("ETF头部持仓研究", source_prompt)
+        self.assertIn("所有执行动作只能针对ETF整体仓位或ETF目标权重", source_prompt)
+        self.assertIn("催化节奏", source_prompt)
         for label in (
             "初始仓位与执行节奏",
             "加仓触发条件",
@@ -214,8 +218,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             "再平衡触发",
             "后续验证指标",
         ):
-            self.assertIn(label, prompt)
-        self.assertNotIn("catalyst timing", prompt)
+            self.assertIn(label, source_prompt)
+        self.assertNotIn("catalyst timing", source_prompt)
 
     def test_bull_bear_researcher_prompts_require_chinese_body_and_decision_summary(self):
         for factory in (create_bull_researcher, create_bear_researcher):
@@ -241,9 +245,9 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         node = create_portfolio_manager(llm, _EmptyMemory())
         node(state)
 
-        prompt = llm.structured_calls[0]
-        self.assertIn("历史决策复盘", prompt)
-        self.assertIn("Past analyses of 002155.SZ", prompt)
+        source_prompt = llm.structured_calls[0][1]["content"]
+        self.assertIn("历史决策复盘", source_prompt)
+        self.assertIn("Past analyses of 002155.SZ", source_prompt)
 
     def test_research_team_history_keeps_real_snapshot_blocks(self):
         llm = _CapturingLLM()
@@ -483,30 +487,32 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         node = create_portfolio_manager(llm, _EmptyMemory())
         node(self.base_state)
 
-        prompt = llm.structured_calls[0]
-        self.assertIn("Write your entire response in Chinese.", prompt)
-        self.assertIn("反馈快照", prompt)
-        self.assertIn("激进风险分析师", prompt)
-        self.assertIn("保守风险分析师", prompt)
-        self.assertIn("中性风险分析师", prompt)
-        self.assertIn("市场与资金流分析", prompt)
-        self.assertIn("ETF持仓行业研究", prompt)
-        self.assertIn("ETF头部持仓研究", prompt)
-        self.assertIn("评级体系", prompt)
-        self.assertIn("买入", prompt)
-        self.assertIn("增持", prompt)
-        self.assertIn("持有", prompt)
-        self.assertIn("减持", prompt)
-        self.assertIn("卖出", prompt)
-        self.assertIn("## 辩论结论", prompt)
-        self.assertIn("## 行为逻辑", prompt)
-        self.assertIn("## 持仓建议", prompt)
-        self.assertIn("关键约束", prompt)
-        self.assertIn("所有执行动作的对象必须是这只ETF的整体仓位", prompt)
-        self.assertIn("The analysis date is 2026-04-28", prompt)
-        self.assertIn("Treat dated macro / earnings / policy events as calendar-sensitive", prompt)
-        self.assertNotIn("Lessons from past decisions", prompt)
-        self.assertIn("催化节奏", prompt)
+        structured_prompt = llm.structured_calls[0]
+        system_prompt = structured_prompt[0]["content"]
+        source_prompt = structured_prompt[1]["content"]
+        self.assertIn("Write your entire response in Chinese.", system_prompt)
+        self.assertIn("反馈快照", source_prompt)
+        self.assertIn("激进风险分析师", source_prompt)
+        self.assertIn("保守风险分析师", source_prompt)
+        self.assertIn("中性风险分析师", source_prompt)
+        self.assertIn("市场与资金流分析", source_prompt)
+        self.assertIn("ETF持仓行业研究", source_prompt)
+        self.assertIn("ETF头部持仓研究", source_prompt)
+        self.assertIn("评级体系", source_prompt)
+        self.assertIn("买入", source_prompt)
+        self.assertIn("增持", source_prompt)
+        self.assertIn("持有", source_prompt)
+        self.assertIn("减持", source_prompt)
+        self.assertIn("卖出", source_prompt)
+        self.assertIn("## 辩论结论", source_prompt)
+        self.assertIn("## 行为逻辑", source_prompt)
+        self.assertIn("## 持仓建议", source_prompt)
+        self.assertIn("关键约束", source_prompt)
+        self.assertIn("所有执行动作的对象必须是这只ETF的整体仓位", source_prompt)
+        self.assertIn("The analysis date is 2026-04-28", source_prompt)
+        self.assertIn("Treat dated macro / earnings / policy events as calendar-sensitive", source_prompt)
+        self.assertNotIn("Lessons from past decisions", source_prompt)
+        self.assertIn("催化节奏", source_prompt)
         for label in (
             "初始仓位与执行节奏",
             "加仓触发条件",
@@ -514,8 +520,8 @@ class OutputLanguagePropagationTests(unittest.TestCase):
             "再平衡触发",
             "后续验证指标",
         ):
-            self.assertIn(label, prompt)
-        self.assertNotIn("catalyst timing", prompt)
+            self.assertIn(label, source_prompt)
+        self.assertNotIn("catalyst timing", source_prompt)
 
     def test_manager_structured_fields_include_positioning_block_contract(self):
         for schema in (ResearchPlan, PortfolioDecision):

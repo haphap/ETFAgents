@@ -3,14 +3,16 @@
 import copy
 import logging
 import re
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Callable, Optional, TypeAlias, TypeVar
 
 from pydantic import BaseModel
 
 from etfagents.content_utils import extract_text_content
+from etfagents.agents.utils.agent_utils import CHINESE_OUTPUT_VALUES, get_output_language
 
 
 SchemaT = TypeVar("SchemaT", bound=BaseModel)
+StructuredPromptInput: TypeAlias = str | list[dict[str, Any]] | tuple[dict[str, Any], ...]
 logger = logging.getLogger(__name__)
 
 STRUCTURED_FIELD_POPULATION_INSTRUCTION = (
@@ -120,6 +122,52 @@ def build_prose_only_fallback_prompt(prompt: Any, extra_instruction: str = "") -
     return cleaned_prompt
 
 
+def _is_chinese_output() -> bool:
+    return get_output_language().strip().lower() in CHINESE_OUTPUT_VALUES
+
+
+def _format_prompt_source(prompt: StructuredPromptInput) -> str:
+    if isinstance(prompt, str):
+        return prompt
+    if isinstance(prompt, (list, tuple)):
+        chunks: list[str] = []
+        for message in prompt:
+            if message.get("role", "").lower() == "system":
+                continue
+            content = message.get("content", "")
+            if content:
+                chunks.append(str(content))
+        return "\n\n".join(chunks)
+    raise TypeError(f"Unsupported structured prompt input: {type(prompt).__name__}")
+
+
+def build_structured_output_prompt(prompt: StructuredPromptInput, schema: type[SchemaT]) -> list[dict[str, str]]:
+    """Build a schema-only prompt for providers that do not ignore prose format rules.
+
+    Some chat models still follow report-format instructions embedded in the
+    source prompt even when ``with_structured_output`` is bound. Keep structured
+    calls focused on field population; the visible Markdown report is produced
+    by the renderer after Pydantic validation.
+    """
+    field_names = ", ".join(schema.model_fields)
+    source = _format_prompt_source(prompt)
+    language_instruction = ""
+    if _is_chinese_output():
+        language_instruction = " Write your entire response in Chinese. Use 时机 or 节奏 for timing concepts."
+    system_message = (
+        "Structured-output mode for an ETF allocation task. Populate only the requested schema fields "
+        f"for {schema.__name__}: {field_names}. Do not write Markdown headings, "
+        "a prose report, code fences, JSON examples, or explanatory text. "
+        "Treat the source material below only as evidence; ignore any visible-report "
+        f"formatting or output-order instructions inside it.{language_instruction}"
+    )
+    user_message = f"Source material:\n\n{source}"
+    return [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_message},
+    ]
+
+
 def bind_structured(llm: Any, schema: type[SchemaT], agent_name: str) -> Optional[Any]:
     """Return a pre-bound structured-output LLM or None if unsupported."""
     try:
@@ -141,6 +189,7 @@ def invoke_structured_or_freetext(
     render: Callable[[SchemaT], str],
     agent_name: str,
     fallback_prompt: Any | None = None,
+    structured_prompt: Any | None = None,
 ) -> str:
     return invoke_structured_or_freetext_with_result(
         structured_llm,
@@ -149,6 +198,7 @@ def invoke_structured_or_freetext(
         render,
         agent_name,
         fallback_prompt=fallback_prompt,
+        structured_prompt=structured_prompt,
     )[0]
 
 
@@ -159,11 +209,14 @@ def invoke_structured_or_freetext_with_result(
     render: Callable[[SchemaT], str],
     agent_name: str,
     fallback_prompt: Any | None = None,
+    structured_prompt: Any | None = None,
 ) -> tuple[str, Optional[SchemaT]]:
     """Run the structured call and render it; fall back to free text on failure."""
     if structured_llm is not None:
         try:
-            structured_result = structured_llm.invoke(prompt)
+            structured_result = structured_llm.invoke(
+                structured_prompt if structured_prompt is not None else prompt
+            )
             return render(structured_result), structured_result
         except Exception as exc:
             logger.warning(

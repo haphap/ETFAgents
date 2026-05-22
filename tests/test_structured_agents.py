@@ -76,6 +76,10 @@ def _base_state():
 
 
 class StructuredAgentTests(unittest.TestCase):
+    def test_structured_agent_schemas_stay_prompt_sized(self):
+        for schema in (ResearchPlan, TraderProposal, PortfolioDecision):
+            self.assertLess(len(schema.model_fields), 20)
+
     def test_trader_renders_structured_output(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
         cfg["output_language"] = "English"
@@ -125,6 +129,85 @@ class StructuredAgentTests(unittest.TestCase):
         self.assertIn("Research View: **Overweight**", result["investment_plan"])
         self.assertIn("FEEDBACK SNAPSHOT:", result["investment_plan"])
 
+    def test_research_manager_uses_schema_only_prompt_for_structured_call(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "Chinese"
+        set_config(cfg)
+        llm = MagicMock()
+        llm.invoke.return_value = _FakeResponse("Side synthesis.")
+        structured = MagicMock()
+        structured.invoke.return_value = ResearchPlan(
+            debate_conclusion="多方证据更强。",
+            action_logic="当前应维持增持并观察确认。",
+            positioning_recommendation="维持增持，分批执行并跟踪触发条件。",
+            rating=PortfolioRating.OVERWEIGHT,
+            snapshot_stance="增持",
+            snapshot_new_and_rebuttal="补充了触发条件。",
+            snapshot_to_verify="跟踪成交量和资金流。",
+        )
+        llm.with_structured_output.return_value = structured
+
+        create_research_manager(llm)(copy.deepcopy(_base_state()))
+
+        structured_prompt = structured.invoke.call_args.args[0]
+        system_prompt = structured_prompt[0]["content"]
+        self.assertIn("Structured-output mode", system_prompt)
+        self.assertIn("ResearchPlan", system_prompt)
+        self.assertIn("Do not write Markdown headings", system_prompt)
+        self.assertNotIn("Use this exact output order with Markdown headings", system_prompt)
+        self.assertIn("Use this exact output order with Markdown headings", structured_prompt[1]["content"])
+
+    def test_trader_uses_schema_only_prompt_for_structured_call(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "Chinese"
+        set_config(cfg)
+        llm = MagicMock()
+        structured = MagicMock()
+        structured.invoke.return_value = TraderProposal(
+            thesis="当前偏中性。",
+            execution_plan="维持轻仓并等待确认。",
+            risk_management="跌破支撑则减仓。",
+            rating=PortfolioRating.HOLD,
+        )
+        llm.with_structured_output.return_value = structured
+
+        create_trader(llm)(copy.deepcopy(_base_state()))
+
+        structured_prompt = structured.invoke.call_args.args[0]
+        self.assertEqual("system", structured_prompt[0]["role"])
+        self.assertIn("Structured-output mode", structured_prompt[0]["content"])
+        self.assertIn("TraderProposal", structured_prompt[0]["content"])
+        self.assertIn("Do not write Markdown headings", structured_prompt[0]["content"])
+        self.assertNotIn("Use exactly four top-level sections", structured_prompt[0]["content"])
+
+    def test_portfolio_manager_uses_schema_only_prompt_for_structured_call(self):
+        cfg = copy.deepcopy(DEFAULT_CONFIG)
+        cfg["output_language"] = "Chinese"
+        set_config(cfg)
+        llm = MagicMock()
+        llm.invoke.return_value = _FakeResponse("Risk synthesis.")
+        structured = MagicMock()
+        structured.invoke.return_value = PortfolioDecision(
+            debate_conclusion="中性观点更稳健。",
+            action_logic="当前维持持有并等待触发条件。",
+            positioning_recommendation="维持持有，控制仓位并跟踪风险。",
+            rating=PortfolioRating.HOLD,
+            snapshot_stance="持有",
+            snapshot_new_and_rebuttal="补充风险约束。",
+            snapshot_to_verify="跟踪价格和资金流。",
+        )
+        llm.with_structured_output.return_value = structured
+
+        create_portfolio_manager(llm)(copy.deepcopy(_base_state()))
+
+        structured_prompt = structured.invoke.call_args.args[0]
+        system_prompt = structured_prompt[0]["content"]
+        self.assertIn("Structured-output mode", system_prompt)
+        self.assertIn("PortfolioDecision", system_prompt)
+        self.assertIn("Do not write Markdown headings", system_prompt)
+        self.assertNotIn("Use this exact output order with Markdown headings", system_prompt)
+        self.assertIn("Use this exact output order with Markdown headings", structured_prompt[1]["content"])
+
     def test_portfolio_manager_falls_back_to_freetext(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
         cfg["output_language"] = "English"
@@ -168,6 +251,11 @@ class StructuredAgentTests(unittest.TestCase):
 
         self.assertIn("Fallback thesis.", result["trader_investment_plan"])
         self.assertIn("FINAL TRANSACTION PROPOSAL: **HOLD**", result["trader_investment_plan"])
+        structured_prompt = structured.invoke.call_args.args[0]
+        self.assertIn("Structured-output mode", structured_prompt[0]["content"])
+        fallback_prompt = llm.invoke.call_args.args[0]
+        self.assertIn("Use exactly four top-level sections", fallback_prompt[0]["content"])
+        self.assertNotIn("Structured-output mode", fallback_prompt[0]["content"])
 
     def test_trader_freetext_demotes_h1_markdown_headings(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
