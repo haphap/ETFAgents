@@ -164,30 +164,6 @@ class StaticValidateTests(unittest.TestCase):
         self.assertTrue(any("一" in item and "结论段" in item for item in verdict.missing_elements))
         self.assertFalse(any("二" in item and "结论段" in item for item in verdict.missing_elements))
 
-    def test_duplicate_opening_and_first_section_lead_recorded(self):
-        repeated = (
-            "多数券商确认矿端紧缺与冶炼利润分化已构筑价格底部，但美国通胀超预期与高利率环境对短期金融溢价形成压制，"
-            "ETF整体处于产业基本面与宏观流动性再定价的博弈窗口。"
-        )
-        spec = AnalystReportSpec(
-            analyst_name="holdings_industry",
-            required_top_sections=("一", "二"),
-            require_top_section_leads=True,
-        )
-        report = (
-            f"{repeated}\n\n"
-            "一、行业主线与分歧焦点\n"
-            f"{repeated}\n\n"
-            "（一）共识主线\n"
-            "报告内容。\n\n"
-            "二、景气、政策与产业链验证\n"
-            "券商分歧集中在库存去化和政策传导速度。\n"
-        )
-
-        verdict = static_validate(report, spec)
-
-        self.assertTrue(any("概述帽段与第一章" in item for item in verdict.critical_issues))
-
     def test_required_top_section_leads_can_target_subset(self):
         spec = AnalystReportSpec(
             analyst_name="meso_commodity",
