@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 
 try:
-    from textual.widgets import Input
+    from textual.widgets import Input, Label, ListItem
 except ModuleNotFoundError:
     Input = None
 
@@ -38,6 +38,11 @@ class _FakeAnalysisRunner:
             section="analyst.market_flow",
             content="fake market report",
             states={ticker: TickerState.SECTION_DONE},
+            section_states={
+                ticker: {
+                    "analyst.market_flow": TickerState.SECTION_DONE,
+                },
+            },
             completed_sections=1,
             total_sections=18,
         )
@@ -129,6 +134,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause(0.1)
                 self.assertEqual(screen.states["510300.SH"], TickerState.DONE)
                 self.assertEqual(screen.events[("510300.SH", "analyst.market_flow")], "fake market report")
+                section_id = screen.section_ids.register("analyst.market_flow")
+                section_label = screen.query_one(f"#{section_id}", ListItem).query_one(Label)
+                self.assertIn("✓", str(section_label.render()))
 
     async def test_backtest_screen_validates_integer_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

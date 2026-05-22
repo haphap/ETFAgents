@@ -30,6 +30,10 @@ class HomeScreen(Screen):
         yield Header(show_clock=True)
         with Vertical(id="home"):
             yield Static("ETFAgents TUI", id="title")
+            yield Static(
+                "研究分析 · 研究报告库 · 回测 · 模拟交易",
+                classes="subtitle",
+            )
             yield Button("研究分析", id="research", variant="primary")
             yield Button("研究报告库", id="reports")
             yield Button("回测", id="backtest")
@@ -78,21 +82,27 @@ class ResearchAnalysisScreen(Screen):
         self.selected_ticker = ""
         self.selected_section = "analyst.market_flow"
         self.states: dict[str, TickerState] = {}
+        self.section_states: dict[str, dict[str, TickerState]] = {}
         self.progress: dict[str, tuple[int, int]] = {}
         self.queue_ids = IdRegistry("ticker")
         self.section_ids = IdRegistry("section")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Vertical():
-            with Horizontal(classes="toolbar"):
+        with Horizontal(classes="screen-body"):
+            with Vertical(classes="left-pane"):
+                yield Static("ETF 队列", classes="pane-title")
+                yield ListView(id="queue", classes="fill-list")
+                yield Static("分析配置", classes="pane-title")
                 yield Input(placeholder="ETF 代码，逗号分隔，例如 510300.SH,159915.SZ", id="tickers")
                 yield Input(value=_dt.date.today().isoformat(), placeholder="YYYY-MM-DD", id="analysis_date")
                 yield Button("开始分析", id="start", variant="primary")
-            with Horizontal():
-                yield ListView(id="queue")
-                with Vertical():
-                    yield ListView(id="sections")
+            with Vertical(classes="right-pane"):
+                with Vertical(classes="right-top"):
+                    yield Static("报告章节", classes="pane-title")
+                    yield ListView(id="sections", classes="section-list")
+                with Vertical(classes="right-bottom"):
+                    yield Static("报告正文", classes="pane-title")
                     yield Markdown("选择 ETF 和报告 section 后查看正文。", id="body")
         yield Footer()
 
@@ -129,6 +139,8 @@ class ResearchAnalysisScreen(Screen):
     def _apply_event(self, event: AnalysisEvent) -> None:
         if event.states:
             self.states = event.states
+        if event.section_states:
+            self.section_states = event.section_states
         elif event.status:
             self.states[event.ticker] = event.status
         if event.completed_sections is not None and event.total_sections is not None:
@@ -141,6 +153,7 @@ class ResearchAnalysisScreen(Screen):
         if event.event_type == "report_persisted" and self.repository is not None:
             self.repository.invalidate()
         self._refresh_queue(event)
+        self._refresh_sections()
         if event.error:
             self.query_one("#body", Markdown).update(f"分析失败：{event.error}")
 
@@ -162,6 +175,20 @@ class ResearchAnalysisScreen(Screen):
             content = f"{self.selected_ticker} / {self.selected_section} 尚未生成。"
         self.query_one("#body", Markdown).update(content)
 
+    def _refresh_sections(self) -> None:
+        states = self.section_states.get(self.selected_ticker, {})
+        sections = self.query_one("#sections", ListView)
+        for definition in SECTION_DEFINITIONS:
+            item_id = self.section_ids.register(definition.key)
+            label_text = (
+                f"{self._section_marker(states.get(definition.key, TickerState.PENDING))} "
+                f"{definition.team} / {definition.title}"
+            )
+            try:
+                sections.query_one(f"#{item_id}", ListItem).query_one(Label).update(label_text)
+            except Exception:
+                pass
+
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         item_id = event.item.id or ""
         if item_id in self.queue_ids:
@@ -170,6 +197,7 @@ class ResearchAnalysisScreen(Screen):
             self.selected_section = self.section_ids.resolve(item_id)
         else:
             self.selected_section = item_id
+        self._refresh_sections()
         self._refresh_body()
 
     def _state_label(self, state: TickerState) -> str:
@@ -181,6 +209,17 @@ class ResearchAnalysisScreen(Screen):
             TickerState.DONE: "完成",
             TickerState.FAILED: "失败",
             TickerState.CANCELLED: "已取消",
+        }[state]
+
+    def _section_marker(self, state: TickerState) -> str:
+        return {
+            TickerState.PENDING: "○",
+            TickerState.RUNNING: "⏳",
+            TickerState.SECTION_RUNNING: "⏳",
+            TickerState.SECTION_DONE: "✓",
+            TickerState.DONE: "✓",
+            TickerState.FAILED: "✗",
+            TickerState.CANCELLED: "–",
         }[state]
 
 
@@ -197,11 +236,18 @@ class ReportLibraryScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Horizontal():
-            yield ListView(id="reports")
-            with Vertical():
-                yield ListView(id="library_sections")
-                yield Markdown("暂无报告。", id="report_body")
+        with Horizontal(classes="screen-body"):
+            with Vertical(classes="left-pane"):
+                yield Static("报告列表", classes="pane-title")
+                yield ListView(id="reports", classes="fill-list")
+                yield Static("按 r 刷新本地报告", classes="hint")
+            with Vertical(classes="right-pane"):
+                with Vertical(classes="right-top"):
+                    yield Static("报告章节", classes="pane-title")
+                    yield ListView(id="library_sections", classes="section-list")
+                with Vertical(classes="right-bottom"):
+                    yield Static("Markdown 正文", classes="pane-title")
+                    yield Markdown("暂无报告。", id="report_body")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -242,7 +288,7 @@ class ReportLibraryScreen(Screen):
 
     async def action_refresh_reports(self) -> None:
         self.repository.invalidate()
-        self.query_one("#reports", ListView).clear()
+        await self.query_one("#reports", ListView).clear()
         self._load_reports()
 
     def _refresh_body(self) -> None:
@@ -263,17 +309,23 @@ class BacktestScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Vertical():
-            with Horizontal(classes="toolbar"):
-                yield ListView(id="backtest_tickers")
-                with Vertical():
-                    yield Input(placeholder="start_date YYYY-MM-DD", id="start_date")
-                    yield Input(placeholder="end_date YYYY-MM-DD", id="end_date")
-                    yield Input(value="20", placeholder="rebalance_interval_days", id="rebalance")
-                    yield Input(value="1", placeholder="top_k", id="top_k")
-                    yield Button("运行回测", id="run_backtest", variant="primary")
-            yield Markdown("选择已有报告 ETF 后运行回测。", id="backtest_summary")
-            yield DataTable(id="backtest_table")
+        with Horizontal(classes="screen-body"):
+            with Vertical(classes="left-pane"):
+                yield Static("ETF Selection", classes="pane-title")
+                yield ListView(id="backtest_tickers", classes="fill-list")
+                yield Static("Parameters", classes="pane-title")
+                yield Input(placeholder="start_date YYYY-MM-DD", id="start_date")
+                yield Input(placeholder="end_date YYYY-MM-DD", id="end_date")
+                yield Input(value="20", placeholder="rebalance_interval_days", id="rebalance")
+                yield Input(value="1", placeholder="top_k", id="top_k")
+                yield Button("运行回测", id="run_backtest", variant="primary")
+            with Vertical(classes="right-pane"):
+                with Vertical(classes="right-top"):
+                    yield Static("NAV / Summary", classes="pane-title")
+                    yield Markdown("选择已有报告 ETF 后运行回测。", id="backtest_summary")
+                with Vertical(classes="right-bottom"):
+                    yield Static("Results", classes="pane-title")
+                    yield DataTable(id="backtest_table")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -321,10 +373,14 @@ class PaperTradingScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Vertical():
-            yield Button("刷新", id="refresh_paper", variant="primary")
-            yield Markdown("模拟账户", id="paper_account")
-            yield DataTable(id="paper_table")
+        with Horizontal(classes="screen-body"):
+            with Vertical(classes="left-pane"):
+                yield Static("账户总览", classes="pane-title")
+                yield Button("刷新", id="refresh_paper", variant="primary")
+                yield Markdown("模拟账户", id="paper_account")
+            with Vertical(classes="right-pane"):
+                yield Static("持仓", classes="pane-title")
+                yield DataTable(id="paper_table")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -378,21 +434,61 @@ class ETFAgentsTuiApp(App):
         text-style: bold;
         margin: 1 0;
     }
-    .toolbar {
-        height: auto;
+    .subtitle {
+        color: $text-muted;
+        margin-bottom: 1;
+    }
+    .screen-body {
+        height: 1fr;
+    }
+    .left-pane {
+        width: 30%;
+        min-width: 30;
+        height: 100%;
+        padding: 0 1;
+        border: solid $primary;
+    }
+    .right-pane {
+        width: 70%;
+        height: 100%;
+        padding: 0 1;
+    }
+    .right-top {
+        height: 35%;
+        border: solid $primary;
+        margin-bottom: 1;
+    }
+    .right-bottom {
+        height: 1fr;
+        border: solid $primary;
+    }
+    .pane-title {
+        text-style: bold;
+        color: $accent;
+        height: 1;
+        margin: 0 0 1 0;
+    }
+    .hint {
+        color: $text-muted;
+        height: 1;
+        margin-top: 1;
+    }
+    .fill-list {
+        height: 1fr;
+    }
+    .section-list {
+        height: 1fr;
     }
     #tickers {
-        width: 48;
+        width: 100%;
     }
     #analysis_date {
-        width: 18;
+        width: 100%;
     }
     ListView {
-        width: 34;
-        border: solid $primary;
+        width: 100%;
     }
     Markdown {
-        border: solid $primary;
         height: 1fr;
     }
     DataTable {
