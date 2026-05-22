@@ -3,10 +3,13 @@ from unittest.mock import patch
 
 import pandas as pd
 
+import etfagents.dataflows.tushare as _tushare_mod
 from etfagents.dataflows.tushare import get_etf_holdings
 
 
 class TushareHoldingsNameTests(unittest.TestCase):
+    def setUp(self):
+        _tushare_mod._stock_basic_name_cache = None
     @patch("etfagents.dataflows.tushare._query_pro")
     def test_get_etf_holdings_enriches_missing_stock_names_from_stock_basic(self, mock_query):
         def _fake_query(api_name, **params):

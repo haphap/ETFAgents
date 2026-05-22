@@ -378,7 +378,14 @@ def _portfolio_code_lookup_keys(value) -> set[str]:
     return keys
 
 
+_stock_basic_name_cache: dict[str, str] | None = None
+
+
 def _stock_basic_name_lookup() -> dict[str, str]:
+    global _stock_basic_name_cache
+    if _stock_basic_name_cache is not None:
+        return _stock_basic_name_cache
+
     basics = _query_pro("stock_basic", fields="ts_code,symbol,name")
     if basics.empty:
         return {}
@@ -391,6 +398,7 @@ def _stock_basic_name_lookup() -> dict[str, str]:
         for column in ("ts_code", "symbol"):
             for key in _portfolio_code_lookup_keys(row.get(column)):
                 lookup.setdefault(key, name)
+    _stock_basic_name_cache = lookup
     return lookup
 
 
