@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-assert "textual" not in sys.modules
+_textual_modules_before = {m for m in sys.modules if m == "textual" or m.startswith("textual.")}
 
 from cli.tui.services import (
     AnalysisRunner,
@@ -13,6 +13,12 @@ from cli.tui.services import (
     PaperTradingViewModel,
     ReportRepository,
     TickerState,
+)
+
+_textual_modules_after = {m for m in sys.modules if m == "textual" or m.startswith("textual.")}
+assert _textual_modules_after == _textual_modules_before, (
+    f"Importing cli.tui.services pulled in textual as a side-effect: "
+    f"{_textual_modules_after - _textual_modules_before}"
 )
 
 

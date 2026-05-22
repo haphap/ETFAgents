@@ -177,7 +177,7 @@ class ResearchAnalysisScreen(Screen):
             TickerState.PENDING: "等待",
             TickerState.RUNNING: "分析中",
             TickerState.SECTION_RUNNING: "生成中",
-            TickerState.SECTION_DONE: "生成中",
+            TickerState.SECTION_DONE: "已完成",
             TickerState.DONE: "完成",
             TickerState.FAILED: "失败",
             TickerState.CANCELLED: "已取消",
@@ -242,7 +242,7 @@ class ReportLibraryScreen(Screen):
 
     async def action_refresh_reports(self) -> None:
         self.repository.invalidate()
-        await self.query_one("#reports", ListView).clear()
+        self.query_one("#reports", ListView).clear()
         self._load_reports()
 
     def _refresh_body(self) -> None:

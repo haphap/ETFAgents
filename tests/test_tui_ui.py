@@ -2,7 +2,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from textual.widgets import Input
+try:
+    from textual.widgets import Input
+except ModuleNotFoundError:
+    Input = None
+
+if Input is None:
+    raise unittest.SkipTest("Textual not installed; skipping TUI UI tests")
 
 from cli.tui.app import ETFAgentsTuiApp, BacktestScreen, PaperTradingScreen, ReportLibraryScreen, ResearchAnalysisScreen
 from cli.tui.services import (
