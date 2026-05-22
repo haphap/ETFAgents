@@ -208,6 +208,46 @@ def validate_and_refine(
 
 _MARKDOWN_H2_RE = re.compile(r"(?m)^\s*##\s+\S")
 _MARKDOWN_H1_RE = re.compile(r"(?m)^\s*#\s+\S")
+_TOP_SECTION_HEADING_RE = re.compile(r"(?m)^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+、[^\n]*$")
+_SUBSECTION_HEADING_RE = re.compile(r"^\s*(?:#{1,6}\s*)?[（(][一二三四五六七八九十\d]+[）)]")
+
+
+def _first_plain_paragraph(lines: list[str]) -> str:
+    paragraph: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if paragraph:
+                break
+            continue
+        if (
+            _TOP_SECTION_HEADING_RE.match(stripped)
+            or _SUBSECTION_HEADING_RE.match(stripped)
+            or stripped.startswith("|")
+        ):
+            break
+        paragraph.append(stripped)
+    return " ".join(paragraph).strip()
+
+
+def _normalize_duplicate_paragraph(text: str) -> str:
+    return re.sub(r"[\s，,。；;：:、.!！？?（）()]+", "", text or "")
+
+
+def _has_duplicate_opening_and_first_section_lead(report: str) -> bool:
+    first_section = _TOP_SECTION_HEADING_RE.search(report or "")
+    if not first_section:
+        return False
+
+    opening = _first_plain_paragraph(report[: first_section.start()].splitlines())
+    section_lead = _first_plain_paragraph(report[first_section.end() :].splitlines())
+    normalized_opening = _normalize_duplicate_paragraph(opening)
+    normalized_lead = _normalize_duplicate_paragraph(section_lead)
+    return bool(
+        normalized_opening
+        and len(normalized_opening) >= 20
+        and normalized_opening == normalized_lead
+    )
 
 
 def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
@@ -234,6 +274,8 @@ def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
         issues.append("出现 markdown ## 二级标题（应使用 中文『（一）』格式）")
     if starts_without_overview_paragraph(report):
         issues.append("缺少开篇概述帽段，报告直接以标题、章节、列表或表格开头")
+    if _has_duplicate_opening_and_first_section_lead(report):
+        issues.append("开篇概述帽段与第一章标题后的结论段重复")
 
     lowered = report.lower()
     for token in spec.required_indicator_tokens:

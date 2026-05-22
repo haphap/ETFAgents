@@ -158,6 +158,8 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         self.assertNotIn("## 第一步：数据获取", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一级标题 -> 1-2句结论段 -> 子章节标题", system_msg)
+        self.assertIn("不得复制或近似复述开篇帽段", system_msg)
+        self.assertIn("不能与开篇帽段使用同一句或同一表达", system_msg)
         self.assertIn("不得写'本章''本节''本部分''旨在''梳理'", system_msg)
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
         self.assertIs(
