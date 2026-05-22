@@ -120,6 +120,51 @@ def build_prose_only_fallback_prompt(prompt: Any, extra_instruction: str = "") -
     return cleaned_prompt
 
 
+def _format_prompt_source(prompt: Any) -> str:
+    if isinstance(prompt, str):
+        return prompt
+    if isinstance(prompt, (list, tuple)):
+        chunks: list[str] = []
+        for message in prompt:
+            if isinstance(message, dict):
+                role = str(message.get("role", "message"))
+                content = message.get("content", "")
+                chunks.append(f"<{role}>\n{content}\n</{role}>")
+            else:
+                chunks.append(str(message))
+        return "\n\n".join(chunks)
+    return str(prompt)
+
+
+def build_structured_output_prompt(prompt: Any, schema: type[SchemaT]) -> Any:
+    """Build a schema-only prompt for providers that do not ignore prose format rules.
+
+    Some chat models still follow report-format instructions embedded in the
+    source prompt even when ``with_structured_output`` is bound. Keep structured
+    calls focused on field population; the visible Markdown report is produced
+    by the renderer after Pydantic validation.
+    """
+    field_names = ", ".join(schema.model_fields)
+    source = _format_prompt_source(prompt)
+    language_instruction = ""
+    if "Write your entire response in Chinese." in source:
+        language_instruction = " Write your entire response in Chinese. Use 时机 or 节奏 for timing concepts."
+    system_message = (
+        "Structured-output mode for an ETF allocation task. Populate only the requested schema fields "
+        f"for {schema.__name__}: {field_names}. Do not write Markdown headings, "
+        "a prose report, code fences, JSON examples, or explanatory text. "
+        "Treat the source material below only as evidence; ignore any visible-report "
+        f"formatting or output-order instructions inside it.{language_instruction}"
+    )
+    user_message = f"Source material:\n\n{source}"
+    if isinstance(prompt, str):
+        return f"{system_message}\n\n{user_message}"
+    return [
+        {"role": "system", "content": system_message},
+        {"role": "user", "content": user_message},
+    ]
+
+
 def bind_structured(llm: Any, schema: type[SchemaT], agent_name: str) -> Optional[Any]:
     """Return a pre-bound structured-output LLM or None if unsupported."""
     try:
@@ -141,6 +186,7 @@ def invoke_structured_or_freetext(
     render: Callable[[SchemaT], str],
     agent_name: str,
     fallback_prompt: Any | None = None,
+    structured_prompt: Any | None = None,
 ) -> str:
     return invoke_structured_or_freetext_with_result(
         structured_llm,
@@ -149,6 +195,7 @@ def invoke_structured_or_freetext(
         render,
         agent_name,
         fallback_prompt=fallback_prompt,
+        structured_prompt=structured_prompt,
     )[0]
 
 
@@ -159,11 +206,14 @@ def invoke_structured_or_freetext_with_result(
     render: Callable[[SchemaT], str],
     agent_name: str,
     fallback_prompt: Any | None = None,
+    structured_prompt: Any | None = None,
 ) -> tuple[str, Optional[SchemaT]]:
     """Run the structured call and render it; fall back to free text on failure."""
     if structured_llm is not None:
         try:
-            structured_result = structured_llm.invoke(prompt)
+            structured_result = structured_llm.invoke(
+                structured_prompt if structured_prompt is not None else prompt
+            )
             return render(structured_result), structured_result
         except Exception as exc:
             logger.warning(

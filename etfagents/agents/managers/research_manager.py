@@ -19,7 +19,11 @@ from etfagents.agents.utils.agent_utils import (
 )
 from etfagents.agents.utils.state_keys import get_asset_symbol, get_state_value, with_state_aliases
 from etfagents.agents.schemas import ResearchPlan, render_research_plan
-from etfagents.agents.utils.structured import bind_structured, invoke_structured_or_freetext
+from etfagents.agents.utils.structured import (
+    bind_structured,
+    build_structured_output_prompt,
+    invoke_structured_or_freetext,
+)
 from etfagents.agents.utils.analysis_memory import (
     build_memory_prompt_section,
 )
@@ -203,6 +207,7 @@ Only after the three sections above, append a feedback block in this exact forma
                 prompt,
                 render_research_plan,
                 "Research Manager",
+                structured_prompt=build_structured_output_prompt(prompt, ResearchPlan),
             )
         )
         judge_snapshot_full = extract_feedback_snapshot(normalized_content)

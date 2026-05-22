@@ -176,19 +176,21 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         node = create_trader(llm)
         node(self.base_state)
 
-        system_prompt = llm.structured_calls[0][0]["content"]
+        structured_prompt = llm.structured_calls[0]
+        system_prompt = structured_prompt[0]["content"]
+        source_prompt = structured_prompt[1]["content"]
         self.assertIn("Write your entire response in Chinese.", system_prompt)
         self.assertIn("ETF", system_prompt)
         self.assertIn("时机", system_prompt)
-        self.assertIn("关键支撑", system_prompt)
-        self.assertIn("成交量", system_prompt)
-        self.assertIn("份额变化", system_prompt)
-        self.assertIn("若没有上方报告里的具体价位、均线数值、量能基数或份额/溢折价数据，就不要下加仓、减仓或回补指令", system_prompt)
-        self.assertIn("所有执行动作的对象必须是ETF整体仓位或ETF目标权重", system_prompt)
-        self.assertIn("The three sections must open with DIFFERENT sentences", system_prompt)
-        self.assertIn("do not mention sizing, levels, or execution steps", system_prompt)
-        self.assertIn("do not restate the thesis rationale", system_prompt)
-        self.assertIn("failure conditions, rebalance triggers, cut or restore rules", system_prompt)
+        self.assertIn("关键支撑", source_prompt)
+        self.assertIn("成交量", source_prompt)
+        self.assertIn("份额变化", source_prompt)
+        self.assertIn("若没有上方报告里的具体价位、均线数值、量能基数或份额/溢折价数据，就不要下加仓、减仓或回补指令", source_prompt)
+        self.assertIn("所有执行动作的对象必须是ETF整体仓位或ETF目标权重", source_prompt)
+        self.assertIn("The three sections must open with DIFFERENT sentences", source_prompt)
+        self.assertIn("do not mention sizing, levels, or execution steps", source_prompt)
+        self.assertIn("do not restate the thesis rationale", source_prompt)
+        self.assertIn("failure conditions, rebalance triggers, cut or restore rules", source_prompt)
 
     def test_research_manager_prompt_respects_output_language(self):
         llm = _CapturingLLM()

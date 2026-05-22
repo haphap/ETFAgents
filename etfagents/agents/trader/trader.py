@@ -8,6 +8,7 @@ from etfagents.agents.utils.structured import (
     STRUCTURED_FIELD_VISIBILITY_INSTRUCTION,
     STRUCTURED_TRIGGER_METRICS_INSTRUCTION,
     build_prose_only_fallback_prompt,
+    build_structured_output_prompt,
     bind_structured,
     invoke_structured_or_freetext_with_result,
 )
@@ -216,6 +217,7 @@ def create_trader(llm):
             functools.partial(render_trader_proposal, context_text=market_flow_report),
             "Trader",
             fallback_prompt=fallback_messages,
+            structured_prompt=build_structured_output_prompt(messages, TraderProposal),
         )
         rendered_result = _demote_trader_h1_headings(
             normalize_chinese_manager_terms(rendered_result)

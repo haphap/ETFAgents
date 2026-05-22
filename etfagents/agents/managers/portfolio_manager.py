@@ -29,6 +29,7 @@ from etfagents.agents.utils.structured import (
     STRUCTURED_FIELD_VISIBILITY_INSTRUCTION,
     STRUCTURED_TRIGGER_METRICS_INSTRUCTION,
     build_prose_only_fallback_prompt,
+    build_structured_output_prompt,
     bind_structured,
     invoke_structured_or_freetext_with_result,
 )
@@ -246,6 +247,7 @@ Only after the three sections above, append a feedback block in this exact forma
             ),
             "Portfolio Manager",
             fallback_prompt=fallback_prompt,
+            structured_prompt=build_structured_output_prompt(prompt, PortfolioDecision),
         )
         normalized_content = normalize_chinese_manager_terms(rendered_content)
         portfolio_backtest_signal = build_portfolio_backtest_signal(
