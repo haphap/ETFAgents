@@ -23,6 +23,7 @@ from cli.tui.services import (
     BacktestViewer,
     PaperTradingSnapshot,
     PaperTradingViewModel,
+    ReportRecord,
     ReportRepository,
     SECTION_DEFINITIONS,
 )
@@ -87,8 +88,8 @@ class ReportLibraryScreen(Screen):
     def __init__(self, repository: ReportRepository) -> None:
         super().__init__()
         self.repository = repository
-        self.records: list[Any] = []
-        self.current: Any | None = None
+        self.records: list[ReportRecord] = []
+        self.current: ReportRecord | None = None
         self.current_section: str = "portfolio_manager"
 
     def compose(self) -> ComposeResult:
@@ -122,6 +123,8 @@ class ReportLibraryScreen(Screen):
         reports = self.query_one("#reports", ListView)
         reports.clear()
         if not self.records:
+            self.current = None
+            self.current_section = "portfolio_manager"
             self.query_one("#lib_body", Markdown).update(
                 "暂无报告。使用 `etfagents analyze` 生成首份报告。"
             )
@@ -233,10 +236,10 @@ class PaperTradingScreen(Screen):
     def _safe_call_from_thread(self, callback: Any, *args: Any) -> None:
         """call_from_thread that silently exits if the app is shutting down."""
         try:
-            if not self.app._running:
+            if not getattr(self.app, "_running", False):
                 return
             self.app.call_from_thread(callback, *args)
-        except Exception:
+        except (RuntimeError, EOFError):
             pass
 
     def _apply_snapshot(self, snap: PaperTradingSnapshot) -> None:

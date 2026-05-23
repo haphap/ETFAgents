@@ -1,7 +1,6 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
 
 try:
     from textual.widgets import Static
@@ -21,7 +20,6 @@ from cli.tui.app import (
     HelpScreen,
 )
 from cli.tui.services import (
-    PaperTradingSnapshot,
     PaperTradingViewModel,
     ReportRepository,
 )
