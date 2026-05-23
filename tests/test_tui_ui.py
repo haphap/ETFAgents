@@ -1,10 +1,10 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 try:
-    from textual.widgets import Static
+    from textual.widgets import Static, ListView, Label
 except ModuleNotFoundError:
     Static = None
 
@@ -24,6 +24,9 @@ from cli.tui.services import (
     PaperTradingSnapshot,
     PaperTradingViewModel,
     ReportRepository,
+    TickerStarted,
+    TickerDone,
+    TickerFailed,
 )
 
 
@@ -192,6 +195,69 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screen = app.screen
                 sections = screen.query_one("#ra_sections")
                 self.assertEqual(len(sections.children), 9)
+
+    async def test_research_analysis_ticker_status_updates(self):
+        """Verify ticker status changes from ⏳ → ✓/✗ when events fire."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+
+                # Simulate ticker started
+                screen._handle_ticker_started(TickerStarted(ticker="510300.SH", total_sections=9))
+                await pilot.pause()
+                queue = screen.query_one("#ra_queue", ListView)
+                self.assertEqual(len(queue.children), 1)
+
+                # Simulate ticker done with rating
+                screen._handle_ticker_done(TickerDone(
+                    ticker="510300.SH",
+                    report_path=Path("/fake"),
+                    rating="BUY"
+                ))
+                await pilot.pause()
+
+                # Verify status updated to ✓ BUY
+                item = queue.children[0]
+                label = item.query_one(Label)
+                rendered = str(label.render())
+                self.assertIn("✓", rendered)
+                self.assertIn("BUY", rendered)
+
+    async def test_research_analysis_ticker_selection(self):
+        """Verify selecting a ticker in queue changes current_ticker."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+
+                # Start two tickers
+                screen._handle_ticker_started(TickerStarted(ticker="510300.SH", total_sections=9))
+                screen._handle_ticker_started(TickerStarted(ticker="159915.SZ", total_sections=9))
+                await pilot.pause()
+
+                # Get the queue ListView
+                queue = screen.query_one("#ra_queue", ListView)
+                self.assertEqual(len(queue.children), 2)
+
+                # Initially first ticker is selected
+                self.assertEqual(screen.current_ticker, "510300.SH")
+
+                # Find the second ticker's id and manually trigger selection
+                second_item = queue.children[1]
+                ticker_id = second_item.id
+                self.assertIsNotNone(ticker_id)
+
+                # Manually call the selection handler (simulating user clicking)
+                from textual.widgets import ListView as ListViewWidget
+                selected_event = ListViewWidget.Selected(queue, second_item, 1)
+                screen.on_list_view_selected(selected_event)
+                await pilot.pause()
+
+                # Verify current_ticker changed
+                self.assertEqual(screen.current_ticker, "159915.SZ")
 
     # --- BacktestScreen ---
 

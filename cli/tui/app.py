@@ -84,7 +84,7 @@ class ResearchAnalysisScreen(Screen):
         super().__init__()
         self.runner = runner
         self.repository = repository or ReportRepository()
-        self.ticker_ids = IdRegistry("ticker")
+        self.ticker_ids = IdRegistry("rtk")
         self.section_contents: dict[tuple[str, str], str] = {}
         self.section_status: dict[tuple[str, str], bool] = {}
         self.current_ticker: str | None = None
@@ -126,10 +126,9 @@ class ResearchAnalysisScreen(Screen):
         if item_id.startswith("rsec-"):
             self.current_section = item_id[5:]
             self._refresh_body()
-        elif item_id.startswith("rtk-"):
-            if item_id in self.ticker_ids:
-                self.current_ticker = self.ticker_ids.resolve(item_id)
-                self._refresh_body()
+        elif item_id in self.ticker_ids:
+            self.current_ticker = self.ticker_ids.resolve(item_id)
+            self._refresh_body()
 
     def _start_analysis(self) -> None:
         input_widget = self.query_one("#ra_ticker_input", Input)
@@ -191,7 +190,8 @@ class ResearchAnalysisScreen(Screen):
         rating_str = f" {event.rating}" if event.rating else ""
         try:
             item = self.query_one(f"#{ticker_id}", ListItem)
-            item.update(Label(f"✓ {event.ticker}{rating_str}"))
+            label = item.query_one(Label)
+            label.update(f"✓ {event.ticker}{rating_str}")
         except Exception:
             pass
         self.repository.invalidate()
@@ -201,7 +201,8 @@ class ResearchAnalysisScreen(Screen):
         ticker_id = self.ticker_ids.register(event.ticker)
         try:
             item = self.query_one(f"#{ticker_id}", ListItem)
-            item.update(Label(f"✗ {event.ticker}"))
+            label = item.query_one(Label)
+            label.update(f"✗ {event.ticker}")
         except Exception:
             pass
         body = self.query_one("#ra_body", Markdown)
@@ -212,7 +213,8 @@ class ResearchAnalysisScreen(Screen):
         ticker_id = self.ticker_ids.register(event.ticker)
         try:
             item = self.query_one(f"#{ticker_id}", ListItem)
-            item.update(Label(f"⊘ {event.ticker}"))
+            label = item.query_one(Label)
+            label.update(f"⊘ {event.ticker}")
         except Exception:
             pass
 
