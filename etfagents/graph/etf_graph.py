@@ -150,6 +150,19 @@ def _has_missing_selected_reports(
     return False
 
 
+def _has_missing_downstream_decisions(payload: dict[str, object]) -> bool:
+    """Return True when a cached candidate payload is only a partial analysis."""
+    for key in (
+        "research_allocation_plan",
+        "trader_allocation_plan",
+        "final_allocation_decision",
+    ):
+        value = payload.get(key)
+        if not isinstance(value, str) or not value.strip():
+            return True
+    return False
+
+
 def _cacheable_candidate_payload(payload: dict[str, object]) -> dict[str, object]:
     cacheable = dict(payload)
     for key, value in tuple(cacheable.items()):
@@ -232,7 +245,10 @@ class EtfAgentsGraph(TradingAgentsGraph):
             cached = cache.get(ticker, trade_date)
             if cached is not None:
                 cached_payload = _sanitize_candidate_payload(dict(cached))
-                if not _has_missing_selected_reports(cached_payload, selected_report_keys):
+                if (
+                    not _has_missing_selected_reports(cached_payload, selected_report_keys)
+                    and not _has_missing_downstream_decisions(cached_payload)
+                ):
                     results.append(cached_payload)
                     if per_ticker_callback:
                         per_ticker_callback(ticker, ticker_index, len(tickers), cached_payload)

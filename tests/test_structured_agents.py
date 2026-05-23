@@ -127,7 +127,9 @@ class StructuredAgentTests(unittest.TestCase):
 
         self.assertIn("## Debate Conclusion", result["investment_plan"])
         self.assertIn("Research View: **Overweight**", result["investment_plan"])
-        self.assertIn("FEEDBACK SNAPSHOT:", result["investment_plan"])
+        self.assertNotIn("FEEDBACK SNAPSHOT:", result["investment_plan"])
+        self.assertNotIn("FEEDBACK SNAPSHOT:", result["investment_debate_state"]["judge_decision"])
+        self.assertIn("Overweight", result["investment_debate_state"]["judge_snapshot"])
 
     def test_research_manager_uses_schema_only_prompt_for_structured_call(self):
         cfg = copy.deepcopy(DEFAULT_CONFIG)
