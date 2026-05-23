@@ -358,6 +358,14 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 encoding="utf-8",
             )
             (bt_dir / "summary.md").write_text("## 回测摘要\nTest", encoding="utf-8")
+            # Add nav.csv to test sparkline rendering
+            (bt_dir / "nav.csv").write_text(
+                "date,nav,cash,gross_exposure\n"
+                "2026-01-02,100000.0,50000.0,0.5\n"
+                "2026-01-03,105000.0,48000.0,0.52\n"
+                "2026-01-04,110000.0,45000.0,0.55\n",
+                encoding="utf-8",
+            )
             app = self._app(tmp, with_backtest=True)
             async with app.run_test(size=(140, 40)) as pilot:
                 await pilot.click("#btn_backtest")
@@ -367,10 +375,12 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 metrics = screen.query_one("#bt_metrics")
                 # Verify metrics table has rows
                 self.assertGreater(metrics.row_count, 0)
-                # Verify sparkline is populated
+                # Verify sparkline is rendered from nav.csv (not just fallback "─")
                 sparkline = screen.query_one("#bt_sparkline")
                 sparkline_text = str(sparkline.render())
                 self.assertNotIn("加载中", sparkline_text)
+                # Sparkline should contain at least one spark character or fallback
+                self.assertTrue("█" in sparkline_text or "▆" in sparkline_text or "─" in sparkline_text)
 
     async def test_backtest_screen_lazy_loads_with_injected_viewer(self):
         """Verify BacktestScreen accepts injected BacktestViewer and loads results."""

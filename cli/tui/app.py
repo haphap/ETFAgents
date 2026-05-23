@@ -378,10 +378,9 @@ class BacktestScreen(Screen):
     def _fetch_records(self) -> None:
         """Fetch backtest records in a worker thread."""
         try:
-            if self._viewer is None:
-                records = []
-            else:
-                records = self._viewer.list_results()
+            # Fallback to default BacktestViewer if none was injected
+            viewer = self._viewer or BacktestViewer()
+            records = viewer.list_results()
         except Exception as exc:
             self._safe_call_from_thread(self._show_error, str(exc))
             return
@@ -422,7 +421,7 @@ class BacktestScreen(Screen):
             label_text = f"{tickers_str} {record.start_date}~{record.end_date}{ret_str}"
             bt_list.append(ListItem(
                 Label(label_text),
-                id=f"btr-{self._load_count}-{i}",
+                id=f"btr_{self._load_count}_{i}",
             ))
 
         # Show first record by default
@@ -430,10 +429,10 @@ class BacktestScreen(Screen):
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         """Handle backtest record selection."""
-        if event.item.id and event.item.id.startswith("btr-"):
+        if event.item.id and event.item.id.startswith("btr_"):
             try:
-                # ID format: btr-{load_count}-{index}
-                parts = event.item.id[4:].split("-")
+                # ID format: btr_{load_count}_{index}
+                parts = event.item.id[4:].split("_")
                 if len(parts) >= 2:
                     idx = int(parts[-1])  # Last part is the index
                     if 0 <= idx < len(self.records):
@@ -447,21 +446,25 @@ class BacktestScreen(Screen):
         self.run_worker(
             lambda: self._fetch_detail(record.output_dir),
             thread=True,
-            exclusive=False,
+            exclusive=True,  # Only one detail fetch at a time to avoid stale data races
         )
 
     def _fetch_detail(self, output_dir: Path) -> None:
         """Fetch backtest detail in a worker thread."""
         try:
-            if self._viewer is None:
-                return
-            vm = self._viewer.load(output_dir)
+            # Fallback to default BacktestViewer if none was injected
+            viewer = self._viewer or BacktestViewer()
+            vm = viewer.load(output_dir)
             self._safe_call_from_thread(self._apply_detail, vm)
         except Exception as exc:
             self._safe_call_from_thread(self._show_error, str(exc))
 
     def _apply_detail(self, vm: BacktestViewModel) -> None:
         """Update UI with backtest details."""
+        # Verify this data is for the currently selected record (avoid stale updates)
+        if self.current is None or vm.output_dir != self.current.output_dir:
+            return
+
         # Sparkline
         sparkline_text = vm.sparkline or "─"
         self.query_one("#bt_sparkline", Static).update(f"[{sparkline_text}]")
