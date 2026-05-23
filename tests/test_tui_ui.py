@@ -21,7 +21,6 @@ from cli.tui.app import (
     HelpScreen,
 )
 from cli.tui.services import (
-    PaperTradingSnapshot,
     PaperTradingViewModel,
     ReportRepository,
     TickerStarted,
