@@ -12,6 +12,7 @@ from textual.widgets import (
     DataTable,
     Footer,
     Header,
+    Input,
     Label,
     ListItem,
     ListView,
@@ -20,12 +21,20 @@ from textual.widgets import (
 )
 
 from cli.tui.services import (
+    AnalysisEvent,
+    AnalysisRunner,
     BacktestViewer,
+    IdRegistry,
     PaperTradingSnapshot,
     PaperTradingViewModel,
     ReportRecord,
     ReportRepository,
     SECTION_DEFINITIONS,
+    SectionDone,
+    TickerCancelled,
+    TickerDone,
+    TickerFailed,
+    TickerStarted,
 )
 
 
@@ -61,16 +70,169 @@ class HomeScreen(Screen):
 
 
 # ---------------------------------------------------------------------------
-# Placeholder screens (M0 — to be implemented in M2–M3)
+# ResearchAnalysisScreen (M2)
 # ---------------------------------------------------------------------------
 
 class ResearchAnalysisScreen(Screen):
+    """Run ETF analysis and stream results in real-time.
+
+    Left pane: ticker input + start button + status list.
+    Right-top: section status circles (○●).
+    Right-bottom: Markdown body for selected section.
+    """
+
+    def __init__(self, runner: AnalysisRunner | None = None, repository: ReportRepository | None = None):
+        super().__init__()
+        self.runner = runner
+        self.repository = repository or ReportRepository()
+        self.ticker_ids = IdRegistry("rtk")
+        self.section_contents: dict[tuple[str, str], str] = {}
+        self.section_status: dict[tuple[str, str], bool] = {}
+        self.current_ticker: str | None = None
+        self.current_section: str = "portfolio_manager"
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Vertical(classes="screen-body"):
-            yield Static("研究分析（待实现）", classes="pane-title")
-            yield Static("此功能将在后续版本中完成。", classes="hint")
+        with Horizontal(classes="screen-body"):
+            with Vertical(classes="left-pane"):
+                yield Static("研究分析", classes="pane-title")
+                yield Static("输入 ETF 代码（逗号分隔）:", id="ra_label")
+                yield Input(id="ra_ticker_input", classes="fill-list")
+                yield Button("开始分析", id="btn_ra_start", variant="primary")
+                yield Static("分析队列", classes="pane-title")
+                yield ListView(id="ra_queue")
+            with Vertical(classes="right-pane"):
+                with Vertical(classes="right-top"):
+                    yield Static("报告章节", classes="pane-title")
+                    yield ListView(id="ra_sections")
+                with Vertical(classes="right-bottom"):
+                    yield Static("报告正文", classes="pane-title")
+                    yield Markdown("请输入 ETF 代码并点击开始分析。", id="ra_body")
         yield Footer()
+
+    def on_mount(self) -> None:
+        sections = self.query_one("#ra_sections", ListView)
+        for defn in SECTION_DEFINITIONS:
+            sections.append(ListItem(
+                Label(f"{defn.team} / {defn.title}"),
+                id=f"rsec-{defn.section_id}",
+            ))
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_ra_start":
+            self._start_analysis()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item_id = event.item.id or ""
+        if item_id.startswith("rsec-"):
+            self.current_section = item_id[5:]
+            self._refresh_body()
+        elif item_id in self.ticker_ids:
+            self.current_ticker = self.ticker_ids.resolve(item_id)
+            self._refresh_body()
+
+    def _start_analysis(self) -> None:
+        input_widget = self.query_one("#ra_ticker_input", Input)
+        tickers_str = input_widget.value.strip()
+        if not tickers_str:
+            return
+
+        tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
+        self.section_contents.clear()
+        self.section_status.clear()
+        self.ticker_ids.clear()
+        self.current_ticker = tickers[0] if tickers else None
+        self.current_section = "portfolio_manager"
+
+        queue = self.query_one("#ra_queue", ListView)
+        queue.clear()
+
+        runner = self.runner or AnalysisRunner()
+        self.run_worker(self._run_analysis, runner, tickers, thread=True, exclusive=True)
+
+    def _run_analysis(self, runner: AnalysisRunner, tickers: list[str]) -> None:
+        """Worker thread: stream analysis events."""
+        try:
+            for event in runner.run_queue(tickers):
+                self.app.call_from_thread(self._apply_event, event)
+        except Exception as exc:
+            self.app.call_from_thread(self._show_error, str(exc))
+
+    def _apply_event(self, event: AnalysisEvent) -> None:
+        """UI thread: handle event."""
+        if isinstance(event, TickerStarted):
+            self._handle_ticker_started(event)
+        elif isinstance(event, SectionDone):
+            self._handle_section_done(event)
+        elif isinstance(event, TickerDone):
+            self._handle_ticker_done(event)
+        elif isinstance(event, TickerFailed):
+            self._handle_ticker_failed(event)
+        elif isinstance(event, TickerCancelled):
+            self._handle_ticker_cancelled(event)
+
+    def _handle_ticker_started(self, event: TickerStarted) -> None:
+        """Mark ticker as running in queue."""
+        ticker_id = self.ticker_ids.register(event.ticker)
+        queue = self.query_one("#ra_queue", ListView)
+        queue.append(ListItem(Label(f"⏳ {event.ticker}"), id=ticker_id))
+        if self.current_ticker is None:
+            self.current_ticker = event.ticker
+
+    def _handle_section_done(self, event: SectionDone) -> None:
+        """Cache section content and update status."""
+        self.section_contents[(event.ticker, event.section_id)] = event.content
+        self.section_status[(event.ticker, event.section_id)] = True
+        self._refresh_body()
+
+    def _handle_ticker_done(self, event: TickerDone) -> None:
+        """Mark ticker complete."""
+        ticker_id = self.ticker_ids.register(event.ticker)
+        rating_str = f" {event.rating}" if event.rating else ""
+        try:
+            item = self.query_one(f"#{ticker_id}", ListItem)
+            label = item.query_one(Label)
+            label.update(f"✓ {event.ticker}{rating_str}")
+        except Exception:
+            pass
+        self.repository.invalidate()
+
+    def _handle_ticker_failed(self, event: TickerFailed) -> None:
+        """Mark ticker failed."""
+        ticker_id = self.ticker_ids.register(event.ticker)
+        try:
+            item = self.query_one(f"#{ticker_id}", ListItem)
+            label = item.query_one(Label)
+            label.update(f"✗ {event.ticker}")
+        except Exception:
+            pass
+        body = self.query_one("#ra_body", Markdown)
+        body.update(f"分析失败：{event.error}")
+
+    def _handle_ticker_cancelled(self, event: TickerCancelled) -> None:
+        """Mark ticker cancelled."""
+        ticker_id = self.ticker_ids.register(event.ticker)
+        try:
+            item = self.query_one(f"#{ticker_id}", ListItem)
+            label = item.query_one(Label)
+            label.update(f"⊘ {event.ticker}")
+        except Exception:
+            pass
+
+    def _refresh_body(self) -> None:
+        """Update Markdown body based on current selection."""
+        if not self.current_ticker:
+            self.query_one("#ra_body", Markdown).update("请选择一个 ticker。")
+            return
+        content = self.section_contents.get((self.current_ticker, self.current_section))
+        if content:
+            self.query_one("#ra_body", Markdown).update(content)
+        else:
+            self.query_one("#ra_body", Markdown).update("该章节暂无内容。")
+
+    def _show_error(self, error: str) -> None:
+        """Show error in body."""
+        self.query_one("#ra_body", Markdown).update(f"分析出错：{error}")
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +541,13 @@ class ETFAgentsTuiApp(App):
 
     def on_mount(self) -> None:
         self.install_screen(HomeScreen(), name="home")
-        self.install_screen(ResearchAnalysisScreen(), name="research")
+        self.install_screen(
+            ResearchAnalysisScreen(
+                runner=self.analysis_runner,
+                repository=self.report_repository,
+            ),
+            name="research",
+        )
         self.install_screen(
             ReportLibraryScreen(repository=self.report_repository),
             name="reports",

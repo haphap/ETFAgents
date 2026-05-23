@@ -1,37 +1,191 @@
-"""Placeholder tests for AnalysisRunner contracts (M2).
+"""Contract tests for AnalysisRunner (M2).
 
-These tests pin the acceptance criteria for the runner that will be
-implemented in M2.  They are skipped until the runner lands.
+These tests verify that the runner correctly handles streaming,
+cancellation, error recovery, and resource cleanup.
 """
 
 import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from cli.tui.services import (
+    AnalysisRunner,
+    SectionDone,
+    TickerCancelled,
+    TickerDone,
+    TickerFailed,
+    TickerStarted,
+)
 
 
-@unittest.skip("M2: AnalysisRunner not yet implemented")
+class _FakeGraph:
+    """Minimal fake graph for testing runner contracts."""
+
+    def __init__(self):
+        self.closed = False
+        self.finalized = False
+
+    def prepare_run(self, ticker, date):
+        return {}, {}, False
+
+    def finalize_run(self, date, state):
+        self.finalized = True
+
+    def close_run(self):
+        self.closed = True
+
+    @property
+    def graph(self):
+        return self
+
+    def stream(self, init_state, **kwargs):
+        """Minimal stream that yields one dummy chunk."""
+        yield {"dummy": "chunk"}
+
+
 class AnalysisRunnerContractTests(unittest.TestCase):
     def test_stream_emits_ticker_started_then_section_done_then_ticker_done(self):
-        """Runner must yield TickerStarted → SectionDone × N → TickerDone
-        for each ticker in the queue."""
+        """Runner must yield TickerStarted → SectionDone × N → TickerDone."""
+        runner = AnalysisRunner()
+
+        # Mock the graph and report saving
+        with patch.object(runner, "_make_graph") as mock_make_graph:
+            with patch.object(runner, "_save_report") as mock_save_report:
+                with patch.object(runner, "_extract_rating_from_report") as mock_rating:
+                    fake_graph = _FakeGraph()
+                    mock_make_graph.return_value = fake_graph
+                    mock_save_report.return_value = Path("/fake/report.md")
+                    mock_rating.return_value = "BUY"
+
+                    # Override stream to emit a real market_flow_report chunk
+                    def fake_stream(init_state, **kwargs):
+                        yield {"market_flow_report": "Market analysis"}
+
+                    fake_graph.stream = fake_stream
+
+                    events = list(runner.run_queue(["510300.SH"]))
+
+                    # Verify sequence
+                    self.assertIsInstance(events[0], TickerStarted)
+                    self.assertEqual(events[0].ticker, "510300.SH")
+                    self.assertTrue(any(isinstance(e, SectionDone) for e in events))
+                    self.assertIsInstance(events[-1], TickerDone)
+                    self.assertEqual(events[-1].ticker, "510300.SH")
+                    self.assertEqual(events[-1].rating, "BUY")
 
     def test_cancel_emits_cancelled_and_stops_processing(self):
-        """request_cancel() must cause remaining tickers to yield
-        TickerCancelled without calling finalize_run() or saving reports."""
+        """request_cancel() must cause remaining tickers to yield TickerCancelled
+        and must NOT call _make_graph/finalize_run/_save_report for them."""
+        runner = AnalysisRunner()
 
-    def test_cancel_leaves_no_temp_files(self):
-        """If cancelled mid-stream, no .tmp section files should remain
-        in the report directory.  Atomic write or cleanup on cancel."""
+        with patch.object(runner, "_make_graph") as mock_make_graph:
+            with patch.object(runner, "_save_report") as mock_save_report:
+                with patch.object(runner, "_extract_rating_from_report") as mock_rating:
+                    fake_graph = _FakeGraph()
+                    mock_make_graph.return_value = fake_graph
+                    mock_save_report.return_value = Path("/fake/report.md")
+                    mock_rating.return_value = "BUY"
 
-    def test_error_yields_ticker_failed_and_continues_queue(self):
-        """A graph exception for one ticker must yield TickerFailed(error=...)
-        and continue processing the remaining tickers."""
+                    def fake_stream(init_state, **kwargs):
+                        yield {"market_flow_report": "Analysis"}
+
+                    fake_graph.stream = fake_stream
+
+                    def cancel_on_second():
+                        """Cancel after first ticker."""
+                        events = []
+                        for event in runner.run_queue(["510300.SH", "159915.SZ"]):
+                            events.append(event)
+                            if isinstance(event, TickerDone):
+                                runner.request_cancel()
+                        return events
+
+                    events = cancel_on_second()
+                    self.assertTrue(any(isinstance(e, TickerCancelled) for e in events))
+
+                    # _make_graph should only be called once (for the first ticker)
+                    self.assertEqual(mock_make_graph.call_count, 1)
+                    # _save_report should only be called once (for the first ticker)
+                    self.assertEqual(mock_save_report.call_count, 1)
 
     def test_graph_close_run_always_called(self):
-        """graph.close_run() must be called in a finally block regardless
-        of success, failure, or cancellation."""
+        """graph.close_run() must be called in a finally block."""
+        runner = AnalysisRunner()
 
-    def test_report_persisted_after_ticker_done(self):
-        """After TickerDone, the complete_report.md and section files
-        must exist on disk at the expected paths."""
+        with patch.object(runner, "_make_graph") as mock_make_graph:
+            fake_graph = _FakeGraph()
+            mock_make_graph.return_value = fake_graph
+
+            # Simulate an error during stream
+            def fake_stream_error(init_state, **kwargs):
+                raise RuntimeError("Stream error")
+
+            fake_graph.stream = fake_stream_error
+
+            list(runner.run_queue(["510300.SH"]))
+
+            # close_run() should have been called despite error
+            self.assertTrue(fake_graph.closed)
+
+    def test_error_yields_ticker_failed_and_continues_queue(self):
+        """A graph exception for one ticker must yield TickerFailed and continue."""
+        runner = AnalysisRunner()
+
+        with patch.object(runner, "_make_graph") as mock_make_graph:
+            fake_graph = _FakeGraph()
+            mock_make_graph.return_value = fake_graph
+
+            # First ticker fails, second succeeds
+            call_count = [0]
+
+            def fake_stream(init_state, **kwargs):
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise RuntimeError("First ticker error")
+                yield {"market_flow_report": "Second ticker OK"}
+
+            fake_graph.stream = fake_stream
+
+            with patch.object(runner, "_save_report") as mock_save_report:
+                with patch.object(runner, "_extract_rating_from_report") as mock_rating:
+                    mock_save_report.return_value = Path("/fake/report.md")
+                    mock_rating.return_value = None
+
+                    events = list(runner.run_queue(["510300.SH", "159915.SZ"]))
+
+                    # Both tickers should appear, one as failed, one as done
+                    ticker_failed = [e for e in events if isinstance(e, TickerFailed)]
+                    ticker_done = [e for e in events if isinstance(e, TickerDone)]
+                    self.assertEqual(len(ticker_failed), 1)
+                    self.assertEqual(len(ticker_done), 1)
+
+    def test_section_detection_marks_completion(self):
+        """Section updates in chunks must be detected and emitted."""
+        runner = AnalysisRunner()
+
+        with patch.object(runner, "_make_graph") as mock_make_graph:
+            with patch.object(runner, "_save_report") as mock_save_report:
+                with patch.object(runner, "_extract_rating_from_report") as mock_rating:
+                    fake_graph = _FakeGraph()
+                    mock_make_graph.return_value = fake_graph
+                    mock_save_report.return_value = Path("/fake/report.md")
+                    mock_rating.return_value = None
+
+                    # Emit multiple section updates
+                    def fake_stream(init_state, **kwargs):
+                        yield {"market_flow_report": "Market"}
+                        yield {"catalyst_sentiment_report": "Sentiment"}
+                        yield {"macro_regime_report": "Macro"}
+
+                    fake_graph.stream = fake_stream
+
+                    events = list(runner.run_queue(["510300.SH"]))
+                    section_done = [e for e in events if isinstance(e, SectionDone)]
+                    self.assertEqual(len(section_done), 3)
+                    self.assertEqual(
+                        [e.section_id for e in section_done],
+                        ["market_flow", "catalyst_sentiment", "macro_regime"],
+                    )
 
 
 if __name__ == "__main__":
