@@ -372,6 +372,65 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 sparkline_text = str(sparkline.render())
                 self.assertNotIn("加载中", sparkline_text)
 
+    async def test_backtest_screen_lazy_loads_with_injected_viewer(self):
+        """Verify BacktestScreen accepts injected BacktestViewer and loads results."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bt_dir = root / "backtest" / "2026-01-02_to_2026-03-31"
+            bt_dir.mkdir(parents=True)
+            (bt_dir / "metrics.json").write_text(
+                '{"metrics": {"cumulative_return": 0.123}}', encoding="utf-8"
+            )
+            (bt_dir / "manifest.json").write_text(
+                '{"tickers": ["510300.SH"], "start_date": "2026-01-02", "end_date": "2026-03-31"}',
+                encoding="utf-8",
+            )
+            (bt_dir / "summary.md").write_text("## Summary", encoding="utf-8")
+            # Create app with injected viewer (explicit path to avoid env var complexity)
+            app = ETFAgentsTuiApp(
+                repository=ReportRepository(tmp),
+                backtest_viewer=BacktestViewer(tmp),
+            )
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_backtest")
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                bt_list = screen.query_one("#bt_list")
+                # Verify BacktestViewer loaded the results
+                self.assertEqual(len(bt_list.children), 1)
+
+    async def test_backtest_screen_refresh_clears_duplicates(self):
+        """Verify refresh button clears old items before loading new ones."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bt_dir = root / "backtest" / "2026-01-02_to_2026-03-31"
+            bt_dir.mkdir(parents=True)
+            (bt_dir / "metrics.json").write_text(
+                '{"metrics": {"cumulative_return": 0.123}}', encoding="utf-8"
+            )
+            (bt_dir / "manifest.json").write_text(
+                '{"tickers": ["510300.SH"], "start_date": "2026-01-02", "end_date": "2026-03-31"}',
+                encoding="utf-8",
+            )
+            (bt_dir / "summary.md").write_text("## Summary", encoding="utf-8")
+            app = self._app(tmp, with_backtest=True)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_backtest")
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                bt_list = screen.query_one("#bt_list")
+                initial_count = len(bt_list.children)
+                self.assertEqual(initial_count, 1)
+                # Click refresh button
+                await pilot.click("#btn_bt_refresh")
+                await pilot.pause()
+                await pilot.pause()
+                # Verify list is not duplicated (should still be 1, not 2)
+                refreshed_count = len(bt_list.children)
+                self.assertEqual(refreshed_count, 1)
+
     # --- helpers ---
 
     def _app(

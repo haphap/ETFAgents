@@ -402,6 +402,10 @@ class BacktestScreen(Screen):
         bt_list = self.query_one("#bt_list", ListView)
         self._load_count += 1
 
+        # Always clear existing items to avoid duplicates on refresh
+        for item in list(bt_list.children):
+            item.remove()
+
         if not records:
             self.query_one("#bt_sparkline", Static).update("暂无回测结果")
             self.query_one("#bt_metrics", DataTable).clear(columns=True)
@@ -699,8 +703,15 @@ class ETFAgentsTuiApp(App):
         super().__init__()
         self.report_repository = repository or ReportRepository()
         self.analysis_runner = analysis_runner
-        self.backtest_viewer = backtest_viewer
+        self._backtest_viewer = backtest_viewer
         self.paper_view_model = paper_view_model
+
+    @property
+    def backtest_viewer(self) -> BacktestViewer:
+        """Lazily instantiate BacktestViewer if not injected."""
+        if self._backtest_viewer is None:
+            self._backtest_viewer = BacktestViewer()
+        return self._backtest_viewer
 
     def on_mount(self) -> None:
         self.install_screen(HomeScreen(), name="home")
