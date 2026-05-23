@@ -1,13 +1,31 @@
-"""Textual application for ETFAgents — M0 skeleton."""
+"""Textual application for ETFAgents — M1: Report Library + Paper Trading."""
 
 from __future__ import annotations
 
-from textual.app import App, ComposeResult
-from textual.containers import Vertical
-from textual.screen import Screen
-from textual.widgets import Button, Footer, Header, Markdown, Static
+from typing import Any
 
-from cli.tui.services import ReportRepository
+from textual.app import App, ComposeResult
+from textual.containers import Horizontal, Vertical
+from textual.screen import Screen
+from textual.widgets import (
+    Button,
+    DataTable,
+    Footer,
+    Header,
+    Label,
+    ListItem,
+    ListView,
+    Markdown,
+    Static,
+)
+
+from cli.tui.services import (
+    BacktestViewer,
+    PaperTradingSnapshot,
+    PaperTradingViewModel,
+    ReportRepository,
+    SECTION_DEFINITIONS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -42,7 +60,7 @@ class HomeScreen(Screen):
 
 
 # ---------------------------------------------------------------------------
-# Placeholder screens (M0 — to be implemented in M1–M3)
+# Placeholder screens (M0 — to be implemented in M2–M3)
 # ---------------------------------------------------------------------------
 
 class ResearchAnalysisScreen(Screen):
@@ -54,18 +72,94 @@ class ResearchAnalysisScreen(Screen):
         yield Footer()
 
 
+# ---------------------------------------------------------------------------
+# ReportLibraryScreen (M1)
+# ---------------------------------------------------------------------------
+
 class ReportLibraryScreen(Screen):
+    """Browse locally saved single-ETF reports.
+
+    Left pane: report list (ticker + date + rating).
+    Right-top: section list (fixed 9 + complete).
+    Right-bottom: selected section Markdown body.
+    """
+
     def __init__(self, repository: ReportRepository) -> None:
         super().__init__()
         self.repository = repository
+        self.records: list[Any] = []
+        self.current: Any | None = None
+        self.current_section: str = "portfolio_manager"
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Vertical(classes="screen-body"):
-            yield Static("研究报告库（待实现）", classes="pane-title")
-            yield Static("此功能将在后续版本中完成。", classes="hint")
+        with Horizontal(classes="screen-body"):
+            with Vertical(classes="left-pane"):
+                yield Static("报告列表", classes="pane-title")
+                yield ListView(id="reports")
+                yield Static("按 r 刷新本地报告", classes="hint")
+            with Vertical(classes="right-pane"):
+                with Vertical(classes="right-top"):
+                    yield Static("报告章节", classes="pane-title")
+                    yield ListView(id="lib_sections")
+                with Vertical(classes="right-bottom"):
+                    yield Static("报告正文", classes="pane-title")
+                    yield Markdown("暂无报告。", id="lib_body")
         yield Footer()
 
+    def on_mount(self) -> None:
+        sections = self.query_one("#lib_sections", ListView)
+        for defn in SECTION_DEFINITIONS:
+            sections.append(ListItem(
+                Label(f"{defn.team} / {defn.title}"),
+                id=f"lsec-{defn.section_id}",
+            ))
+        sections.append(ListItem(Label("完整报告"), id="lsec-complete"))
+        self._load_reports()
+
+    def _load_reports(self) -> None:
+        self.records = self.repository.list_reports()
+        reports = self.query_one("#reports", ListView)
+        reports.clear()
+        if not self.records:
+            self.query_one("#lib_body", Markdown).update(
+                "暂无报告。使用 `etfagents analyze` 生成首份报告。"
+            )
+            return
+        for i, rec in enumerate(self.records):
+            rating_str = f"  {rec.rating}" if rec.rating else ""
+            reports.append(ListItem(
+                Label(f"{rec.ticker}  {rec.date}{rating_str}"),
+                id=f"rpt-{i}",
+            ))
+        self.current = self.records[0]
+        self._refresh_body()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        item_id = event.item.id or ""
+        if item_id.startswith("rpt-"):
+            idx = int(item_id[4:])
+            if 0 <= idx < len(self.records):
+                self.current = self.records[idx]
+                self._refresh_body()
+        elif item_id.startswith("lsec-"):
+            self.current_section = item_id[5:]
+            self._refresh_body()
+
+    async def action_refresh_reports(self) -> None:
+        self.repository.invalidate()
+        self._load_reports()
+
+    def _refresh_body(self) -> None:
+        if self.current is None:
+            return
+        content = self.repository.read_section(self.current, self.current_section)
+        self.query_one("#lib_body", Markdown).update(content or "该章节暂无内容。")
+
+
+# ---------------------------------------------------------------------------
+# BacktestScreen (M0 placeholder — full implementation in M3)
+# ---------------------------------------------------------------------------
 
 class BacktestScreen(Screen):
     def compose(self) -> ComposeResult:
@@ -76,13 +170,133 @@ class BacktestScreen(Screen):
         yield Footer()
 
 
+# ---------------------------------------------------------------------------
+# PaperTradingScreen (M1)
+# ---------------------------------------------------------------------------
+
 class PaperTradingScreen(Screen):
+    """Read-only paper trading dashboard.
+
+    Left pane: account summary + refresh button.
+    Right-top: positions DataTable.
+    Right-bottom: trade history DataTable.
+    """
+
+    def __init__(self, view_model: PaperTradingViewModel | None = None) -> None:
+        super().__init__()
+        self._view_model = view_model
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Vertical(classes="screen-body"):
-            yield Static("模拟交易（待实现）", classes="pane-title")
-            yield Static("此功能将在后续版本中完成。", classes="hint")
+        with Horizontal(classes="screen-body"):
+            with Vertical(classes="left-pane"):
+                yield Static("模拟交易", classes="pane-title")
+                yield Static("加载中...", id="pt_account")
+                yield Button("刷新", id="btn_pt_refresh", variant="primary")
+            with Vertical(classes="right-pane"):
+                with Vertical(classes="right-top"):
+                    yield Static("持仓", classes="pane-title")
+                    yield DataTable(id="pt_positions")
+                with Vertical(classes="right-bottom"):
+                    yield Static("交易历史", classes="pane-title")
+                    yield DataTable(id="pt_trades")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self._start_loading()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_pt_refresh":
+            self._start_loading()
+
+    async def action_refresh_reports(self) -> None:
+        self._start_loading()
+
+    def _start_loading(self) -> None:
+        self.query_one("#pt_account", Static).update("加载中...")
+        self.run_worker(self._fetch_snapshot, thread=True, exclusive=True)
+
+    @property
+    def view_model(self) -> PaperTradingViewModel:
+        if self._view_model is None:
+            self._view_model = PaperTradingViewModel()
+        return self._view_model
+
+    def _fetch_snapshot(self) -> None:
+        try:
+            snap = self.view_model.snapshot()
+        except Exception as exc:
+            self._safe_call_from_thread(self._show_error, str(exc))
+            return
+        self._safe_call_from_thread(self._apply_snapshot, snap)
+
+    def _safe_call_from_thread(self, callback: Any, *args: Any) -> None:
+        """call_from_thread that silently exits if the app is shutting down."""
+        try:
+            if not self.app._running:
+                return
+            self.app.call_from_thread(callback, *args)
+        except Exception:
+            pass
+
+    def _apply_snapshot(self, snap: PaperTradingSnapshot) -> None:
+        acct = snap.account
+        self.query_one("#pt_account", Static).update(
+            f"总资产: {acct.get('total_assets', 'N/A')}\n"
+            f"现金: {acct.get('cash', 'N/A')}\n"
+            f"市值: {acct.get('market_value', 'N/A')}\n"
+            f"未实现盈亏: {acct.get('unrealized_pnl', 'N/A')}\n"
+            f"已实现盈亏: {acct.get('realized_pnl', 'N/A')}"
+        )
+
+        # Positions table
+        pos_table = self.query_one("#pt_positions", DataTable)
+        pos_table.clear(columns=True)
+        pos_table.add_columns("代码", "名称", "数量", "成本", "现价", "市值", "盈亏", "盈亏%")
+        for p in snap.positions:
+            pnl = p.get("unrealized_pnl", 0)
+            pnl_pct = p.get("pnl_pct", 0)
+            try:
+                pnl = float(pnl)
+            except (TypeError, ValueError):
+                pnl = 0.0
+            try:
+                pnl_pct = float(pnl_pct)
+            except (TypeError, ValueError):
+                pnl_pct = 0.0
+            pnl_str = f"{pnl:+.2f}"
+            pct_str = f"{pnl_pct:+.2f}%"
+            avg_cost = p.get("avg_cost", "")
+            cur_price = p.get("current_price", "")
+            mkt_val = p.get("market_value", "")
+            pos_table.add_row(
+                str(p.get("ticker", "")),
+                str(p.get("name", "")),
+                str(p.get("quantity", "")),
+                f"{avg_cost:.4f}" if isinstance(avg_cost, (int, float)) else str(avg_cost),
+                f"{cur_price:.4f}" if isinstance(cur_price, (int, float)) else str(cur_price),
+                f"{mkt_val:.2f}" if isinstance(mkt_val, (int, float)) else str(mkt_val),
+                pnl_str,
+                pct_str,
+            )
+
+        # Trade history table
+        trade_table = self.query_one("#pt_trades", DataTable)
+        trade_table.clear(columns=True)
+        trade_table.add_columns("时间", "代码", "方向", "数量", "价格", "金额", "盈亏")
+        for t in snap.trades:
+            trade_table.add_row(
+                str(t.get("created_at", "")),
+                str(t.get("ticker", "")),
+                str(t.get("side", "")),
+                str(t.get("quantity", "")),
+                str(t.get("price", "")),
+                str(t.get("amount", "")),
+                str(t.get("pnl", "")),
+            )
+
+    def _show_error(self, error: str) -> None:
+        self.query_one("#pt_account", Static).update(f"加载失败：{error}")
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +313,7 @@ class HelpScreen(Screen):
 |--------|------|
 | `q` | 退出 |
 | `Escape` | 返回上一屏 |
+| `r` | 刷新当前数据 |
 | `?` | 显示本帮助 |
 
 ## 功能
@@ -127,9 +342,12 @@ class ETFAgentsTuiApp(App):
     .screen-body { height: 1fr; }
     .pane-title { text-style: bold; color: $accent; height: 1; margin: 0 0 1 0; }
     .hint { color: $text-muted; height: 1; margin-top: 1; }
+    .fill-list { height: 1fr; }
+    ListView { width: 100%; }
     Markdown { height: 1fr; }
+    DataTable { height: 1fr; }
 
-    /* Two-pane layout — active in M1+ screens */
+    /* Two-pane layout */
     .left-pane  { height: 100%; width: 35%; min-width: 36; border: solid $primary; padding: 0 1; }
     .right-pane { height: 100%; width: 65%; padding: 0 1; }
     .right-top    { height: 35%; border: solid $primary; margin-bottom: 1; }
@@ -140,14 +358,21 @@ class ETFAgentsTuiApp(App):
         ("q", "quit", "退出"),
         ("escape", "pop_screen", "返回"),
         ("?", "show_help", "帮助"),
+        ("r", "refresh_reports", "刷新"),
     ]
 
     def __init__(
         self,
         repository: ReportRepository | None = None,
+        analysis_runner: Any | None = None,
+        backtest_viewer: BacktestViewer | None = None,
+        paper_view_model: PaperTradingViewModel | None = None,
     ):
         super().__init__()
         self.report_repository = repository or ReportRepository()
+        self.analysis_runner = analysis_runner
+        self.backtest_viewer = backtest_viewer
+        self.paper_view_model = paper_view_model
 
     def on_mount(self) -> None:
         self.install_screen(HomeScreen(), name="home")
@@ -157,12 +382,22 @@ class ETFAgentsTuiApp(App):
             name="reports",
         )
         self.install_screen(BacktestScreen(), name="backtest")
-        self.install_screen(PaperTradingScreen(), name="paper")
+        self.install_screen(
+            PaperTradingScreen(view_model=self.paper_view_model),
+            name="paper",
+        )
         self.install_screen(HelpScreen(), name="help")
         self.push_screen("home")
 
     def action_show_help(self) -> None:
         self.push_screen("help")
+
+    async def action_refresh_reports(self) -> None:
+        screen = self.screen
+        if hasattr(screen, "action_refresh_reports"):
+            result = screen.action_refresh_reports()
+            if result is not None:
+                await result
 
 
 def main() -> None:
