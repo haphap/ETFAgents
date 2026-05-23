@@ -171,6 +171,28 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 # 9 sections + 1 complete = 10
                 self.assertEqual(len(sections.children), 10)
 
+    # --- ResearchAnalysisScreen ---
+
+    async def test_research_analysis_screen_has_input_and_start_button(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                from cli.tui.app import ResearchAnalysisScreen
+                self.assertIsInstance(screen, ResearchAnalysisScreen)
+                self.assertIsNotNone(screen.query_one("#ra_ticker_input"))
+                self.assertIsNotNone(screen.query_one("#btn_ra_start"))
+
+    async def test_research_analysis_section_list_has_9_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                sections = screen.query_one("#ra_sections")
+                self.assertEqual(len(sections.children), 9)
+
     # --- BacktestScreen ---
 
     async def test_backtest_screen_is_view_only(self):

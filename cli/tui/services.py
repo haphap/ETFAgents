@@ -5,11 +5,15 @@ This module must NOT import textual.
 
 from __future__ import annotations
 
+import copy
 import csv
 import json
+import threading
 from dataclasses import dataclass, field
+from datetime import datetime
+from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from etfagents.default_config import DEFAULT_CONFIG
 
@@ -42,6 +46,7 @@ ANALYST_KEYS = [
 class SectionDef:
     section_id: str
     state_key: str
+    detection_keys: tuple[str, ...]
     team: str
     title: str
     disk_paths: tuple[str, ...]
@@ -50,52 +55,109 @@ class SectionDef:
 SECTION_DEFINITIONS: tuple[SectionDef, ...] = (
     SectionDef(
         "market_flow", "market_flow_report",
+        ("market_flow_report",),
         "分析师", "市场与资金流",
         ("reports/market_flow_report.md", "1_analysts/market_flow.md"),
     ),
     SectionDef(
         "catalyst_sentiment", "catalyst_sentiment_report",
+        ("catalyst_sentiment_report",),
         "分析师", "舆情与事件",
         ("reports/catalyst_sentiment_report.md", "1_analysts/catalyst_sentiment.md"),
     ),
     SectionDef(
         "macro_regime", "macro_regime_report",
+        ("macro_regime_report",),
         "分析师", "宏观框架",
         ("reports/macro_regime_report.md", "1_analysts/macro_regime.md"),
     ),
     SectionDef(
         "meso_commodity", "meso_commodity_report",
+        ("meso_commodity_report",),
         "分析师", "中观大宗",
         ("reports/meso_commodity_report.md", "1_analysts/meso_commodity.md"),
     ),
     SectionDef(
         "holdings_industry", "holdings_industry_report",
+        ("holdings_industry_report",),
         "分析师", "持仓行业",
         ("reports/holdings_industry_report.md", "1_analysts/holdings_industry.md"),
     ),
     SectionDef(
         "top_holdings", "top_holdings_report",
+        ("top_holdings_report",),
         "分析师", "头部持仓",
         ("reports/top_holdings_report.md", "1_analysts/top_holdings.md"),
     ),
     SectionDef(
         "research", "research_allocation_plan",
+        ("research_allocation_plan", "investment_debate_state"),
         "研究", "研究团队",
         ("reports/research_allocation_plan.md", "2_research/manager.md"),
     ),
     SectionDef(
         "trader", "trader_allocation_plan",
+        ("trader_allocation_plan",),
         "交易", "交易员",
         ("reports/trader_allocation_plan.md", "3_trading/trader.md"),
     ),
     SectionDef(
         "portfolio_manager", "final_allocation_decision",
+        ("final_allocation_decision", "risk_debate_state"),
         "决策", "投资组合经理",
         ("reports/final_allocation_decision.md", "5_portfolio/decision.md"),
     ),
 )
 
 SECTION_BY_ID = {defn.section_id: defn for defn in SECTION_DEFINITIONS}
+
+
+# ---------------------------------------------------------------------------
+# Ticker state and events
+# ---------------------------------------------------------------------------
+
+class TickerState(Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True)
+class TickerStarted:
+    ticker: str
+    total_sections: int
+
+
+@dataclass(frozen=True)
+class SectionDone:
+    ticker: str
+    section_id: str
+    content: str
+    completed: int
+    total: int
+
+
+@dataclass(frozen=True)
+class TickerDone:
+    ticker: str
+    report_path: Path
+    rating: str | None
+
+
+@dataclass(frozen=True)
+class TickerFailed:
+    ticker: str
+    error: str
+
+
+@dataclass(frozen=True)
+class TickerCancelled:
+    ticker: str
+
+
+AnalysisEvent = TickerStarted | SectionDone | TickerDone | TickerFailed | TickerCancelled
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +491,207 @@ class BacktestViewer:
             with path.open(newline="", encoding="utf-8") as fh:
                 return list(csv.DictReader(fh))
         except (OSError, csv.Error, UnicodeDecodeError):
+            return None
+
+
+# ---------------------------------------------------------------------------
+# AnalysisRunner (M2)
+# ---------------------------------------------------------------------------
+
+class AnalysisRunner:
+    """Stream graph execution for ETF analysis.
+
+    run_queue() is a sync generator designed for worker threads.
+    Events are yielded as analysis progresses.
+    """
+
+    def __init__(self, config: dict[str, Any] | None = None):
+        self.config = copy.deepcopy(config or DEFAULT_CONFIG)
+        self.states: dict[str, TickerState] = {}
+        self._cancel_event = threading.Event()
+
+    def request_cancel(self) -> None:
+        self._cancel_event.set()
+
+    def run_queue(
+        self,
+        tickers: list[str],
+        analysis_date: str | None = None,
+        selected_analysts: list[str] | None = None,
+    ) -> Iterator[AnalysisEvent]:
+        """Run analysis on a queue of tickers, yielding events."""
+        date = analysis_date or datetime.now().date().isoformat()
+        analysts = selected_analysts or list(ANALYST_KEYS)
+        normalized = [t.strip().upper() for t in tickers if t.strip()]
+        self._cancel_event.clear()
+        self.states = {t: TickerState.PENDING for t in normalized}
+
+        for ticker in normalized:
+            if self._cancel_event.is_set():
+                self.states[ticker] = TickerState.CANCELLED
+                yield TickerCancelled(ticker=ticker)
+                continue
+            yield from self.run_one(ticker, date, analysts)
+
+    def run_one(
+        self,
+        ticker: str,
+        analysis_date: str,
+        selected_analysts: list[str],
+    ) -> Iterator[AnalysisEvent]:
+        """Run a single ticker's analysis."""
+        graph = None
+        try:
+            self.states[ticker] = TickerState.RUNNING
+            graph = self._make_graph()
+            graph._ensure_graph_initialized()
+
+            yield TickerStarted(ticker=ticker, total_sections=len(SECTION_DEFINITIONS))
+
+            init_state, args, _ = graph.prepare_run(ticker, analysis_date)
+            accumulated = copy.deepcopy(init_state)
+
+            # Merge selected_analysts into config for this run
+            run_config = copy.deepcopy(self.config)
+            if selected_analysts:
+                run_config["selected_analysts"] = selected_analysts
+            from cli.report_utils import merge_stream_state
+
+            already_done: set[str] = set()
+            completed = 0
+
+            for chunk in graph.graph.stream(init_state, **args):
+                if self._cancel_event.is_set():
+                    self.states[ticker] = TickerState.CANCELLED
+                    yield TickerCancelled(ticker=ticker)
+                    return
+
+                merge_stream_state(accumulated, chunk)
+                for event in self._detect_section_updates(
+                    chunk, accumulated, already_done, ticker
+                ):
+                    completed += 1
+                    yield event
+
+            # Finalize and save
+            graph.finalize_run(analysis_date, accumulated)
+            report_path = self._save_report(accumulated, ticker, analysis_date)
+            rating = self._extract_rating_from_report(report_path)
+            self.states[ticker] = TickerState.DONE
+            yield TickerDone(ticker=ticker, report_path=report_path, rating=rating)
+
+        except Exception as exc:
+            self.states[ticker] = TickerState.FAILED
+            yield TickerFailed(ticker=ticker, error=str(exc))
+        finally:
+            if graph:
+                graph.close_run()
+
+    def _detect_section_updates(
+        self,
+        chunk: dict,
+        accumulated: dict,
+        already_done: set[str],
+        ticker: str,
+    ) -> Iterator[SectionDone]:
+        """Yield SectionDone events for newly completed sections."""
+        for defn in SECTION_DEFINITIONS:
+            if defn.section_id in already_done:
+                continue
+
+            for det_key in defn.detection_keys:
+                value = self._get_chunk_value(chunk, det_key)
+                if not value:
+                    continue
+
+                # Determine content and trigger
+                if det_key == defn.state_key:
+                    content = str(value)
+                elif det_key == "investment_debate_state":
+                    if not isinstance(value, dict) or not value.get("judge_decision"):
+                        continue
+                    content = self._format_research(value)
+                elif det_key == "risk_debate_state":
+                    if not isinstance(value, dict) or not value.get("judge_decision"):
+                        continue
+                    content = self._format_risk(value)
+                else:
+                    content = str(value)
+
+                already_done.add(defn.section_id)
+                completed = len(already_done)
+                yield SectionDone(
+                    ticker=ticker,
+                    section_id=defn.section_id,
+                    content=content,
+                    completed=completed,
+                    total=len(SECTION_DEFINITIONS),
+                )
+                break
+
+    def _get_chunk_value(self, chunk: dict, key: str) -> Any:
+        """Extract value from chunk, checking top-level and nested node outputs."""
+        if not isinstance(chunk, dict):
+            return None
+
+        # Direct key
+        if key in chunk:
+            return chunk.get(key)
+
+        # Nested under node name
+        for value in chunk.values():
+            if isinstance(value, dict) and key in value:
+                return value.get(key)
+        return None
+
+    def _format_research(self, debate: dict) -> str:
+        """Format research debate state to Markdown."""
+        parts: list[str] = []
+        if debate.get("bull_history"):
+            parts.append(f"### 多头\n{debate['bull_history']}")
+        if debate.get("bear_history"):
+            parts.append(f"### 空头\n{debate['bear_history']}")
+        if debate.get("judge_decision"):
+            parts.append(f"### 研究经理综合结论\n{debate['judge_decision']}")
+        return "\n\n".join(parts)
+
+    def _format_risk(self, risk: dict) -> str:
+        """Format risk debate state to Markdown."""
+        parts: list[str] = []
+        if risk.get("aggressive_history"):
+            parts.append(f"### 激进\n{risk['aggressive_history']}")
+        if risk.get("neutral_history"):
+            parts.append(f"### 中性\n{risk['neutral_history']}")
+        if risk.get("conservative_history"):
+            parts.append(f"### 保守\n{risk['conservative_history']}")
+        if risk.get("judge_decision"):
+            parts.append(f"### 投资组合经理\n{risk['judge_decision']}")
+        return "\n\n".join(parts)
+
+    def _make_graph(self) -> Any:
+        """Lazy import and create graph."""
+        from etfagents.graph.etf_graph import EtfAgentsGraph
+        return EtfAgentsGraph(config=self.config, debug=False)
+
+    def _save_report(self, state: dict, ticker: str, analysis_date: str) -> Path:
+        """Save complete report to disk."""
+        from cli.main import save_report_to_disk
+        save_path = (
+            Path(self.config["results_dir"]).expanduser() /
+            ticker / analysis_date
+        )
+        return save_report_to_disk(state, ticker, save_path)
+
+    def _extract_rating_from_report(self, report_path: Path) -> str | None:
+        """Extract rating from complete_report.md."""
+        complete = report_path.parent / "complete_report.md"
+        if not complete.exists():
+            return None
+        try:
+            text = complete.read_text(encoding="utf-8")
+            from etfagents.agents.utils.rating import parse_rating
+            return parse_rating(text, default="")
+        except (ImportError, AttributeError, OSError):
             return None
 
 
