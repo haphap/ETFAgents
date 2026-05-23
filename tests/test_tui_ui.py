@@ -1,7 +1,5 @@
-import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 try:
     from textual.widgets import Static, ListView, Label
@@ -25,7 +23,6 @@ from cli.tui.services import (
     ReportRepository,
     TickerStarted,
     TickerDone,
-    TickerFailed,
 )
 
 

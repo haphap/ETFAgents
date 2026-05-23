@@ -137,7 +137,7 @@ class ResearchAnalysisScreen(Screen):
         if not tickers_str:
             return
 
-        tickers = [t.strip() for t in tickers_str.split(",") if t.strip()]
+        tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
         self.section_contents.clear()
         self.section_status.clear()
         self.ticker_ids.clear()

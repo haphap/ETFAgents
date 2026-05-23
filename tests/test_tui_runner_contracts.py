@@ -4,10 +4,9 @@ These tests verify that the runner correctly handles streaming,
 cancellation, error recovery, and resource cleanup.
 """
 
-import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from cli.tui.services import (
     AnalysisRunner,
@@ -25,10 +24,6 @@ class _FakeGraph:
     def __init__(self):
         self.closed = False
         self.finalized = False
-        self.initialized = False
-
-    def _ensure_graph_initialized(self):
-        self.initialized = True
 
     def prepare_run(self, ticker, date):
         return {}, {}, False
@@ -79,29 +74,39 @@ class AnalysisRunnerContractTests(unittest.TestCase):
                     self.assertEqual(events[-1].rating, "BUY")
 
     def test_cancel_emits_cancelled_and_stops_processing(self):
-        """request_cancel() must cause remaining tickers to yield TickerCancelled."""
+        """request_cancel() must cause remaining tickers to yield TickerCancelled
+        and must NOT call _make_graph/finalize_run/_save_report for them."""
         runner = AnalysisRunner()
 
         with patch.object(runner, "_make_graph") as mock_make_graph:
-            fake_graph = _FakeGraph()
-            mock_make_graph.return_value = fake_graph
+            with patch.object(runner, "_save_report") as mock_save_report:
+                with patch.object(runner, "_extract_rating_from_report") as mock_rating:
+                    fake_graph = _FakeGraph()
+                    mock_make_graph.return_value = fake_graph
+                    mock_save_report.return_value = Path("/fake/report.md")
+                    mock_rating.return_value = "BUY"
 
-            def fake_stream(init_state, **kwargs):
-                yield {"market_flow_report": "Analysis"}
+                    def fake_stream(init_state, **kwargs):
+                        yield {"market_flow_report": "Analysis"}
 
-            fake_graph.stream = fake_stream
+                    fake_graph.stream = fake_stream
 
-            def cancel_on_second():
-                """Cancel after first ticker."""
-                events = []
-                for event in runner.run_queue(["510300.SH", "159915.SZ"]):
-                    events.append(event)
-                    if isinstance(event, TickerDone):
-                        runner.request_cancel()
-                return events
+                    def cancel_on_second():
+                        """Cancel after first ticker."""
+                        events = []
+                        for event in runner.run_queue(["510300.SH", "159915.SZ"]):
+                            events.append(event)
+                            if isinstance(event, TickerDone):
+                                runner.request_cancel()
+                        return events
 
-            events = cancel_on_second()
-            self.assertTrue(any(isinstance(e, TickerCancelled) for e in events))
+                    events = cancel_on_second()
+                    self.assertTrue(any(isinstance(e, TickerCancelled) for e in events))
+
+                    # _make_graph should only be called once (for the first ticker)
+                    self.assertEqual(mock_make_graph.call_count, 1)
+                    # _save_report should only be called once (for the first ticker)
+                    self.assertEqual(mock_save_report.call_count, 1)
 
     def test_graph_close_run_always_called(self):
         """graph.close_run() must be called in a finally block."""

@@ -543,18 +543,13 @@ class AnalysisRunner:
         graph = None
         try:
             self.states[ticker] = TickerState.RUNNING
-            graph = self._make_graph()
-            graph._ensure_graph_initialized()
+            graph = self._make_graph(selected_analysts)
 
             yield TickerStarted(ticker=ticker, total_sections=len(SECTION_DEFINITIONS))
 
             init_state, args, _ = graph.prepare_run(ticker, analysis_date)
             accumulated = copy.deepcopy(init_state)
 
-            # Merge selected_analysts into config for this run
-            run_config = copy.deepcopy(self.config)
-            if selected_analysts:
-                run_config["selected_analysts"] = selected_analysts
             from cli.report_utils import merge_stream_state
 
             already_done: set[str] = set()
@@ -573,7 +568,12 @@ class AnalysisRunner:
                     completed += 1
                     yield event
 
-            # Finalize and save
+            # Finalize and save (skip if cancelled during stream)
+            if self._cancel_event.is_set():
+                self.states[ticker] = TickerState.CANCELLED
+                yield TickerCancelled(ticker=ticker)
+                return
+
             graph.finalize_run(analysis_date, accumulated)
             report_path = self._save_report(accumulated, ticker, analysis_date)
             rating = self._extract_rating_from_report(report_path)
@@ -601,7 +601,7 @@ class AnalysisRunner:
 
             for det_key in defn.detection_keys:
                 value = self._get_chunk_value(chunk, det_key)
-                if not value:
+                if value is None:
                     continue
 
                 # Determine content and trigger
@@ -646,32 +646,22 @@ class AnalysisRunner:
 
     def _format_research(self, debate: dict) -> str:
         """Format research debate state to Markdown."""
-        parts: list[str] = []
-        if debate.get("bull_history"):
-            parts.append(f"### 多头\n{debate['bull_history']}")
-        if debate.get("bear_history"):
-            parts.append(f"### 空头\n{debate['bear_history']}")
-        if debate.get("judge_decision"):
-            parts.append(f"### 研究经理综合结论\n{debate['judge_decision']}")
-        return "\n\n".join(parts)
+        from cli.main import format_research_team_history
+        return format_research_team_history(debate)
 
     def _format_risk(self, risk: dict) -> str:
         """Format risk debate state to Markdown."""
-        parts: list[str] = []
-        if risk.get("aggressive_history"):
-            parts.append(f"### 激进\n{risk['aggressive_history']}")
-        if risk.get("neutral_history"):
-            parts.append(f"### 中性\n{risk['neutral_history']}")
-        if risk.get("conservative_history"):
-            parts.append(f"### 保守\n{risk['conservative_history']}")
-        if risk.get("judge_decision"):
-            parts.append(f"### 投资组合经理\n{risk['judge_decision']}")
-        return "\n\n".join(parts)
+        from cli.main import format_risk_management_history
+        return format_risk_management_history(risk)
 
-    def _make_graph(self) -> Any:
+    def _make_graph(self, selected_analysts: list[str] | None = None) -> Any:
         """Lazy import and create graph."""
         from etfagents.graph.etf_graph import EtfAgentsGraph
-        return EtfAgentsGraph(config=self.config, debug=False)
+        return EtfAgentsGraph(
+            selected_analysts=selected_analysts,
+            config=self.config,
+            debug=False,
+        )
 
     def _save_report(self, state: dict, ticker: str, analysis_date: str) -> Path:
         """Save complete report to disk."""
