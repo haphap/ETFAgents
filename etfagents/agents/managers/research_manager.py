@@ -211,6 +211,7 @@ Only after the three sections above, append a feedback block in this exact forma
             )
         )
         judge_snapshot_full = extract_feedback_snapshot(normalized_content)
+        visible_decision = strip_feedback_snapshot(normalized_content)
         debate_round = max(1, investment_debate_state.get("count", 0) // 2)
         judge_snapshot_path = save_snapshot_file(
             judge_snapshot_full,
@@ -232,13 +233,13 @@ Only after the three sections above, append a feedback block in this exact forma
         )
 
         new_investment_debate_state = {
-            "judge_decision": normalized_content,
+            "judge_decision": visible_decision,
             "judge_snapshot": judge_snapshot,
             "judge_snapshot_path": judge_snapshot_path,
             "history": investment_debate_state.get("history", ""),
             "bear_history": investment_debate_state.get("bear_history", ""),
             "bull_history": investment_debate_state.get("bull_history", ""),
-            "current_response": strip_feedback_snapshot(normalized_content),
+            "current_response": visible_decision,
             "current_bull_response": investment_debate_state.get("current_bull_response", ""),
             "current_bear_response": investment_debate_state.get("current_bear_response", ""),
             "bull_snapshot": bull_snapshot_display,
@@ -252,7 +253,7 @@ Only after the three sections above, append a feedback block in this exact forma
 
         return with_state_aliases({
             "investment_debate_state": new_investment_debate_state,
-            "research_allocation_plan": normalized_content,
+            "research_allocation_plan": visible_decision,
         })
 
     return research_manager_node

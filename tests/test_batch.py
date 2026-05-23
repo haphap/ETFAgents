@@ -106,6 +106,8 @@ class AnalyzeCandidatePoolCallbackTests(unittest.TestCase):
             "meso_commodity_report": "report",
             "holdings_industry_report": "report",
             "top_holdings_report": "report",
+            "research_allocation_plan": "research",
+            "trader_allocation_plan": "trader",
         }
         _mock_cache_cls.return_value = mock_cache
 
@@ -120,6 +122,39 @@ class AnalyzeCandidatePoolCallbackTests(unittest.TestCase):
         self.assertEqual(len(callbacks), 1)
         self.assertEqual(callbacks[0][0], "510300.SH")
         self.assertNotIsInstance(callbacks[0][3], Exception)
+
+    @patch("etfagents.graph.etf_graph.BacktestSignalStore")
+    @patch.object(EtfAgentsGraph, "propagate")
+    def test_partial_cached_result_is_ignored(self, mock_propagate, _mock_cache_cls):
+        mock_cache = MagicMock()
+        mock_cache.get.return_value = {
+            "ticker": "510300.SH",
+            "rating": "BUY",
+            "score": "4",
+            "market_flow_report": "report",
+            "catalyst_sentiment_report": "report",
+            "macro_regime_report": "report",
+            "meso_commodity_report": "report",
+            "holdings_industry_report": "report",
+            "top_holdings_report": "report",
+        }
+        _mock_cache_cls.return_value = mock_cache
+        mock_propagate.return_value = (
+            {
+                "research_allocation_plan": "fresh research",
+                "trader_allocation_plan": "fresh trader",
+                "final_allocation_decision": "Rating: HOLD",
+            },
+            "HOLD",
+        )
+
+        graph = _make_graph()
+        results = graph.analyze_candidate_pool(["510300.SH"], "2026-05-20")
+
+        mock_propagate.assert_called_once_with("510300.SH", "2026-05-20")
+        self.assertEqual(results[0]["research_allocation_plan"], "fresh research")
+        self.assertEqual(results[0]["trader_allocation_plan"], "fresh trader")
+        self.assertEqual(results[0]["final_allocation_decision"], "Rating: HOLD")
 
     @patch("etfagents.graph.etf_graph.BacktestSignalStore")
     @patch.object(EtfAgentsGraph, "propagate")
