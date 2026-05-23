@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from textual.app import App, ComposeResult
@@ -23,7 +24,9 @@ from textual.widgets import (
 from cli.tui.services import (
     AnalysisEvent,
     AnalysisRunner,
+    BacktestRecord,
     BacktestViewer,
+    BacktestViewModel,
     IdRegistry,
     PaperTradingSnapshot,
     PaperTradingViewModel,
@@ -327,12 +330,179 @@ class ReportLibraryScreen(Screen):
 # ---------------------------------------------------------------------------
 
 class BacktestScreen(Screen):
+    """View existing backtest results.
+
+    Left pane: list of runs + refresh button.
+    Right-top: metrics table + sparkline.
+    Right-bottom: summary markdown.
+    """
+
+    def __init__(self, viewer: BacktestViewer | None = None) -> None:
+        super().__init__()
+        self._viewer = viewer
+        self.records: list[BacktestRecord] = []
+        self.current: BacktestRecord | None = None
+        self._load_count = 0  # Counter for unique IDs across refreshes
+
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with Vertical(classes="screen-body"):
-            yield Static("回测（待实现）", classes="pane-title")
-            yield Static("此功能将在后续版本中完成。", classes="hint")
+        with Horizontal(classes="screen-body"):
+            with Vertical(classes="left-pane"):
+                yield Static("回测结果", classes="pane-title")
+                yield ListView(id="bt_list")
+                yield Button("刷新", id="btn_bt_refresh", variant="primary")
+            with Vertical(classes="right-pane"):
+                with Vertical(classes="right-top"):
+                    yield Static("NAV走势", classes="pane-title")
+                    yield Static("", id="bt_sparkline")
+                    yield DataTable(id="bt_metrics")
+                with Vertical(classes="right-bottom"):
+                    yield Static("摘要", classes="pane-title")
+                    yield Markdown(id="bt_summary")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self._start_loading()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_bt_refresh":
+            self._start_loading()
+
+    async def action_refresh_reports(self) -> None:
+        self._start_loading()
+
+    def _start_loading(self) -> None:
+        self.query_one("#bt_sparkline", Static).update("加载中...")
+        self.run_worker(self._fetch_records, thread=True, exclusive=True)
+
+    def _fetch_records(self) -> None:
+        """Fetch backtest records in a worker thread."""
+        try:
+            # Fallback to default BacktestViewer if none was injected
+            viewer = self._viewer or BacktestViewer()
+            records = viewer.list_results()
+        except Exception as exc:
+            self._safe_call_from_thread(self._show_error, str(exc))
+            return
+        self._safe_call_from_thread(self._apply_records, records)
+
+    def _safe_call_from_thread(self, callback: Any, *args: Any) -> None:
+        """call_from_thread that silently exits if the app is shutting down."""
+        try:
+            if not getattr(self.app, "_running", False):
+                return
+            self.app.call_from_thread(callback, *args)
+        except (RuntimeError, EOFError):
+            pass
+
+    def _apply_records(self, records: list[BacktestRecord]) -> None:
+        """Update UI with loaded records."""
+        self.records = records
+        bt_list = self.query_one("#bt_list", ListView)
+        self._load_count += 1
+
+        # Always clear existing items to avoid duplicates on refresh
+        for item in list(bt_list.children):
+            item.remove()
+
+        if not records:
+            self.query_one("#bt_sparkline", Static).update("暂无回测结果")
+            self.query_one("#bt_metrics", DataTable).clear(columns=True)
+            self.query_one("#bt_summary", Markdown).update("")
+            return
+
+        # Populate list of backtest runs
+        # Use load count to ensure unique IDs across refreshes (avoids DuplicateId errors)
+        for i, record in enumerate(records):
+            tickers_str = ",".join(record.tickers[:2]) + ("…" if len(record.tickers) > 2 else "")
+            ret_str = ""
+            if record.cumulative_return is not None:
+                ret_str = f" {record.cumulative_return:+.1%}"
+            label_text = f"{tickers_str} {record.start_date}~{record.end_date}{ret_str}"
+            bt_list.append(ListItem(
+                Label(label_text),
+                id=f"btr_{self._load_count}_{i}",
+            ))
+
+        # Show first record by default
+        self._show_record(records[0])
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        """Handle backtest record selection."""
+        if event.item.id and event.item.id.startswith("btr_"):
+            try:
+                # ID format: btr_{load_count}_{index}
+                parts = event.item.id[4:].split("_")
+                if len(parts) >= 2:
+                    idx = int(parts[-1])  # Last part is the index
+                    if 0 <= idx < len(self.records):
+                        self._show_record(self.records[idx])
+            except (ValueError, IndexError):
+                pass
+
+    def _show_record(self, record: BacktestRecord) -> None:
+        """Load and display a backtest result."""
+        self.current = record
+        self.run_worker(
+            lambda: self._fetch_detail(record.output_dir),
+            thread=True,
+            exclusive=True,  # Only one detail fetch at a time to avoid stale data races
+        )
+
+    def _fetch_detail(self, output_dir: Path) -> None:
+        """Fetch backtest detail in a worker thread."""
+        try:
+            # Fallback to default BacktestViewer if none was injected
+            viewer = self._viewer or BacktestViewer()
+            vm = viewer.load(output_dir)
+            self._safe_call_from_thread(self._apply_detail, vm)
+        except Exception as exc:
+            self._safe_call_from_thread(self._show_error, str(exc))
+
+    def _apply_detail(self, vm: BacktestViewModel) -> None:
+        """Update UI with backtest details."""
+        # Verify this data is for the currently selected record (avoid stale updates)
+        if self.current is None or vm.output_dir != self.current.output_dir:
+            return
+
+        # Sparkline
+        sparkline_text = vm.sparkline or "─"
+        self.query_one("#bt_sparkline", Static).update(f"[{sparkline_text}]")
+
+        # Metrics table
+        metrics_table = self.query_one("#bt_metrics", DataTable)
+        metrics_table.clear(columns=True)
+        metrics_table.add_columns("指标", "值")
+
+        if vm.metrics and "metrics" in vm.metrics:
+            m = vm.metrics["metrics"]
+            metrics_to_show = [
+                ("累计收益", "cumulative_return"),
+                ("年化收益", "annualized_return"),
+                ("年化波动", "annualized_volatility"),
+                ("最大回撤", "max_drawdown"),
+                ("Sharpe比率", "sharpe_ratio"),
+                ("总交易数", "total_trades"),
+            ]
+            for label, key in metrics_to_show:
+                val = m.get(key)
+                if val is not None:
+                    if isinstance(val, float) and key in ["cumulative_return", "annualized_return", "max_drawdown"]:
+                        val_str = f"{val:+.1%}"
+                    elif isinstance(val, float) and key == "annualized_volatility":
+                        val_str = f"{val:.1%}"
+                    elif isinstance(val, float):
+                        val_str = f"{val:.2f}"
+                    else:
+                        val_str = str(val)
+                    metrics_table.add_row(label, val_str)
+
+        # Summary
+        summary_md = vm.summary or "无摘要"
+        self.query_one("#bt_summary", Markdown).update(summary_md)
+
+    def _show_error(self, error: str) -> None:
+        self.query_one("#bt_sparkline", Static).update(f"加载失败：{error}")
 
 
 # ---------------------------------------------------------------------------
@@ -536,8 +706,15 @@ class ETFAgentsTuiApp(App):
         super().__init__()
         self.report_repository = repository or ReportRepository()
         self.analysis_runner = analysis_runner
-        self.backtest_viewer = backtest_viewer
+        self._backtest_viewer = backtest_viewer
         self.paper_view_model = paper_view_model
+
+    @property
+    def backtest_viewer(self) -> BacktestViewer:
+        """Lazily instantiate BacktestViewer if not injected."""
+        if self._backtest_viewer is None:
+            self._backtest_viewer = BacktestViewer()
+        return self._backtest_viewer
 
     def on_mount(self) -> None:
         self.install_screen(HomeScreen(), name="home")
@@ -552,7 +729,10 @@ class ETFAgentsTuiApp(App):
             ReportLibraryScreen(repository=self.report_repository),
             name="reports",
         )
-        self.install_screen(BacktestScreen(), name="backtest")
+        self.install_screen(
+            BacktestScreen(viewer=self.backtest_viewer),
+            name="backtest",
+        )
         self.install_screen(
             PaperTradingScreen(view_model=self.paper_view_model),
             name="paper",

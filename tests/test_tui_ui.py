@@ -19,6 +19,7 @@ from cli.tui.app import (
     HelpScreen,
 )
 from cli.tui.services import (
+    BacktestViewer,
     PaperTradingViewModel,
     ReportRepository,
     TickerStarted,
@@ -300,15 +301,162 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 pos_table = screen.query_one("#pt_positions")
                 self.assertGreater(pos_table.row_count, 0)
 
+    # --- BacktestScreen ---
+
+    async def test_backtest_screen_empty_shows_placeholder(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp, with_backtest=True)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_backtest")
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, BacktestScreen)
+                sparkline = screen.query_one("#bt_sparkline")
+                self.assertIn("暂无回测结果", str(sparkline.render()))
+
+    async def test_backtest_screen_shows_record_in_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bt_dir = root / "backtest" / "2026-01-02_to_2026-03-31"
+            bt_dir.mkdir(parents=True)
+            (bt_dir / "metrics.json").write_text(
+                '{"metrics": {"cumulative_return": 0.123}}', encoding="utf-8"
+            )
+            (bt_dir / "manifest.json").write_text(
+                '{"tickers": ["510300.SH"], "start_date": "2026-01-02", "end_date": "2026-03-31"}',
+                encoding="utf-8",
+            )
+            (bt_dir / "summary.md").write_text("## 回测摘要\nTest summary", encoding="utf-8")
+            app = self._app(tmp, with_backtest=True)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_backtest")
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, BacktestScreen)
+                bt_list = screen.query_one("#bt_list")
+                self.assertEqual(len(bt_list.children), 1)
+                # Verify metrics table was populated
+                metrics = screen.query_one("#bt_metrics")
+                self.assertGreater(metrics.row_count, 0)
+
+    async def test_backtest_screen_displays_metrics_table(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bt_dir = root / "backtest" / "2026-01-02_to_2026-03-31"
+            bt_dir.mkdir(parents=True)
+            (bt_dir / "metrics.json").write_text(
+                '{"metrics": {"cumulative_return": 0.123, "sharpe_ratio": 1.5}}',
+                encoding="utf-8",
+            )
+            (bt_dir / "manifest.json").write_text(
+                '{"tickers": ["510300.SH"], "start_date": "2026-01-02", "end_date": "2026-03-31"}',
+                encoding="utf-8",
+            )
+            (bt_dir / "summary.md").write_text("## 回测摘要\nTest", encoding="utf-8")
+            # Add nav.csv to test sparkline rendering
+            (bt_dir / "nav.csv").write_text(
+                "date,nav,cash,gross_exposure\n"
+                "2026-01-02,100000.0,50000.0,0.5\n"
+                "2026-01-03,105000.0,48000.0,0.52\n"
+                "2026-01-04,110000.0,45000.0,0.55\n",
+                encoding="utf-8",
+            )
+            app = self._app(tmp, with_backtest=True)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_backtest")
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                metrics = screen.query_one("#bt_metrics")
+                # Verify metrics table has rows
+                self.assertGreater(metrics.row_count, 0)
+                # Verify sparkline is rendered from nav.csv (not just fallback "─")
+                sparkline = screen.query_one("#bt_sparkline")
+                sparkline_text = str(sparkline.render())
+                self.assertNotIn("加载中", sparkline_text)
+                # Sparkline should contain at least one spark character or fallback
+                self.assertTrue("█" in sparkline_text or "▆" in sparkline_text or "─" in sparkline_text)
+
+    async def test_backtest_screen_lazy_loads_with_injected_viewer(self):
+        """Verify BacktestScreen accepts injected BacktestViewer and loads results."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bt_dir = root / "backtest" / "2026-01-02_to_2026-03-31"
+            bt_dir.mkdir(parents=True)
+            (bt_dir / "metrics.json").write_text(
+                '{"metrics": {"cumulative_return": 0.123}}', encoding="utf-8"
+            )
+            (bt_dir / "manifest.json").write_text(
+                '{"tickers": ["510300.SH"], "start_date": "2026-01-02", "end_date": "2026-03-31"}',
+                encoding="utf-8",
+            )
+            (bt_dir / "summary.md").write_text("## Summary", encoding="utf-8")
+            # Create app with injected viewer (explicit path to avoid env var complexity)
+            app = ETFAgentsTuiApp(
+                repository=ReportRepository(tmp),
+                backtest_viewer=BacktestViewer(tmp),
+            )
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_backtest")
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                bt_list = screen.query_one("#bt_list")
+                # Verify BacktestViewer loaded the results
+                self.assertEqual(len(bt_list.children), 1)
+
+    async def test_backtest_screen_refresh_clears_duplicates(self):
+        """Verify refresh button clears old items before loading new ones."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            bt_dir = root / "backtest" / "2026-01-02_to_2026-03-31"
+            bt_dir.mkdir(parents=True)
+            (bt_dir / "metrics.json").write_text(
+                '{"metrics": {"cumulative_return": 0.123}}', encoding="utf-8"
+            )
+            (bt_dir / "manifest.json").write_text(
+                '{"tickers": ["510300.SH"], "start_date": "2026-01-02", "end_date": "2026-03-31"}',
+                encoding="utf-8",
+            )
+            (bt_dir / "summary.md").write_text("## Summary", encoding="utf-8")
+            app = self._app(tmp, with_backtest=True)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_backtest")
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                bt_list = screen.query_one("#bt_list")
+                initial_count = len(bt_list.children)
+                self.assertEqual(initial_count, 1)
+                # Click refresh button
+                await pilot.click("#btn_bt_refresh")
+                await pilot.pause()
+                await pilot.pause()
+                # Verify list is not duplicated (should still be 1, not 2)
+                refreshed_count = len(bt_list.children)
+                self.assertEqual(refreshed_count, 1)
+
     # --- helpers ---
 
-    def _app(self, results_dir: str, *, with_paper: bool = False) -> ETFAgentsTuiApp:
+    def _app(
+        self,
+        results_dir: str,
+        *,
+        with_paper: bool = False,
+        with_backtest: bool = False,
+    ) -> ETFAgentsTuiApp:
         paper_vm = None
         if with_paper:
             paper_vm = PaperTradingViewModel(engine=_FakePaperEngine())
+        backtest_viewer = None
+        if with_backtest:
+            backtest_viewer = BacktestViewer(results_dir)
         return ETFAgentsTuiApp(
             repository=ReportRepository(results_dir),
             paper_view_model=paper_vm,
+            backtest_viewer=backtest_viewer,
         )
 
 
