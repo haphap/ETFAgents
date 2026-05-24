@@ -31,6 +31,7 @@ from cli.tui.app import (
 from cli.tui.services import (
     AnalysisConfig,
     BacktestViewer,
+    DebateProgress,
     PaperTradingViewModel,
     ReportRepository,
     SectionDone,
@@ -176,6 +177,14 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(app.screen.query_one("#btn_backtest"))
                 self.assertIsNotNone(app.screen.query_one("#btn_paper"))
 
+    async def test_home_buttons_render_as_text_nav(self):
+        """Nav buttons should render as text actions, not solid blocks."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                btn = app.screen.query_one("#btn_research", Button)
+                self.assertIn("nav-action", btn.classes)
+
     async def test_home_menu_navigates_to_research_screen(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
@@ -271,7 +280,10 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#ra_ticker_input"))
                 self.assertIsNotNone(screen.query_one("#btn_ra_start"))
 
-    async def test_analysis_run_screen_section_list_has_9_items(self):
+    # --- AnalysisRunScreen: board layout ---
+
+    async def test_analysis_run_board_has_four_columns(self):
+        """Board should have 4 columns: analysts, research, risk, decision."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -284,8 +296,50 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 screen = app.screen
                 self.assertIsInstance(screen, AnalysisRunScreen)
-                sections = screen.query_one("#ra_sections")
-                self.assertEqual(len(sections.children), 9)
+                # All 4 columns present
+                self.assertIsNotNone(screen.query_one("#col_analysts"))
+                self.assertIsNotNone(screen.query_one("#col_research"))
+                self.assertIsNotNone(screen.query_one("#col_risk"))
+                self.assertIsNotNone(screen.query_one("#col_decision"))
+
+    async def test_analysis_run_board_analysts_dual_column(self):
+        """Analyst column should have 6 items in 3x2 grid."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                # 6 analyst buttons
+                from cli.tui.services import ANALYST_KEYS
+                for key in ANALYST_KEYS:
+                    self.assertIsNotNone(screen.query_one(f"#rsec-{key}", Button))
+
+    async def test_analysis_run_board_follows_selected_analysts(self):
+        """Board should only show selected analysts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _FakeAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(selected_analysts=["market_flow"]),
+                    runner=runner,
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                # market_flow should be present
+                self.assertIsNotNone(screen.query_one("#rsec-market_flow", Button))
+                # macro_regime should NOT be present
+                results = screen.query("#rsec-macro_regime")
+                self.assertEqual(len(results), 0)
 
     async def test_analysis_run_ticker_status_updates(self):
         """Verify ticker status changes from ⏳ → ✓/✗ when events fire."""
@@ -386,61 +440,157 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(runner.calls[0][0], ["510300.SH"])
                 self.assertEqual(runner.calls[0][2], ["market_flow"])
 
-    async def test_analysis_run_sections_follow_selected_analysts(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            runner = _FakeAnalysisRunner()
-            app = self._app(tmp, analysis_runner=runner)
-            async with app.run_test(size=(140, 40)) as pilot:
-                app.push_screen(AnalysisRunScreen(
-                    ["510300.SH"],
-                    AnalysisConfig(selected_analysts=["market_flow"]),
-                    runner=runner,
-                    repository=ReportRepository(tmp),
-                ))
-                await pilot.pause()
-                screen = app.screen
-                self.assertIsInstance(screen, AnalysisRunScreen)
-                sections = screen.query_one("#ra_sections", ListView)
-                self.assertEqual(len(sections.children), 4)
-                labels = [str(item.query_one(Label).render()) for item in sections.children]
-                self.assertIn("分析师 / 市场与资金流", labels)
-                self.assertNotIn("分析师 / 宏观框架", labels)
+    # --- Board item click shows report ---
 
-    # --- BacktestScreen (M4: has run inputs) ---
-
-    async def test_backtest_screen_has_run_inputs(self):
-        """BacktestScreen M4 should have ticker/date inputs and a run button."""
+    async def test_analysis_run_board_item_click_shows_report(self):
+        """Clicking a board item button should show section report in body."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
-            async with app.run_test(size=(140, 40)) as pilot:
-                await pilot.click("#btn_backtest")
-                screen = app.screen
-                self.assertIsInstance(screen, BacktestScreen)
-                self.assertIsNotNone(screen.query_one("#bt_run_tickers"))
-                self.assertIsNotNone(screen.query_one("#bt_run_start"))
-                self.assertIsNotNone(screen.query_one("#bt_run_end"))
-                self.assertIsNotNone(screen.query_one("#btn_bt_run"))
-
-    # --- AnalysisRunScreen M4: cancel button ---
-
-    async def test_analysis_run_cancel_button_enables_while_running(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            runner = _BlockingAnalysisRunner()
-            app = self._app(tmp, analysis_runner=runner)
             async with app.run_test(size=(140, 40)) as pilot:
                 app.push_screen(AnalysisRunScreen(
                     ["510300.SH"],
                     AnalysisConfig(),
-                    runner=runner,
+                    runner=_FakeAnalysisRunner(),
                     repository=ReportRepository(tmp),
                 ))
                 await pilot.pause()
                 screen = app.screen
                 self.assertIsInstance(screen, AnalysisRunScreen)
-                cancel = screen.query_one("#btn_ra_cancel", Button)
-                self.assertFalse(cancel.disabled)
-                screen._cancel_analysis()
-                self.assertTrue(runner.cancel_requested)
+                screen._handle_section_done(SectionDone(
+                    ticker="510300.SH",
+                    section_id="market_flow",
+                    content="市场资金流报告正文",
+                    completed=1,
+                    total=9,
+                ))
+                await pilot.pause()
+                # Click the market_flow board item
+                await pilot.click("#rsec-market_flow")
+                await pilot.pause()
+                self.assertIn("市场与资金流", str(screen.query_one("#ra_body_title", Static).render()))
+                self.assertIn("市场资金流报告正文", screen.query_one("#ra_body")._markdown)
+
+    # --- Board state updates ---
+
+    async def test_analysis_run_board_updates_on_section_done(self):
+        """SectionDone should update board item icon and column header."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+
+                # Fire a section done for an analyst (instant done)
+                screen._handle_section_done(SectionDone(
+                    ticker="510300.SH",
+                    section_id="market_flow",
+                    content="report content",
+                    completed=1,
+                    total=9,
+                ))
+                await pilot.pause()
+
+                # Board item should show ✔
+                btn = screen.query_one("#rsec-market_flow", Button)
+                self.assertIn("✔", str(btn.label))
+                # Column header should show 1/6
+                header = screen.query_one("#col_analysts_header", Static)
+                self.assertIn("1/6", str(header.render()))
+
+    # --- Debate progress ---
+
+    async def test_analysis_run_debate_progress_updates_bar(self):
+        """DebateProgress should update progress bar in research/risk columns."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+
+                # Simulate debate progress
+                screen._handle_debate_progress(DebateProgress(
+                    ticker="510300.SH",
+                    section_id="research",
+                    current_round=2,
+                    max_rounds=3,
+                ))
+                await pilot.pause()
+
+                # Check progress bar content
+                progress = screen.query_one("#research_progress", Static)
+                rendered = str(progress.render())
+                self.assertIn("2/3", rendered)
+
+    async def test_analysis_run_risk_debate_progress(self):
+        """Risk debate progress should update risk column."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+
+                # Simulate risk debate progress reaching max
+                screen._handle_debate_progress(DebateProgress(
+                    ticker="510300.SH",
+                    section_id="risk_debate",
+                    current_round=1,
+                    max_rounds=1,
+                ))
+                await pilot.pause()
+
+                # Risk item should be done
+                btn = screen.query_one("#rsec-risk_debate", Button)
+                self.assertIn("✔", str(btn.label))
+
+    # --- Stats bar ---
+
+    async def test_analysis_run_shows_cli_runtime_stats_bar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_FakeAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                stats_bar = str(screen.query_one("#ra_stats_bar", Static).render())
+                self.assertIn("Agents", stats_bar)
+                self.assertIn("Agent", stats_bar)
+                self.assertIn("LLM 2", stats_bar)
+                self.assertIn("Tools 3", stats_bar)
+                self.assertIn("Tokens 1.2k", stats_bar)
+                self.assertIn("Reports", stats_bar)
+                stats_widget = screen.query_one("#ra_stats_bar", Static)
+                self.assertGreater(stats_widget.size.height, 0)
+                screenshot = app.export_screenshot()
+                self.assertIn("Agents", screenshot)
+                self.assertIn("LLM", screenshot)
 
     async def test_analysis_run_body_defaults_to_overall_progress(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -474,60 +624,70 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(screen, AnalysisRunScreen)
                 self.assertIsInstance(screen.query_one("#ra_body_scroll"), VerticalScroll)
 
-    async def test_analysis_run_shows_cli_runtime_stats_bar(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            app = self._app(tmp)
-            async with app.run_test(size=(140, 40)) as pilot:
-                app.push_screen(AnalysisRunScreen(
-                    ["510300.SH"],
-                    AnalysisConfig(),
-                    runner=_FakeAnalysisRunner(),
-                    repository=ReportRepository(tmp),
-                ))
-                await pilot.pause()
-                await pilot.pause()
-                screen = app.screen
-                self.assertIsInstance(screen, AnalysisRunScreen)
-                stats_bar = str(screen.query_one("#ra_stats_bar", Static).render())
-                self.assertIn("Agents", stats_bar)
-                self.assertIn("Agent", stats_bar)
-                self.assertIn("LLM 2", stats_bar)
-                self.assertIn("Tools 3", stats_bar)
-                self.assertIn("Tokens 1.2k", stats_bar)
-                self.assertIn("Reports", stats_bar)
-                stats_widget = screen.query_one("#ra_stats_bar", Static)
-                self.assertGreater(stats_widget.size.height, 0)
-                screenshot = app.export_screenshot()
-                self.assertIn("Agents", screenshot)
-                self.assertIn("LLM", screenshot)
+    # --- Active column highlighting ---
 
-    async def test_analysis_run_section_click_switches_to_report_or_progress(self):
+    async def test_analysis_run_active_column_highlighted(self):
+        """Active column should have column-active class."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
                 app.push_screen(AnalysisRunScreen(
                     ["510300.SH"],
                     AnalysisConfig(),
-                    runner=_FakeAnalysisRunner(),
+                    runner=_NoopAnalysisRunner(),
                     repository=ReportRepository(tmp),
                 ))
                 await pilot.pause()
                 screen = app.screen
-                self.assertIsInstance(screen, AnalysisRunScreen)
+                screen.current_ticker = "510300.SH"
+
                 screen._handle_section_done(SectionDone(
                     ticker="510300.SH",
                     section_id="market_flow",
-                    content="市场资金流报告正文",
+                    content="report",
                     completed=1,
                     total=9,
                 ))
                 await pilot.pause()
-                sections = screen.query_one("#ra_sections", ListView)
-                event = ListView.Selected(sections, sections.children[0], 0)
-                screen.on_list_view_selected(event)
+
+                col = screen.query_one("#col_analysts")
+                self.assertIn("column-active", col.classes)
+
+    # --- BacktestScreen ---
+
+    async def test_backtest_screen_has_run_inputs(self):
+        """BacktestScreen should have ticker/date inputs and a run button."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_backtest")
+                screen = app.screen
+                self.assertIsInstance(screen, BacktestScreen)
+                self.assertIsNotNone(screen.query_one("#bt_run_tickers"))
+                self.assertIsNotNone(screen.query_one("#bt_run_start"))
+                self.assertIsNotNone(screen.query_one("#bt_run_end"))
+                self.assertIsNotNone(screen.query_one("#btn_bt_run"))
+
+    # --- AnalysisRunScreen: cancel button ---
+
+    async def test_analysis_run_cancel_button_enables_while_running(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _BlockingAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=runner,
+                    repository=ReportRepository(tmp),
+                ))
                 await pilot.pause()
-                self.assertIn("市场与资金流", str(screen.query_one("#ra_body_title", Static).render()))
-                self.assertIn("市场资金流报告正文", screen.query_one("#ra_body")._markdown)
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                cancel = screen.query_one("#btn_ra_cancel", Button)
+                self.assertFalse(cancel.disabled)
+                screen._cancel_analysis()
+                self.assertTrue(runner.cancel_requested)
 
     # --- SettingsScreen ---
 
@@ -549,7 +709,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#sel_panel_width"))
                 self.assertIsNotNone(screen.query_one("#btn_settings_save"))
 
-    # --- PaperTradingScreen M4: buy/sell/login buttons ---
+    # --- PaperTradingScreen ---
 
     async def test_paper_screen_has_buy_sell_login_buttons(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -561,8 +721,6 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#btn_pt_logout"))
                 self.assertIsNotNone(screen.query_one("#btn_pt_buy"))
                 self.assertIsNotNone(screen.query_one("#btn_pt_sell"))
-
-    # --- PaperTradingScreen ---
 
     async def test_paper_trading_shows_account(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -984,6 +1142,21 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         from cli.tui.app import OrderModal as _OrderModal
         src = inspect.getsource(_OrderModal.on_button_pressed)
         self.assertIn("exclusive=True", src)
+
+    # --- DebateProgress event unit test ---
+
+    def test_debate_progress_event_fields(self):
+        """DebateProgress should carry expected fields."""
+        dp = DebateProgress(
+            ticker="510300.SH",
+            section_id="research",
+            current_round=2,
+            max_rounds=3,
+        )
+        self.assertEqual(dp.ticker, "510300.SH")
+        self.assertEqual(dp.section_id, "research")
+        self.assertEqual(dp.current_round, 2)
+        self.assertEqual(dp.max_rounds, 3)
 
     # --- helpers ---
 

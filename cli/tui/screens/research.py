@@ -25,15 +25,18 @@ from textual.widgets import (
 )
 
 from cli.tui.services import (
+    ANALYST_KEYS,
     AnalysisConfig,
     AnalysisEvent,
     AnalysisRunner,
+    DebateProgress,
     IdRegistry,
     RESEARCH_DEPTH_REQUIREMENTS,
     ReportRepository,
     SECTION_BY_ID,
     SECTION_DEFINITIONS,
     SectionDone,
+    SectionDef,
     TickerCancelled,
     TickerDone,
     TickerFailed,
@@ -61,6 +64,9 @@ LLM_PROVIDER_OPTIONS: list[tuple[str, str, str | None]] = [
 LLM_PROVIDER_ENDPOINTS = {
     provider: endpoint for _, provider, endpoint in LLM_PROVIDER_OPTIONS
 }
+
+# Sections that complete on first SectionDone (non-debate, single-shot)
+_INSTANT_DONE_SECTIONS = set(ANALYST_KEYS) | {"trader"}
 
 
 def _depth_option_label(depth_name: str) -> str:
@@ -148,6 +154,14 @@ def _apply_provider_model_defaults(
         config["deep_think_llm"] = deep_model
 
 
+def _debate_progress_bar(current: int, total: int) -> str:
+    """Build ▓▓░ progress bar string."""
+    if total <= 0:
+        return ""
+    filled = min(current, total)
+    return "▓" * filled + "░" * (total - filled) + f" {current}/{total}"
+
+
 # ---------------------------------------------------------------------------
 # AnalysisConfigModal
 # ---------------------------------------------------------------------------
@@ -157,27 +171,29 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
 
     DEFAULT_CSS = """
     AnalysisConfigModal { align: center middle; }
-    #acm_container { width: 82; height: auto; max-height: 46; border: thick $accent; background: $surface; padding: 1 2; }
+    #acm_container { width: 88; height: auto; max-height: 46; border: solid $accent; background: $surface; padding: 1 2; }
     #acm_container .acm-row { height: auto; margin: 0; }
     #acm_container .acm-col { width: 1fr; height: auto; margin-right: 1; }
     #acm_container Static { height: 1; margin: 0; }
     #acm_container Checkbox { height: 1; margin: 0; }
-    #acm_container Button { margin: 0 1 0 0; }
     #acm_container Select { margin: 0 0 1 0; }
+    #acm_container .analyst-grid { layout: grid; grid-size: 3 2; grid-gutter: 0 1; height: auto; }
+    #acm_container .text-action { margin: 0 1 0 0; }
     """
 
     def compose(self) -> ComposeResult:
         with Vertical(id="acm_container"):
             yield Static("分析配置", classes="pane-title")
             yield Static("选择分析师:")
-            for defn in SECTION_DEFINITIONS:
-                if defn.team == "分析师":
-                    yield Checkbox(
-                        defn.title,
-                        value=True,
-                        id=f"acm_cb_{defn.section_id}",
-                        compact=True,
-                    )
+            with Vertical(classes="analyst-grid"):
+                for defn in SECTION_DEFINITIONS:
+                    if defn.team == "分析师":
+                        yield Checkbox(
+                            defn.title,
+                            value=True,
+                            id=f"acm_cb_{defn.section_id}",
+                            compact=True,
+                        )
             with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
                     yield Static("研究深度:")
@@ -204,12 +220,11 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
             deep_options = _model_select_options("openai", "deep")
             yield Select(deep_options, value=deep_options[0][1], id="acm_deep_model")
             with Horizontal(classes="acm-row"):
-                yield Button("确定", id="btn_acm_ok", variant="primary")
-                yield Button("取消", id="btn_acm_cancel")
+                yield Button("› Confirm", id="btn_acm_ok", classes="text-action")
+                yield Button("Cancel", id="btn_acm_cancel", classes="text-action muted")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_acm_ok":
-            from cli.tui.services import ANALYST_KEYS
             selected = [
                 k for k in ANALYST_KEYS
                 if self._checkbox_checked(f"acm_cb_{k}")
@@ -268,15 +283,19 @@ class ResearchAnalysisScreen(Screen):
         yield Header(show_clock=True)
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane"):
-                yield Static("研究分析", classes="pane-title")
-                yield Static("输入 ETF 代码（逗号分隔）:", id="ra_label")
-                yield Input(id="ra_ticker_input")
-                yield Button("开始分析", id="btn_ra_start", variant="primary")
+                yield Static("Create Run", classes="pane-title")
+                yield Static("ETF tickers:")
+                yield Input(placeholder="510300.SH,159915.SZ", id="ra_ticker_input")
+                yield Button("› Start Analysis", id="btn_ra_start", classes="text-action")
             with Vertical(classes="right-pane"):
-                yield Markdown(
-                    "点击开始分析后进入运行页。运行页左侧显示 ETF 状态，右上显示团队，右下显示整体进度或选中团队报告。",
-                    id="ra_intro",
-                )
+                with Vertical(classes="right-top"):
+                    yield Static("Run Brief", classes="pane-title")
+                    yield Markdown(
+                        "1. Enter ETF tickers\n"
+                        "2. Select analysts, provider, models\n"
+                        "3. Track each team output in board",
+                        id="ra_intro",
+                    )
         yield Footer()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -312,15 +331,15 @@ class ResearchAnalysisScreen(Screen):
 
 
 # ---------------------------------------------------------------------------
-# AnalysisRunScreen
+# AnalysisRunScreen — 4-column kanban board
 # ---------------------------------------------------------------------------
 
 class AnalysisRunScreen(Screen):
-    """Run ETF analysis and stream results in real-time.
+    """Run ETF analysis with a 4-column kanban board.
 
-    Left pane: ETF queue/status.
-    Right-top: team list.
-    Right-bottom: overall progress or selected team report.
+    Left pane: ETF queue/status + config summary.
+    Right-top: board columns (分析团队 | 研究 | 风险 | 决策).
+    Right-bottom: overall progress or selected section report.
     """
 
     def __init__(
@@ -339,6 +358,11 @@ class AnalysisRunScreen(Screen):
         self.ticker_ids = IdRegistry("rtk")
         self.section_contents: dict[tuple[str, str], str] = {}
         self.section_status: dict[tuple[str, str], bool] = {}
+        # Board state: (ticker, section_id) -> "pending" | "running" | "done" | "failed"
+        self._board_state: dict[tuple[str, str], str] = {}
+        # Debate progress: section_id -> (current_round, max_rounds)
+        self._debate_rounds: dict[str, tuple[int, int]] = {}
+        self._active_column: str = ""
         self.current_ticker: str | None = None
         self.current_section: str | None = None
         self._analysis_thread: threading.Thread | None = None
@@ -347,19 +371,91 @@ class AnalysisRunScreen(Screen):
         self._last_stats: dict[str, Any] = {}
 
     def compose(self) -> ComposeResult:
+        defs = self._section_definitions()
+        analyst_defs = [d for d in defs if d.team == "分析师"]
+        research_defs = [d for d in defs if d.section_id == "research"]
+        trader_defs = [d for d in defs if d.section_id == "trader"]
+        pm_defs = [d for d in defs if d.section_id == "portfolio_manager"]
+        decision_count = len(trader_defs) + len(pm_defs)
+
         yield Header(show_clock=True)
         with Vertical(classes="run-layout"):
             with Horizontal(classes="screen-body run-main"):
                 with Vertical(classes="left-pane"):
-                    yield Static("ETF 信息", classes="pane-title")
+                    yield Static("ETF Queue", classes="pane-title")
                     yield Static(self._config_summary(), id="ra_run_config")
-                    yield Button("取消", id="btn_ra_cancel", variant="warning", disabled=True)
-                    yield Static("分析队列", classes="pane-title")
+                    yield Button("Cancel", id="btn_ra_cancel", classes="text-action warning-text", disabled=True)
                     yield ListView(id="ra_queue")
                 with Vertical(classes="right-pane"):
-                    with Vertical(classes="right-top"):
-                        yield Static("团队", classes="pane-title")
-                        yield ListView(id="ra_sections")
+                    # Board (right-top) — replaces old ListView #ra_sections
+                    with Horizontal(classes="right-top", id="ra_sections"):
+                        # Column 1: Analysts (wide)
+                        with Vertical(classes="board-column column-inactive board-col-wide", id="col_analysts"):
+                            yield Static(
+                                f"分析团队 (0/{len(analyst_defs)})",
+                                id="col_analysts_header",
+                                classes="column-header",
+                            )
+                            for i in range(0, len(analyst_defs), 2):
+                                with Horizontal(classes="board-row"):
+                                    yield Button(
+                                        f"○ {analyst_defs[i].title}",
+                                        id=f"rsec-{analyst_defs[i].section_id}",
+                                        classes="board-item",
+                                    )
+                                    if i + 1 < len(analyst_defs):
+                                        yield Button(
+                                            f"○ {analyst_defs[i + 1].title}",
+                                            id=f"rsec-{analyst_defs[i + 1].section_id}",
+                                            classes="board-item",
+                                        )
+                        # Column 2: Research
+                        if research_defs:
+                            with Vertical(classes="board-column column-inactive", id="col_research"):
+                                yield Static(
+                                    "研究 (0/1)",
+                                    id="col_research_header",
+                                    classes="column-header",
+                                )
+                                yield Button(
+                                    "○ 研究团队",
+                                    id="rsec-research",
+                                    classes="board-item",
+                                )
+                                yield Static("", id="research_progress", classes="debate-progress")
+                        # Column 3: Risk (synthetic)
+                        with Vertical(classes="board-column column-inactive", id="col_risk"):
+                            yield Static(
+                                "风险 (0/1)",
+                                id="col_risk_header",
+                                classes="column-header",
+                            )
+                            yield Button(
+                                "○ 风险辩论",
+                                id="rsec-risk_debate",
+                                classes="board-item",
+                            )
+                            yield Static("", id="risk_progress", classes="debate-progress")
+                        # Column 4: Decision
+                        with Vertical(classes="board-column column-inactive", id="col_decision"):
+                            yield Static(
+                                f"决策 (0/{decision_count})",
+                                id="col_decision_header",
+                                classes="column-header",
+                            )
+                            if trader_defs:
+                                yield Button(
+                                    "○ 交易员",
+                                    id="rsec-trader",
+                                    classes="board-item",
+                                )
+                            if pm_defs:
+                                yield Button(
+                                    "○ PM",
+                                    id="rsec-portfolio_manager",
+                                    classes="board-item",
+                                )
+                    # Report body (right-bottom)
                     with Vertical(classes="right-bottom"):
                         yield Static("整体进度", id="ra_body_title", classes="pane-title")
                         with VerticalScroll(id="ra_body_scroll"):
@@ -368,26 +464,24 @@ class AnalysisRunScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
-        sections = self.query_one("#ra_sections", ListView)
-        for defn in self._section_definitions():
-            sections.append(ListItem(
-                Label(f"{defn.team} / {defn.title}"),
-                id=f"rsec-{defn.section_id}",
-            ))
         self._start_analysis()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn_ra_cancel":
+        btn_id = event.button.id or ""
+        if btn_id == "btn_ra_cancel":
             self._cancel_analysis()
+        elif btn_id.startswith("rsec-"):
+            section_id = btn_id[5:]
+            self.current_section = section_id
+            self._refresh_body()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         item_id = event.item.id or ""
-        if item_id.startswith("rsec-"):
-            self.current_section = item_id[5:]
-            self._refresh_body()
-        elif item_id in self.ticker_ids:
+        if item_id in self.ticker_ids:
             self.current_ticker = self.ticker_ids.resolve(item_id)
             self._refresh_body()
+
+    # --- Analysis lifecycle ---
 
     def _start_analysis(self) -> None:
         if not self.tickers:
@@ -395,6 +489,9 @@ class AnalysisRunScreen(Screen):
 
         self.section_contents.clear()
         self.section_status.clear()
+        self._board_state.clear()
+        self._debate_rounds.clear()
+        self._active_column = ""
         self.ticker_ids.clear()
         self.progress_lines.clear()
         self.current_ticker = self.tickers[0]
@@ -424,10 +521,10 @@ class AnalysisRunScreen(Screen):
         cfg = self._analysis_config
         return (
             f"ETF: {', '.join(self.tickers)}\n"
-            f"研究深度: {_depth_option_label(cfg.depth_name)}\n"
-            f"Provider: {cfg.llm_provider}\n"
-            f"快速模型: {cfg.quick_model or '默认'}\n"
-            f"深度模型: {cfg.deep_model or '默认'}"
+            f"depth: {_depth_option_label(cfg.depth_name)}\n"
+            f"provider: {cfg.llm_provider}\n"
+            f"quick: {cfg.quick_model or 'default'}\n"
+            f"deep: {cfg.deep_model or 'default'}"
         )
 
     def _cancel_analysis(self) -> None:
@@ -461,12 +558,16 @@ class AnalysisRunScreen(Screen):
         except Exception:
             pass
 
+    # --- Event dispatch ---
+
     def _apply_event(self, event: AnalysisEvent) -> None:
         """UI thread: handle event."""
         if isinstance(event, TickerStarted):
             self._handle_ticker_started(event)
         elif isinstance(event, SectionDone):
             self._handle_section_done(event)
+        elif isinstance(event, DebateProgress):
+            self._handle_debate_progress(event)
         elif isinstance(event, TickerDone):
             self._handle_ticker_done(event)
         elif isinstance(event, TickerFailed):
@@ -486,9 +587,33 @@ class AnalysisRunScreen(Screen):
     def _handle_section_done(self, event: SectionDone) -> None:
         self.section_contents[(event.ticker, event.section_id)] = event.content
         self.section_status[(event.ticker, event.section_id)] = True
+
+        # Update board state
+        if event.section_id in _INSTANT_DONE_SECTIONS:
+            self._board_state[(event.ticker, event.section_id)] = "done"
+        else:
+            cur = self._board_state.get((event.ticker, event.section_id))
+            if cur != "done":
+                self._board_state[(event.ticker, event.section_id)] = "running"
+
         title = SECTION_BY_ID.get(event.section_id).title if event.section_id in SECTION_BY_ID else event.section_id
         self._append_progress(f"{event.ticker}: {title} 已更新 ({event.completed}/{event.total})")
+        self._set_active_column(event.section_id)
+        self._refresh_board()
         self._refresh_body()
+
+    def _handle_debate_progress(self, event: DebateProgress) -> None:
+        self._debate_rounds[event.section_id] = (event.current_round, event.max_rounds)
+
+        # Update risk_debate board state
+        if event.section_id == "risk_debate":
+            key = (event.ticker, "risk_debate")
+            if event.current_round >= event.max_rounds:
+                self._board_state[key] = "done"
+            elif event.current_round > 0:
+                self._board_state[key] = "running"
+
+        self._refresh_board()
 
     def _handle_ticker_done(self, event: TickerDone) -> None:
         ticker_id = self.ticker_ids.register(event.ticker)
@@ -499,8 +624,15 @@ class AnalysisRunScreen(Screen):
             label.update(f"✓ {event.ticker}{rating_str}")
         except Exception:
             pass
+
+        # Mark all sections as done for this ticker
+        for defn in self._section_definitions():
+            self._board_state[(event.ticker, defn.section_id)] = "done"
+        self._board_state[(event.ticker, "risk_debate")] = "done"
+
         self.repository.invalidate()
         self._append_progress(f"{event.ticker}: 分析完成{rating_str}")
+        self._refresh_board()
 
     def _handle_ticker_failed(self, event: TickerFailed) -> None:
         ticker_id = self.ticker_ids.register(event.ticker)
@@ -510,7 +642,18 @@ class AnalysisRunScreen(Screen):
             label.update(f"✗ {event.ticker}")
         except Exception:
             pass
+
+        # Mark pending sections as failed
+        for defn in self._section_definitions():
+            key = (event.ticker, defn.section_id)
+            if self._board_state.get(key, "pending") == "pending":
+                self._board_state[key] = "failed"
+        risk_key = (event.ticker, "risk_debate")
+        if self._board_state.get(risk_key, "pending") == "pending":
+            self._board_state[risk_key] = "failed"
+
         self._append_progress(f"{event.ticker}: 分析失败 - {event.error}")
+        self._refresh_board()
 
     def _handle_ticker_cancelled(self, event: TickerCancelled) -> None:
         ticker_id = self.ticker_ids.register(event.ticker)
@@ -522,6 +665,127 @@ class AnalysisRunScreen(Screen):
             pass
         self._append_progress(f"{event.ticker}: 已取消")
 
+    # --- Board refresh ---
+
+    def _set_active_column(self, section_id: str) -> None:
+        if section_id in ANALYST_KEYS:
+            self._active_column = "col_analysts"
+        elif section_id == "research":
+            self._active_column = "col_research"
+        elif section_id == "risk_debate":
+            self._active_column = "col_risk"
+        elif section_id in ("trader", "portfolio_manager"):
+            self._active_column = "col_decision"
+
+    def _refresh_board(self) -> None:
+        """Update board item labels, column headers, progress bars, and active column."""
+        ticker = self.current_ticker
+        if not ticker:
+            return
+
+        defs = self._section_definitions()
+        analyst_defs = [d for d in defs if d.team == "分析师"]
+        research_defs = [d for d in defs if d.section_id == "research"]
+        trader_defs = [d for d in defs if d.section_id == "trader"]
+        pm_defs = [d for d in defs if d.section_id == "portfolio_manager"]
+
+        _STATUS_ICONS = {"pending": "○", "running": "▒", "done": "✔", "failed": "✘"}
+
+        # Update each board item
+        for defn in defs:
+            state = self._board_state.get((ticker, defn.section_id), "pending")
+            icon = _STATUS_ICONS.get(state, "○")
+            try:
+                btn = self.query_one(f"#rsec-{defn.section_id}", Button)
+                btn.label = f"{icon} {defn.title}"
+                btn.remove_class("board-item-done", "board-item-failed")
+                if state == "done":
+                    btn.add_class("board-item-done")
+                elif state == "failed":
+                    btn.add_class("board-item-failed")
+            except Exception:
+                pass
+
+        # Risk debate item
+        risk_state = self._board_state.get((ticker, "risk_debate"), "pending")
+        risk_icon = _STATUS_ICONS.get(risk_state, "○")
+        try:
+            btn = self.query_one("#rsec-risk_debate", Button)
+            btn.label = f"{risk_icon} 风险辩论"
+            btn.remove_class("board-item-done", "board-item-failed")
+            if risk_state == "done":
+                btn.add_class("board-item-done")
+            elif risk_state == "failed":
+                btn.add_class("board-item-failed")
+        except Exception:
+            pass
+
+        # Column headers with counts
+        def _done_count(section_ids: list[str]) -> int:
+            return sum(
+                1 for sid in section_ids
+                if self._board_state.get((ticker, sid)) == "done"
+            )
+
+        analyst_ids = [d.section_id for d in analyst_defs]
+        try:
+            self.query_one("#col_analysts_header", Static).update(
+                f"分析团队 ({_done_count(analyst_ids)}/{len(analyst_ids)})"
+            )
+        except Exception:
+            pass
+
+        if research_defs:
+            try:
+                self.query_one("#col_research_header", Static).update(
+                    f"研究 ({_done_count(['research'])}/1)"
+                )
+            except Exception:
+                pass
+
+        try:
+            self.query_one("#col_risk_header", Static).update(
+                f"风险 ({_done_count(['risk_debate'])}/1)"
+            )
+        except Exception:
+            pass
+
+        decision_ids = [d.section_id for d in trader_defs + pm_defs]
+        try:
+            self.query_one("#col_decision_header", Static).update(
+                f"决策 ({_done_count(decision_ids)}/{len(decision_ids)})"
+            )
+        except Exception:
+            pass
+
+        # Debate progress bars
+        for prog_id, debate_key in [("research_progress", "research"), ("risk_progress", "risk_debate")]:
+            rounds = self._debate_rounds.get(debate_key)
+            try:
+                widget = self.query_one(f"#{prog_id}", Static)
+                if rounds:
+                    widget.update(_debate_progress_bar(rounds[0], rounds[1]))
+                else:
+                    widget.update("")
+            except Exception:
+                pass
+
+        # Active column highlighting
+        col_ids = ["col_analysts", "col_research", "col_risk", "col_decision"]
+        for col_id in col_ids:
+            try:
+                col = self.query_one(f"#{col_id}")
+                if col_id == self._active_column:
+                    col.remove_class("column-inactive")
+                    col.add_class("column-active")
+                else:
+                    col.remove_class("column-active")
+                    col.add_class("column-inactive")
+            except Exception:
+                pass
+
+    # --- Body refresh ---
+
     def _refresh_body(self) -> None:
         if not self.current_ticker:
             self.query_one("#ra_body", Markdown).update("请选择一个 ticker。")
@@ -530,6 +794,23 @@ class AnalysisRunScreen(Screen):
             self.query_one("#ra_body_title", Static).update("整体进度")
             self.query_one("#ra_body", Markdown).update(self._progress_markdown())
             return
+
+        # risk_debate is synthetic — show PM content or status
+        if self.current_section == "risk_debate":
+            self.query_one("#ra_body_title", Static).update("风险辩论")
+            content = self.section_contents.get((self.current_ticker, "portfolio_manager"))
+            if content:
+                self.query_one("#ra_body", Markdown).update(content)
+            else:
+                rounds = self._debate_rounds.get("risk_debate")
+                if rounds:
+                    self.query_one("#ra_body", Markdown).update(
+                        f"风险辩论进行中 {_debate_progress_bar(rounds[0], rounds[1])}"
+                    )
+                else:
+                    self.query_one("#ra_body", Markdown).update("风险辩论尚未开始。")
+            return
+
         content = self.section_contents.get((self.current_ticker, self.current_section))
         title = SECTION_BY_ID.get(self.current_section).title if self.current_section in SECTION_BY_ID else self.current_section
         self.query_one("#ra_body_title", Static).update(str(title))
@@ -551,6 +832,8 @@ class AnalysisRunScreen(Screen):
 
     def _progress_markdown(self) -> str:
         return "\n".join(f"- {line}" for line in self.progress_lines) or "等待分析事件。"
+
+    # --- Stats bar ---
 
     def _refresh_stats_bar(self) -> None:
         try:
@@ -604,7 +887,7 @@ class AnalysisRunScreen(Screen):
                     return section.title
         return "等待"
 
-    def _section_definitions(self) -> tuple[Any, ...]:
+    def _section_definitions(self) -> tuple[SectionDef, ...]:
         return section_definitions_for(self._analysis_config.selected_analysts)
 
     def _elapsed_text(self) -> str:

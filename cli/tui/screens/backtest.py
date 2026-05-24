@@ -36,10 +36,10 @@ from cli.tui.screens.research import _safe_call_from_thread
 
 
 class BacktestScreen(Screen):
-    """View existing backtest results and run new backtests.
+    """Runs / New Test + Performance Board layout.
 
-    Left pane: list of runs + refresh button + run inputs.
-    Right-top: metrics table + sparkline.
+    Left pane: recent runs list + new backtest form.
+    Right-top: NAV sparkline + metrics summary.
     Right-bottom: summary markdown.
     """
 
@@ -55,22 +55,22 @@ class BacktestScreen(Screen):
         yield Header(show_clock=True)
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane"):
-                yield Static("回测结果", classes="pane-title")
+                yield Static("Runs", classes="pane-title")
                 yield ListView(id="bt_list")
-                yield Button("刷新", id="btn_bt_refresh", variant="primary")
-                yield Static("运行新回测", classes="pane-title")
+                yield Button("Refresh", id="btn_bt_refresh", classes="text-action")
+                yield Static("New Backtest", classes="pane-title")
                 yield Input(placeholder="ETF代码（逗号分隔）", id="bt_run_tickers")
                 yield Input(placeholder="开始日期 (YYYY-MM-DD)", id="bt_run_start")
                 yield Input(placeholder="结束日期 (YYYY-MM-DD)", id="bt_run_end")
-                yield Button("运行回测", id="btn_bt_run", variant="success")
-                yield Static("", id="bt_run_status")
+                yield Button("› Run", id="btn_bt_run", classes="text-action")
+                yield Static("", id="bt_run_status", classes="status-strip")
             with Vertical(classes="right-pane"):
                 with Vertical(classes="right-top"):
-                    yield Static("NAV走势", classes="pane-title")
+                    yield Static("Performance Board", classes="pane-title")
                     yield Static("", id="bt_sparkline")
                     yield DataTable(id="bt_metrics")
                 with Vertical(classes="right-bottom"):
-                    yield Static("摘要", classes="pane-title")
+                    yield Static("Summary", classes="pane-title")
                     yield Markdown(id="bt_summary")
         yield Footer()
 

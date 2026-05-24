@@ -202,7 +202,16 @@ class TickerCancelled:
     ticker: str
 
 
-AnalysisEvent = TickerStarted | SectionDone | TickerDone | TickerFailed | TickerCancelled
+@dataclass(frozen=True)
+class DebateProgress:
+    """Emitted when debate round counts change in research or risk stages."""
+    ticker: str
+    section_id: str  # "research" or "risk_debate"
+    current_round: int
+    max_rounds: int
+
+
+AnalysisEvent = TickerStarted | SectionDone | TickerDone | TickerFailed | TickerCancelled | DebateProgress
 
 
 # ---------------------------------------------------------------------------
@@ -604,6 +613,7 @@ class AnalysisRunner:
             from cli.report_utils import merge_stream_state
 
             emitted_sections: dict[str, str] = {}
+            last_debate_counts: dict[str, int] = {}
 
             for chunk in graph.graph.stream(init_state, **args):
                 if self._cancel_event.is_set():
@@ -612,6 +622,10 @@ class AnalysisRunner:
                     return
 
                 merge_stream_state(accumulated, chunk)
+                for dp in self._detect_debate_progress(
+                    chunk, last_debate_counts, ticker
+                ):
+                    yield dp
                 for event in self._detect_section_updates(
                     chunk, accumulated, emitted_sections, ticker, active_sections
                 ):
@@ -687,6 +701,39 @@ class AnalysisRunner:
                     total=len(section_definitions),
                 )
                 break
+
+    def _detect_debate_progress(
+        self,
+        chunk: dict,
+        last_counts: dict[str, int],
+        ticker: str,
+    ) -> Iterator[DebateProgress]:
+        """Yield DebateProgress when debate round counts change."""
+        invest_state = self._get_chunk_value(chunk, "investment_debate_state")
+        if isinstance(invest_state, dict):
+            count = invest_state.get("count", 0)
+            if count != last_counts.get("research", 0):
+                last_counts["research"] = count
+                max_rounds = self.config.get("max_debate_rounds", 1)
+                yield DebateProgress(
+                    ticker=ticker,
+                    section_id="research",
+                    current_round=count // 2,
+                    max_rounds=max_rounds,
+                )
+
+        risk_state = self._get_chunk_value(chunk, "risk_debate_state")
+        if isinstance(risk_state, dict):
+            count = risk_state.get("count", 0)
+            if count != last_counts.get("risk_debate", 0):
+                last_counts["risk_debate"] = count
+                max_rounds = self.config.get("max_risk_discuss_rounds", 1)
+                yield DebateProgress(
+                    ticker=ticker,
+                    section_id="risk_debate",
+                    current_round=(count + 2) // 3,
+                    max_rounds=max_rounds,
+                )
 
     def _get_chunk_value(self, chunk: dict, key: str) -> Any:
         """Extract value from chunk, checking top-level and nested node outputs."""

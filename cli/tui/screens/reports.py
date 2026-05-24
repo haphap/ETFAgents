@@ -33,16 +33,16 @@ class ReportLibraryScreen(Screen):
         yield Header(show_clock=True)
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane"):
-                yield Static("报告列表", classes="pane-title")
+                yield Static("Report List", classes="pane-title")
                 yield ListView(id="reports")
-                yield Static("按 r 刷新本地报告", classes="hint")
+                yield Static("r Refresh", classes="hint")
             with Vertical(classes="right-pane"):
                 with Vertical(classes="right-top"):
-                    yield Static("报告章节", classes="pane-title")
+                    yield Static("Sections", classes="pane-title")
                     yield ListView(id="lib_sections")
                 with Vertical(classes="right-bottom"):
-                    yield Static("报告正文", classes="pane-title")
-                    yield Markdown("暂无报告。", id="lib_body")
+                    yield Static("Body", classes="pane-title")
+                    yield Markdown("", id="lib_body")
         yield Footer()
 
     def on_mount(self) -> None:
