@@ -90,6 +90,11 @@ class PaperTradingEngine:
         logger.debug("No active session to clear")
         return ""
 
+    @property
+    def current_user(self) -> str:
+        """Public accessor for the current logged-in user."""
+        return self._get_current_user()
+
     def _get_current_user(self) -> str:
         session_path = self.SESSION_PATH
         if session_path.exists():

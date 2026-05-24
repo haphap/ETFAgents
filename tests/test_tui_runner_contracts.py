@@ -25,7 +25,7 @@ class _FakeGraph:
         self.closed = False
         self.finalized = False
 
-    def prepare_run(self, ticker, date):
+    def prepare_run(self, ticker, date, callbacks=None):
         return {}, {}, False
 
     def finalize_run(self, date, state):
@@ -186,6 +186,52 @@ class AnalysisRunnerContractTests(unittest.TestCase):
                         [e.section_id for e in section_done],
                         ["market_flow", "catalyst_sentiment", "macro_regime"],
                     )
+
+    def test_research_debate_updates_before_manager_decision(self):
+        """Research debate history should be visible before judge_decision lands."""
+        runner = AnalysisRunner()
+        emitted: dict[str, str] = {}
+        runner._format_research = lambda debate: debate.get("bull_history", "")
+
+        events = list(runner._detect_section_updates(
+            {
+                "investment_debate_state": {
+                    "bull_history": "Bull view in progress",
+                    "bear_history": "",
+                    "judge_decision": "",
+                }
+            },
+            {},
+            emitted,
+            "510300.SH",
+        ))
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].section_id, "research")
+        self.assertIn("Bull view", events[0].content)
+
+    def test_research_section_can_update_after_first_debate_event(self):
+        """Final manager content should replace earlier in-progress debate content."""
+        runner = AnalysisRunner()
+        emitted: dict[str, str] = {}
+        runner._format_research = lambda debate: debate.get("bull_history", "")
+        list(runner._detect_section_updates(
+            {"investment_debate_state": {"bull_history": "Draft", "judge_decision": ""}},
+            {},
+            emitted,
+            "510300.SH",
+        ))
+
+        events = list(runner._detect_section_updates(
+            {"research_allocation_plan": "Final manager decision"},
+            {},
+            emitted,
+            "510300.SH",
+        ))
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].section_id, "research")
+        self.assertEqual(events[0].content, "Final manager decision")
 
 
 if __name__ == "__main__":

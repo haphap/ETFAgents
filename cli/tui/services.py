@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import csv
 import json
+import re
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -16,6 +17,9 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from etfagents.default_config import DEFAULT_CONFIG
+from etfagents.llm_clients.model_catalog import (
+    RESEARCH_DEPTH_REQUIREMENTS as RESEARCH_DEPTH_REQUIREMENTS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +114,34 @@ SECTION_DEFINITIONS: tuple[SectionDef, ...] = (
 )
 
 SECTION_BY_ID = {defn.section_id: defn for defn in SECTION_DEFINITIONS}
+
+
+# ---------------------------------------------------------------------------
+# Analysis configuration
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AnalysisConfig:
+    selected_analysts: list[str] = field(default_factory=lambda: list(ANALYST_KEYS))
+    depth_name: str = "标准"
+    llm_provider: str = "openai"
+    backend_url: str | None = None
+    quick_model: str | None = None
+    deep_model: str | None = None
+    output_language: str = "Chinese"
+
+
+# ---------------------------------------------------------------------------
+# TUI settings — canonical definitions live in cli.tui.settings
+# ---------------------------------------------------------------------------
+
+from cli.tui.settings import (  # noqa: F401, E402
+    AVAILABLE_THEMES,
+    DENSITY_OPTIONS,
+    PANEL_WIDTH_PRESETS,
+    SETTINGS_PATH,
+    TuiSettings,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -509,6 +541,7 @@ class AnalysisRunner:
         self.config = copy.deepcopy(config or DEFAULT_CONFIG)
         self.states: dict[str, TickerState] = {}
         self._cancel_event = threading.Event()
+        self._stats_handler: Any = None
 
     def request_cancel(self) -> None:
         self._cancel_event.set()
@@ -547,13 +580,16 @@ class AnalysisRunner:
 
             yield TickerStarted(ticker=ticker, total_sections=len(SECTION_DEFINITIONS))
 
-            init_state, args, _ = graph.prepare_run(ticker, analysis_date)
+            init_state, args, _ = graph.prepare_run(
+                ticker,
+                analysis_date,
+                callbacks=[self._ensure_stats_handler()],
+            )
             accumulated = copy.deepcopy(init_state)
 
             from cli.report_utils import merge_stream_state
 
-            already_done: set[str] = set()
-            completed = 0
+            emitted_sections: dict[str, str] = {}
 
             for chunk in graph.graph.stream(init_state, **args):
                 if self._cancel_event.is_set():
@@ -563,9 +599,8 @@ class AnalysisRunner:
 
                 merge_stream_state(accumulated, chunk)
                 for event in self._detect_section_updates(
-                    chunk, accumulated, already_done, ticker
+                    chunk, accumulated, emitted_sections, ticker
                 ):
-                    completed += 1
                     yield event
 
             # Finalize and save (skip if cancelled during stream)
@@ -591,14 +626,19 @@ class AnalysisRunner:
         self,
         chunk: dict,
         accumulated: dict,
-        already_done: set[str],
+        emitted_sections: dict[str, str],
         ticker: str,
     ) -> Iterator[SectionDone]:
-        """Yield SectionDone events for newly completed sections."""
-        for defn in SECTION_DEFINITIONS:
-            if defn.section_id in already_done:
-                continue
+        """Yield SectionDone events when section content changes.
 
+        Deviation from plan §7.2: SectionDone is emitted on every content
+        change, not only on final completion.  For debate sections (research,
+        risk) this means the UI can show intermediate progress — e.g. bull
+        arguments appear before the judge decides.  Deduplication is by
+        content equality (``emitted_sections[id] == content``), so unchanged
+        chunks are silently skipped.
+        """
+        for defn in SECTION_DEFINITIONS:
             for det_key in defn.detection_keys:
                 value = self._get_chunk_value(chunk, det_key)
                 if value is None:
@@ -608,18 +648,22 @@ class AnalysisRunner:
                 if det_key == defn.state_key:
                     content = str(value)
                 elif det_key == "investment_debate_state":
-                    if not isinstance(value, dict) or not value.get("judge_decision"):
+                    if not isinstance(value, dict):
                         continue
                     content = self._format_research(value)
                 elif det_key == "risk_debate_state":
-                    if not isinstance(value, dict) or not value.get("judge_decision"):
+                    if not isinstance(value, dict):
                         continue
                     content = self._format_risk(value)
                 else:
                     content = str(value)
 
-                already_done.add(defn.section_id)
-                completed = len(already_done)
+                if not content.strip() or emitted_sections.get(defn.section_id) == content:
+                    continue
+
+                is_new_section = defn.section_id not in emitted_sections
+                emitted_sections[defn.section_id] = content
+                completed = len(emitted_sections) if is_new_section else len(emitted_sections)
                 yield SectionDone(
                     ticker=ticker,
                     section_id=defn.section_id,
@@ -661,7 +705,18 @@ class AnalysisRunner:
             selected_analysts=selected_analysts,
             config=self.config,
             debug=False,
+            callbacks=[self._ensure_stats_handler()],
         )
+
+    def _ensure_stats_handler(self) -> Any:
+        if self._stats_handler is None:
+            from cli.stats_handler import StatsCallbackHandler
+            self._stats_handler = StatsCallbackHandler()
+        return self._stats_handler
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return current LLM/tool/token usage stats."""
+        return self._ensure_stats_handler().get_stats()
 
     def _save_report(self, state: dict, ticker: str, analysis_date: str) -> Path:
         """Save complete report to disk."""
@@ -686,6 +741,77 @@ class AnalysisRunner:
 
 
 # ---------------------------------------------------------------------------
+# Backtest runner (M4)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class BacktestStarted:
+    tickers: list[str]
+    start_date: str
+    end_date: str
+
+
+@dataclass(frozen=True)
+class BacktestFinished:
+    output_dir: Path
+
+
+@dataclass(frozen=True)
+class BacktestFailed:
+    error: str
+
+
+BacktestEvent = BacktestStarted | BacktestFinished | BacktestFailed
+
+
+class BacktestRunner:
+    """Run a backtest, yielding events.  Designed for worker threads."""
+
+    def run(
+        self,
+        tickers: list[str],
+        start_date: str,
+        end_date: str,
+        rebalance_interval_days: int = 21,
+        top_k: int = 3,
+        initial_cash: float = 1_000_000.0,
+        config: dict[str, Any] | None = None,
+    ) -> Iterator[BacktestEvent]:
+        yield BacktestStarted(tickers=tickers, start_date=start_date, end_date=end_date)
+        try:
+            from etfagents.graph.etf_graph import EtfAgentsGraph
+            from etfagents.backtest import save_backtest_result
+
+            cfg = copy.deepcopy(config or DEFAULT_CONFIG)
+            graph = EtfAgentsGraph(config=cfg, debug=False)
+            result = graph.backtest_candidate_pool(
+                tickers,
+                start_date=start_date,
+                end_date=end_date,
+                rebalance_interval_days=rebalance_interval_days,
+                top_k=top_k,
+                initial_cash=initial_cash,
+            )
+            # Compute output directory mirroring CLI flow
+            visible = tickers[:3]
+            slug = "__".join(visible)
+            if len(tickers) > 3:
+                slug += f"__plus_{len(tickers) - 3}"
+            slug = re.sub(r"[^A-Za-z0-9._-]+", "_", slug)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = (
+                Path(cfg["results_dir"]).expanduser()
+                / "backtest" / slug
+                / f"{start_date}_to_{end_date}"
+                / timestamp
+            )
+            save_backtest_result(result, output_dir)
+            yield BacktestFinished(output_dir=output_dir)
+        except Exception as exc:
+            yield BacktestFailed(error=str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Paper trading
 # ---------------------------------------------------------------------------
 
@@ -696,8 +822,15 @@ class PaperTradingSnapshot:
     trades: list[dict[str, Any]]
 
 
+@dataclass
+class OrderResult:
+    success: bool
+    message: str
+    detail: dict[str, Any] = field(default_factory=dict)
+
+
 class PaperTradingViewModel:
-    """Wraps PaperTradingEngine.  v1 only exposes snapshot() (read-only)."""
+    """Wraps PaperTradingEngine for the TUI."""
 
     def __init__(self, engine: Any | None = None):
         if engine is None:
@@ -711,3 +844,26 @@ class PaperTradingViewModel:
             positions=self.engine.get_positions(user_id=user_id),
             trades=self.engine.get_trades(user_id=user_id, limit=trade_limit),
         )
+
+    def current_user(self) -> str:
+        return self.engine.current_user
+
+    def login(self, username: str, password: str) -> bool:
+        return self.engine.login(username, password)
+
+    def logout(self) -> str:
+        return self.engine.logout()
+
+    def buy(self, ticker: str, quantity: int) -> OrderResult:
+        try:
+            result = self.engine.buy(ticker, quantity)
+            return OrderResult(success=True, message="买入成功", detail=result)
+        except Exception as exc:
+            return OrderResult(success=False, message=str(exc))
+
+    def sell(self, ticker: str, quantity: int) -> OrderResult:
+        try:
+            result = self.engine.sell(ticker, quantity)
+            return OrderResult(success=True, message="卖出成功", detail=result)
+        except Exception as exc:
+            return OrderResult(success=False, message=str(exc))
