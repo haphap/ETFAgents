@@ -18,7 +18,6 @@ from etfagents.agents.utils.analysis_memory import (
 )
 from etfagents.agents.utils.report_leads import (
     collect_top_section_marks,
-    contains_markdown_table,
     get_concise_heading_instruction,
     get_no_process_narration_instruction,
     get_no_title_instruction,
@@ -49,7 +48,11 @@ _MACRO_REQUIRED_MARKERS = ("ETF暴露", "配置")
 
 
 def _looks_like_complete_macro_report(report: str) -> bool:
-    """Positive contract for accepting a macro report into graph state."""
+    """Positive contract for accepting a macro report into graph state.
+
+    Keep this gate focused on whether user-visible text is worth streaming.
+    Detailed completeness issues are handled by validate_and_refine below.
+    """
     content = report or ""
     if not content.strip():
         return False
@@ -58,13 +61,10 @@ def _looks_like_complete_macro_report(report: str) -> bool:
         return False
 
     section_marks = collect_top_section_marks(content)
-    if not _MACRO_REQUIRED_TOP_SECTIONS.issubset(section_marks):
+    if len(_MACRO_REQUIRED_TOP_SECTIONS.intersection(section_marks)) < 3:
         return False
 
-    return (
-        all(marker in content for marker in _MACRO_REQUIRED_MARKERS)
-        and contains_markdown_table(content)
-    )
+    return all(marker in content for marker in _MACRO_REQUIRED_MARKERS)
 
 
 def create_macro_analyst(llm):
@@ -149,6 +149,7 @@ def create_macro_analyst(llm):
             current_date=current_date,
             instrument_context=instrument_context,
             report_acceptance_check=_looks_like_complete_macro_report,
+            rejected_report_fallback="last_attempt",
             unexecuted_tool_recovery={
                 "trigger_tool_names": [tool.name for tool in tools],
                 "tool_payloads": [

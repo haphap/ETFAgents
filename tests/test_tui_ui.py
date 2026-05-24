@@ -386,6 +386,26 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(runner.calls[0][0], ["510300.SH"])
                 self.assertEqual(runner.calls[0][2], ["market_flow"])
 
+    async def test_analysis_run_sections_follow_selected_analysts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _FakeAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(selected_analysts=["market_flow"]),
+                    runner=runner,
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                sections = screen.query_one("#ra_sections", ListView)
+                self.assertEqual(len(sections.children), 4)
+                labels = [str(item.query_one(Label).render()) for item in sections.children]
+                self.assertIn("分析师 / 市场与资金流", labels)
+                self.assertNotIn("分析师 / 宏观框架", labels)
+
     # --- BacktestScreen (M4: has run inputs) ---
 
     async def test_backtest_screen_has_run_inputs(self):

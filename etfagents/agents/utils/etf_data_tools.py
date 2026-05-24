@@ -4,6 +4,7 @@ import io
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from functools import lru_cache
 from typing import Annotated, Any
@@ -1148,39 +1149,56 @@ def _build_macro_snapshot_payload(
         ("Japan", lambda: _load_fred_series("IR3TIB01JPM156N", curr_date, look_back_days), lambda: _load_fred_series("IRLTLT01JPM156N", curr_date, look_back_days)),
         ("China", lambda: _load_china_policy_rate_series(curr_date, look_back_days), lambda: _load_china_ten_year_yield_series(curr_date, look_back_days)),
     ]
-    rates = [
-        {
-            "economy": economy,
-            "policy_short_series": _serialize_series(short_loader()),
-            "ten_year_series": _serialize_series(long_loader()),
-        }
-        for economy, short_loader, long_loader in rate_specs
-    ]
-    safe_havens = [
-        {
-            "label": label,
-            "symbol": symbol,
-            "invert_pct": invert,
-            "close_series": _serialize_series(
-                _load_yfinance_close(symbol, curr_date, look_back_days)
-            ),
-        }
-        for label, symbol, invert in _MACRO_SAFE_HAVEN_SPECS
-    ]
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        rate_futures = [
+            (
+                economy,
+                executor.submit(short_loader),
+                executor.submit(long_loader),
+            )
+            for economy, short_loader, long_loader in rate_specs
+        ]
+        safe_haven_futures = [
+            (
+                label,
+                symbol,
+                invert,
+                executor.submit(_load_yfinance_close, symbol, curr_date, look_back_days),
+            )
+            for label, symbol, invert in _MACRO_SAFE_HAVEN_SPECS
+        ]
+        tips_future = executor.submit(_load_fred_series, "DFII10", curr_date, look_back_days)
+        ccc_future = executor.submit(_load_fred_series, "BAMLH0A3HYC", curr_date, look_back_days)
+        calendar_future = executor.submit(_load_cn_schedule_frame, curr_date)
+
+        rates = [
+            {
+                "economy": economy,
+                "policy_short_series": _serialize_series(short_future.result()),
+                "ten_year_series": _serialize_series(long_future.result()),
+            }
+            for economy, short_future, long_future in rate_futures
+        ]
+        safe_havens = [
+            {
+                "label": label,
+                "symbol": symbol,
+                "invert_pct": invert,
+                "close_series": _serialize_series(close_future.result()),
+            }
+            for label, symbol, invert, close_future in safe_haven_futures
+        ]
+        tips_real_series = _serialize_series(tips_future.result())
+        ccc_spread_series = _serialize_series(ccc_future.result())
+        china_calendar = _serialize_frame_records(calendar_future.result())
     start_date, end_date = _date_window(curr_date, look_back_days)
     return (
         {
             "rates": rates,
-            "tips_real_series": _serialize_series(
-                _load_fred_series("DFII10", curr_date, look_back_days)
-            ),
-            "ccc_spread_series": _serialize_series(
-                _load_fred_series("BAMLH0A3HYC", curr_date, look_back_days)
-            ),
+            "tips_real_series": tips_real_series,
+            "ccc_spread_series": ccc_spread_series,
             "safe_havens": safe_havens,
-            "china_calendar": _serialize_frame_records(
-                _load_cn_schedule_frame(curr_date)
-            ),
+            "china_calendar": china_calendar,
         },
         {
             "coverage_start_date": start_date,

@@ -38,6 +38,7 @@ from cli.tui.services import (
     TickerDone,
     TickerFailed,
     TickerStarted,
+    section_definitions_for,
 )
 
 
@@ -363,7 +364,7 @@ class AnalysisRunScreen(Screen):
 
     def on_mount(self) -> None:
         sections = self.query_one("#ra_sections", ListView)
-        for defn in SECTION_DEFINITIONS:
+        for defn in self._section_definitions():
             sections.append(ListItem(
                 Label(f"{defn.team} / {defn.title}"),
                 id=f"rsec-{defn.section_id}",
@@ -555,9 +556,9 @@ class AnalysisRunScreen(Screen):
     def _stats_text(self) -> str:
         stats = self._read_runner_stats()
         agents_done = sum(1 for done in self.section_status.values() if done)
-        agents_total = len(SECTION_DEFINITIONS)
+        agents_total = len(self._section_definitions())
         reports_done = agents_done
-        reports_total = len(SECTION_DEFINITIONS)
+        reports_total = agents_total
         current_agent = self._current_agent_label()
         elapsed = self._elapsed_text()
         tokens_in = int(stats.get("tokens_in", 0) or 0)
@@ -597,6 +598,9 @@ class AnalysisRunScreen(Screen):
                 if section:
                     return section.title
         return "等待"
+
+    def _section_definitions(self) -> tuple[Any, ...]:
+        return section_definitions_for(self._analysis_config.selected_analysts)
 
     def _elapsed_text(self) -> str:
         if self._started_at is None:
