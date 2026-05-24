@@ -139,6 +139,13 @@ class TuiSettingsTests(unittest.TestCase):
         loaded = TuiSettings.load(Path("/nonexistent/settings.json"))
         self.assertEqual(loaded.theme, "textual-dark")
 
+    def test_non_dict_json_returns_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.json"
+            path.write_text("[]", encoding="utf-8")
+            loaded = TuiSettings.load(path)
+            self.assertEqual(loaded.theme, "textual-dark")
+
 
 class _FakePaperEngine:
     def __init__(self):

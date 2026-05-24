@@ -166,7 +166,7 @@ class TuiSettings:
                 density=data.get("density", "normal"),
                 left_pane_width=data.get("left_pane_width", 35),
             )
-        except (OSError, json.JSONDecodeError, KeyError):
+        except (OSError, json.JSONDecodeError, KeyError, AttributeError, TypeError):
             return cls()
 
 
