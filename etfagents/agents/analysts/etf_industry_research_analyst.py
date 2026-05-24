@@ -98,13 +98,13 @@ def _holdings_industry_strict_failures(report: str) -> list[str]:
     section_marks = collect_top_section_marks(content)
     missing_sections = sorted(_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS - section_marks)
     if missing_sections:
-        failures.append("缺少一级章节：" + "、".join(f"{mark}、" for mark in missing_sections))
+        failures.append("缺少一级章节：" + "、".join(missing_sections))
 
     missing_leads = find_top_sections_missing_leads(content, _REPORT_SPEC.required_top_sections)
     if missing_leads:
         failures.append(
             "一级章节标题后缺少1-2句引导句："
-            + "、".join(f"{mark}、" for mark in missing_leads)
+            + "、".join(missing_leads)
         )
 
     missing_markers = [

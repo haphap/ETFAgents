@@ -560,8 +560,8 @@ class AnalysisRunScreen(Screen):
 
     def _stats_text(self) -> str:
         stats = self._read_runner_stats()
+        agents_total = len(self._section_definitions()) * len(self.tickers)
         agents_done = sum(1 for done in self.section_status.values() if done)
-        agents_total = len(self._section_definitions())
         reports_done = agents_done
         reports_total = agents_total
         current_agent = self._current_agent_label()
