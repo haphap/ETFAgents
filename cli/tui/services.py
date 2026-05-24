@@ -541,8 +541,7 @@ class AnalysisRunner:
         self.config = copy.deepcopy(config or DEFAULT_CONFIG)
         self.states: dict[str, TickerState] = {}
         self._cancel_event = threading.Event()
-        from cli.stats_handler import StatsCallbackHandler
-        self.stats_handler = StatsCallbackHandler()
+        self._stats_handler: Any = None
 
     def request_cancel(self) -> None:
         self._cancel_event.set()
@@ -584,7 +583,7 @@ class AnalysisRunner:
             init_state, args, _ = graph.prepare_run(
                 ticker,
                 analysis_date,
-                callbacks=[self.stats_handler],
+                callbacks=[self._ensure_stats_handler()],
             )
             accumulated = copy.deepcopy(init_state)
 
@@ -630,7 +629,15 @@ class AnalysisRunner:
         emitted_sections: dict[str, str],
         ticker: str,
     ) -> Iterator[SectionDone]:
-        """Yield SectionDone events for newly completed sections."""
+        """Yield SectionDone events when section content changes.
+
+        Deviation from plan §7.2: SectionDone is emitted on every content
+        change, not only on final completion.  For debate sections (research,
+        risk) this means the UI can show intermediate progress — e.g. bull
+        arguments appear before the judge decides.  Deduplication is by
+        content equality (``emitted_sections[id] == content``), so unchanged
+        chunks are silently skipped.
+        """
         for defn in SECTION_DEFINITIONS:
             for det_key in defn.detection_keys:
                 value = self._get_chunk_value(chunk, det_key)
@@ -698,12 +705,18 @@ class AnalysisRunner:
             selected_analysts=selected_analysts,
             config=self.config,
             debug=False,
-            callbacks=[self.stats_handler],
+            callbacks=[self._ensure_stats_handler()],
         )
+
+    def _ensure_stats_handler(self) -> Any:
+        if self._stats_handler is None:
+            from cli.stats_handler import StatsCallbackHandler
+            self._stats_handler = StatsCallbackHandler()
+        return self._stats_handler
 
     def get_stats(self) -> dict[str, Any]:
         """Return current LLM/tool/token usage stats."""
-        return self.stats_handler.get_stats()
+        return self._ensure_stats_handler().get_stats()
 
     def _save_report(self, state: dict, ticker: str, analysis_date: str) -> Path:
         """Save complete report to disk."""

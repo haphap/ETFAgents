@@ -550,7 +550,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 await pilot.pause()
                 acct_text = str(screen.query_one("#pt_account", Static).render())
-                self.assertIn("150000", acct_text)
+                self.assertIn("150,000", acct_text)
 
     async def test_paper_trading_positions_table(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -929,6 +929,20 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 modal = app.screen
                 self.assertIsInstance(modal, OrderModal)
                 self.assertEqual(modal.side, "sell")
+
+    async def test_login_modal_exclusive_worker_prevents_duplicate(self):
+        """Second login click while first is in-flight should not spawn a second worker."""
+        import inspect
+        from cli.tui.app import LoginModal as _LoginModal
+        src = inspect.getsource(_LoginModal.on_button_pressed)
+        self.assertIn("exclusive=True", src)
+
+    async def test_order_modal_exclusive_worker_prevents_duplicate(self):
+        """Order modal should use exclusive worker to prevent double-submit."""
+        import inspect
+        from cli.tui.app import OrderModal as _OrderModal
+        src = inspect.getsource(_OrderModal.on_button_pressed)
+        self.assertIn("exclusive=True", src)
 
     # --- helpers ---
 

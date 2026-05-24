@@ -270,6 +270,35 @@ class BacktestRunnerTests(unittest.TestCase):
             self.assertTrue(finished[0].output_dir.is_relative_to(Path(tmp)))
             mock_save.assert_called_once()
 
+    def test_output_dir_slug_matches_cli_flow(self):
+        """output_dir must encode ticker slug, date range, and timestamp."""
+        from unittest.mock import MagicMock, patch
+        from cli.tui.services import BacktestFinished
+        with tempfile.TemporaryDirectory() as tmp:
+            mock_graph = MagicMock()
+            mock_graph.backtest_candidate_pool.return_value = MagicMock()
+            with patch("etfagents.graph.etf_graph.EtfAgentsGraph", return_value=mock_graph):
+                with patch("etfagents.backtest.save_backtest_result"):
+                    import copy
+                    from etfagents.default_config import DEFAULT_CONFIG
+                    cfg = copy.deepcopy(DEFAULT_CONFIG)
+                    cfg["results_dir"] = tmp
+                    events = list(BacktestRunner().run(
+                        ["510300.SH", "159915.SZ", "510050.SH", "510500.SH"],
+                        "2026-01-01", "2026-03-31",
+                        config=cfg,
+                    ))
+            finished = [e for e in events if isinstance(e, BacktestFinished)][0]
+            parts = finished.output_dir.relative_to(Path(tmp) / "backtest").parts
+            # slug: first 3 tickers + "plus_1", dots replaced by _
+            self.assertIn("510300", parts[0])
+            self.assertIn("plus_1", parts[0])
+            # date range subfolder
+            self.assertEqual(parts[1], "2026-01-01_to_2026-03-31")
+            # timestamp subfolder (YYYYMMDD_HHMMSS)
+            import re
+            self.assertRegex(parts[2], r"^\d{8}_\d{6}$")
+
 
 if __name__ == "__main__":
     unittest.main()
