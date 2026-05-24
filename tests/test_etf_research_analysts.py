@@ -8,6 +8,7 @@ from etfagents.agents.analysts.etf_industry_research_analyst import (
     create_etf_industry_research_analyst,
     _looks_like_holdings_industry_draft,
     _looks_like_complete_holdings_industry_report,
+    _strict_refine_holdings_industry_report,
 )
 from etfagents.agents.analysts.etf_market_analyst import (
     _REPORT_SPEC,
@@ -114,6 +115,25 @@ class _FakeTool:
         return self.return_value
 
 
+class _HoldingsStrictRepairLLM(RunnableLambda):
+    def __init__(self, draft_report, repaired_report):
+        super().__init__(func=self._invoke)
+        self._prompts = []
+        self.draft_report = draft_report
+        self.repaired_report = repaired_report
+
+    def _invoke(self, prompt, **kwargs):
+        self._prompts.append(prompt)
+        if "未通过原因" in str(prompt):
+            return AIMessage(content=self.repaired_report)
+        if len(self._prompts) == 1:
+            return AIMessage(content="我将调用 get_etf_industry_research 工具完成行业交叉分析。")
+        return AIMessage(content=self.draft_report)
+
+    def bind_tools(self, tools):
+        return self
+
+
 class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
     def test_prompt_uses_tradingagents_style_cross_analysis_framework(self):
         llm = _CapturingLLM()
@@ -161,6 +181,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一级标题 -> 1-2句引导句 -> 子章节标题", system_msg)
         self.assertIn("[直接写1-2句引导句", system_msg)
+        self.assertIn("不得把方括号说明原样输出", system_msg)
         self.assertIn("开篇帽段负责统领全文", system_msg)
         self.assertIn("第一章标题后的引导句只负责导入本章", system_msg)
         self.assertIn("第一章引导句要承接'行业主线与分歧焦点'", system_msg)
@@ -233,6 +254,23 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
                 "| 示例券商 | 煤炭 | 谨慎 |"
             )
         )
+
+    def test_holdings_industry_draft_gate_accepts_cleanable_legacy_shape(self):
+        legacy_report = (
+            "# 516650.SH 行业交叉深度研报\n\n"
+            "券商共识显示ETF主导行业仍受政策和库存牵制，ETF暴露需要等待需求验证。\n\n"
+            "#### 1. 共识观点\n"
+            "券商报告显示行业配置节奏取决于库存去化。\n\n"
+            "#### 2. 核心分歧\n"
+            "分歧集中在政策传导和价格修复。\n\n"
+            "#### 10. 研报总览表\n"
+            "| 券商 | 行业关键词 | 立场 |\n"
+            "| --- | --- | --- |\n"
+            "| 示例券商 | 工业金属 | 中性 |"
+        )
+
+        self.assertTrue(_looks_like_holdings_industry_draft(legacy_report))
+        self.assertFalse(_looks_like_complete_holdings_industry_report(legacy_report))
 
     def test_recovers_when_model_describes_tool_call_without_executing_it(self):
         llm = _IntentThenFinalLLM()
@@ -337,6 +375,57 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
             )
 
         self.assertEqual(refined_report, output["holdings_industry_report"])
+
+    def test_holdings_industry_strict_repair_gets_final_report_through_gate(self):
+        draft_report = (
+            "券商行业研究显示ETF主导暴露仍受政策和库存变量牵制，配置应等待行业景气扩散确认。\n\n"
+            "一、行业主线与分歧焦点\n"
+            "（一）共识主线\n"
+            "报告内容。\n\n"
+            "二、景气、政策与产业链验证\n"
+            "（一）景气与价格对比\n"
+            "报告内容。\n\n"
+            "三、未解问题与风险边界\n"
+            "（一）未解问题\n"
+            "报告内容。\n\n"
+            "四、ETF影响与研报总览\n"
+            "（一）ETF暴露与配置含义\n"
+            "ETF暴露需要等待需求验证。\n\n"
+            "（二）研报总览表\n"
+            "| 券商 | 行业关键词 | 立场 |\n"
+            "| --- | --- | --- |\n"
+            "| 示例券商 | 工业金属 | 中性 |"
+        )
+        repaired_report = (
+            "券商行业研究显示ETF主导暴露仍受政策和库存变量牵制，配置应等待行业景气扩散确认。\n\n"
+            "一、行业主线与分歧焦点\n"
+            "券商共识集中在政策托底，分歧集中在库存去化节奏。\n\n"
+            "（一）共识主线\n"
+            "报告内容。\n\n"
+            "二、景气、政策与产业链验证\n"
+            "景气验证依赖价格、库存和政策传导同时改善，否则ETF暴露仍难扩散。\n\n"
+            "（一）景气与价格对比\n"
+            "报告内容。\n\n"
+            "三、未解问题与风险边界\n"
+            "未解问题集中在需求斜率和盈利修正，风险边界应围绕库存去化重新定价。\n\n"
+            "（一）未解问题\n"
+            "报告内容。\n\n"
+            "四、ETF影响与研报总览\n"
+            "ETF暴露需要把行业盈利弹性转化为权重贡献，当前应等待需求验证后再提高仓位。\n\n"
+            "（一）ETF暴露与配置含义\n"
+            "ETF暴露需要等待需求验证。\n\n"
+            "（二）研报总览表\n"
+            "| 券商 | 行业关键词 | 立场 | 核心论点 | 重要数据点 |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| 示例券商 | 工业金属 | 中性 | 库存去化决定配置节奏 | 库存与价格同步验证 |"
+        )
+
+        repaired = _strict_refine_holdings_industry_report(
+            draft_report,
+            _HoldingsStrictRepairLLM(draft_report, repaired_report),
+        )
+
+        self.assertTrue(_looks_like_complete_holdings_industry_report(repaired))
 
 
 class EtfStockResearchAnalystPromptTests(unittest.TestCase):

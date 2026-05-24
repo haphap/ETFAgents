@@ -1,6 +1,7 @@
 from langchain_core.messages import AIMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+from etfagents.content_utils import extract_text_content
 from etfagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_collaboration_stop_instruction,
@@ -47,6 +48,7 @@ _REPORT_SPEC = AnalystReportSpec(
 _HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS = set(_REPORT_SPEC.required_top_sections)
 # Anchors must match the section names emitted by the prompt template below.
 _HOLDINGS_INDUSTRY_REQUIRED_MARKERS = ("ETF暴露", "研报总览")
+_HOLDINGS_INDUSTRY_DRAFT_MARKERS = ("券商", "共识", "分歧", "ETF")
 
 
 def _looks_like_complete_holdings_industry_report(report: str) -> bool:
@@ -70,18 +72,83 @@ def _looks_like_complete_holdings_industry_report(report: str) -> bool:
 
 def _looks_like_holdings_industry_draft(report: str) -> bool:
     """Accept report-shaped drafts so validate_and_refine can repair lead issues."""
-    content = report or ""
+    content = pre_judge_clean(report or "")
     if not content.strip() or has_invalid_opening_cap(content):
         return False
 
     section_marks = collect_top_section_marks(content)
-    if not _HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS.issubset(section_marks):
-        return False
+    has_strict_sections = _HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS.issubset(section_marks)
 
     return (
-        all(marker in content for marker in _HOLDINGS_INDUSTRY_REQUIRED_MARKERS)
+        (has_strict_sections or all(marker in content for marker in _HOLDINGS_INDUSTRY_DRAFT_MARKERS))
+        and "研报总览" in content
         and contains_markdown_table(content)
     )
+
+
+def _holdings_industry_strict_failures(report: str) -> list[str]:
+    """Explain why a holdings-industry report still fails the final contract."""
+    content = report or ""
+    failures: list[str] = []
+    if not content.strip():
+        return ["报告为空"]
+    if has_invalid_opening_cap(content):
+        failures.append("开篇帽段无效：不得以标题、章节、列表、表格、结论标签或过程话术开头")
+
+    section_marks = collect_top_section_marks(content)
+    missing_sections = sorted(_HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS - section_marks)
+    if missing_sections:
+        failures.append("缺少一级章节：" + "、".join(f"{mark}、" for mark in missing_sections))
+
+    missing_leads = find_top_sections_missing_leads(content, _REPORT_SPEC.required_top_sections)
+    if missing_leads:
+        failures.append(
+            "一级章节标题后缺少1-2句引导句："
+            + "、".join(f"{mark}、" for mark in missing_leads)
+        )
+
+    missing_markers = [
+        marker for marker in _HOLDINGS_INDUSTRY_REQUIRED_MARKERS if marker not in content
+    ]
+    if missing_markers:
+        failures.append("缺少关键词：" + "、".join(missing_markers))
+    if not contains_markdown_table(content):
+        failures.append("缺少Markdown表格，研报总览表必须使用以 | 开头和结尾的表格")
+    return failures
+
+
+def _strict_refine_holdings_industry_report(report: str, llm) -> str:
+    """One targeted repair pass for reports that fail the holdings-industry contract."""
+    failures = _holdings_industry_strict_failures(report)
+    if not failures:
+        return report
+
+    prompt = (
+        "你是一名ETF持仓行业研究报告修订员。下面的报告没有通过最终结构检查。"
+        "请重新生成一份完整报告，不要解释修订过程，只输出最终Markdown正文。\n\n"
+        "必须满足以下硬性结构：\n"
+        "1. 第一段是2-4句开篇帽段，不得以标题、编号、表格、项目符号或“结论：”开头。\n"
+        "2. 必须且只能使用以下四个一级章节：\n"
+        "一、行业主线与分歧焦点\n"
+        "二、景气、政策与产业链验证\n"
+        "三、未解问题与风险边界\n"
+        "四、ETF影响与研报总览\n"
+        "3. 每个一级章节标题下一行必须先写1-2句引导句，然后才能写（一）格式子章节；"
+        "引导句必须是具体判断句，包含券商证据、ETF暴露、权重贡献、配置含义或风险边界。\n"
+        "4. 第四章必须包含“（一）ETF暴露与配置含义”和“（二）研报总览表”。\n"
+        "5. 研报总览表必须是标准Markdown表格，表头至少包含：券商、行业关键词、立场、核心论点、重要数据点。\n"
+        "6. 不得使用#或##标题，不得写过程话术，不得输出方括号提示语，不得使用“本章/本节/本部分旨在”等自指句。\n\n"
+        "未通过原因：\n"
+        + "\n".join(f"- {failure}" for failure in failures)
+        + "\n\n原始报告：\n"
+        + report
+    )
+    try:
+        response = llm.invoke(prompt)
+    except Exception:
+        return report
+    refined = extract_text_content(getattr(response, "content", response))
+    return refined or report
 
 
 def create_etf_industry_research_analyst(llm):
@@ -134,6 +201,7 @@ def create_etf_industry_research_analyst(llm):
             "二、三、四章标题后的引导句必须是带券商证据、ETF权重或配置含义的判断句，不是任务说明；"
             "不得写'本章''本节''本部分''旨在''梳理''等自指式开头，也不得写'导语：'标签。"
             "不得在结论段与首个子章节之间插入额外空行、重复标题行或松散填充。\n\n"
+            "下面结构中的引导句说明用于约束写作，不得把方括号说明原样输出到报告中。\n"
             "一、行业主线与分歧焦点\n"
             "[直接写1-2句引导句：点明券商共识来源、分歧来源和ETF配置含义]\n"
             "  （一）共识主线\n\n"
@@ -222,6 +290,9 @@ def create_etf_industry_research_analyst(llm):
         report = pre_judge_clean(report) if report else report
         report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
         report = post_judge_clean(report) if report else report
+        if report and not _looks_like_complete_holdings_industry_report(report):
+            report = _strict_refine_holdings_industry_report(report, llm)
+            report = post_judge_clean(report) if report else report
         if report and not _looks_like_complete_holdings_industry_report(report):
             report = ""
         if report and not getattr(result, "tool_calls", None):
