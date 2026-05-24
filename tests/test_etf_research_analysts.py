@@ -269,6 +269,36 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
             fake_industry.calls,
         )
 
+    def test_holdings_industry_keeps_last_draft_when_shape_gate_rejects(self):
+        incomplete_report = (
+            "券商行业研究显示ETF主导暴露仍受政策和库存变量牵制，配置应等待行业景气扩散确认。\n\n"
+            "一、行业主线与分歧焦点\n"
+            "券商共识集中在政策托底，分歧集中在库存去化节奏。"
+        )
+        llm = _IntentThenFinalLLM(final_content=incomplete_report)
+        node = create_etf_industry_research_analyst(llm)
+        fake_industry = _FakeTool("get_etf_industry_research", "industry research data")
+
+        with (
+            patch(
+                "etfagents.agents.analysts.etf_industry_research_analyst.get_etf_industry_research",
+                fake_industry,
+            ),
+            patch(
+                "etfagents.agents.analysts.etf_industry_research_analyst.validate_and_refine",
+                side_effect=lambda report, *_args, **_kwargs: report,
+            ),
+        ):
+            output = node(
+                {
+                    "company_of_interest": "516650.SH",
+                    "trade_date": "2026-04-30",
+                    "messages": [HumanMessage(content="Analyze 516650.SH")],
+                }
+            )
+
+        self.assertEqual(incomplete_report, output["holdings_industry_report"])
+
 
 class EtfStockResearchAnalystPromptTests(unittest.TestCase):
     def test_prompt_uses_tradingagents_style_stock_framework(self):
@@ -447,7 +477,6 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
             [{"ticker": "516650.SH", "curr_date": "2026-04-30"}],
             fake_stock.calls,
         )
-
 
 class EtfStructureAnalystPromptTests(unittest.TestCase):
     def test_prompt_forces_judgment_before_data_dump(self):
