@@ -793,6 +793,22 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(modal.query_one("#btn_acm_ok"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_cancel"))
 
+    async def test_analysis_config_modal_shows_analyst_labels(self):
+        """Analyst checkboxes must render their visible labels in the modal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                self.assertIsInstance(modal, AnalysisConfigModal)
+                screenshot = app.export_screenshot()
+                self.assertIn("市场与资金流", screenshot)
+                self.assertIn("宏观框架", screenshot)
+
     async def test_analysis_config_modal_updates_models_for_provider(self):
         """Changing provider should refresh quick/deep model choices."""
         with tempfile.TemporaryDirectory() as tmp:

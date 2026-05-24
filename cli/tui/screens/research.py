@@ -172,7 +172,12 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
             yield Static("选择分析师:")
             for defn in SECTION_DEFINITIONS:
                 if defn.team == "分析师":
-                    yield Checkbox(defn.title, value=True, id=f"acm_cb_{defn.section_id}")
+                    yield Checkbox(
+                        defn.title,
+                        value=True,
+                        id=f"acm_cb_{defn.section_id}",
+                        compact=True,
+                    )
             with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
                     yield Static("研究深度:")
