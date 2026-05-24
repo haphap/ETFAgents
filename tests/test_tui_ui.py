@@ -1,9 +1,11 @@
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 
 try:
-    from textual.widgets import Static, ListView, Label
+    from textual.widgets import Button, Static, ListView, Label
+    from textual.containers import VerticalScroll
 except ModuleNotFoundError:
     Static = None
 
@@ -14,9 +16,12 @@ from cli.tui.app import (
     AnalysisConfigModal,
     ETFAgentsTuiApp,
     HomeScreen,
+    LLM_PROVIDER_OPTIONS,
     LoginModal,
     OrderModal,
+    AnalysisRunScreen,
     ResearchAnalysisScreen,
+    _build_analysis_runner,
     ReportLibraryScreen,
     BacktestScreen,
     PaperTradingScreen,
@@ -24,9 +29,11 @@ from cli.tui.app import (
     HelpScreen,
 )
 from cli.tui.services import (
+    AnalysisConfig,
     BacktestViewer,
     PaperTradingViewModel,
     ReportRepository,
+    SectionDone,
     TickerFailed,
     TickerStarted,
     TickerDone,
@@ -87,6 +94,10 @@ class _FakePaperEngine:
     def _get_current_user(self):
         return self._logged_in_user
 
+    @property
+    def current_user(self):
+        return self._get_current_user()
+
     def login(self, username, password):
         if password == "correct":
             self._logged_in_user = username
@@ -103,6 +114,53 @@ class _FakePaperEngine:
 
     def sell(self, ticker, quantity, user_id=None, analysis_id=None):
         return {"ticker": ticker, "quantity": quantity, "status": "filled"}
+
+
+class _FakeAnalysisRunner:
+    def __init__(self):
+        self.calls = []
+        self.cancel_requested = False
+        self.stats = {
+            "llm_calls": 2,
+            "tool_calls": 3,
+            "tokens_in": 1200,
+            "tokens_out": 340,
+        }
+
+    def run_queue(self, tickers, analysis_date=None, selected_analysts=None):
+        self.calls.append((list(tickers), analysis_date, selected_analysts))
+        for ticker in tickers:
+            yield TickerStarted(ticker=ticker, total_sections=9)
+            yield TickerDone(ticker=ticker, report_path=Path("/fake/report.md"), rating="BUY")
+
+    def request_cancel(self):
+        self.cancel_requested = True
+
+    def get_stats(self):
+        return dict(self.stats)
+
+
+class _BlockingAnalysisRunner(_FakeAnalysisRunner):
+    def __init__(self):
+        super().__init__()
+        self.started = threading.Event()
+        self.release = threading.Event()
+
+    def run_queue(self, tickers, analysis_date=None, selected_analysts=None):
+        self.calls.append((list(tickers), analysis_date, selected_analysts))
+        self.started.set()
+        yield TickerStarted(ticker=tickers[0], total_sections=9)
+        self.release.wait(1)
+
+    def request_cancel(self):
+        super().request_cancel()
+        self.release.set()
+
+
+class _NoopAnalysisRunner(_FakeAnalysisRunner):
+    def run_queue(self, tickers, analysis_date=None, selected_analysts=None):
+        self.calls.append((list(tickers), analysis_date, selected_analysts))
+        return iter(())
 
 
 class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
@@ -213,27 +271,43 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#ra_ticker_input"))
                 self.assertIsNotNone(screen.query_one("#btn_ra_start"))
 
-    async def test_research_analysis_section_list_has_9_items(self):
+    async def test_analysis_run_screen_section_list_has_9_items(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
-                await pilot.click("#btn_research")
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
                 screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
                 sections = screen.query_one("#ra_sections")
                 self.assertEqual(len(sections.children), 9)
 
-    async def test_research_analysis_ticker_status_updates(self):
+    async def test_analysis_run_ticker_status_updates(self):
         """Verify ticker status changes from ⏳ → ✓/✗ when events fire."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
-                await pilot.click("#btn_research")
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
                 screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                queue = screen.query_one("#ra_queue", ListView)
+                queue.clear()
+                screen.ticker_ids.clear()
 
                 # Simulate ticker started
                 screen._handle_ticker_started(TickerStarted(ticker="510300.SH", total_sections=9))
                 await pilot.pause()
-                queue = screen.query_one("#ra_queue", ListView)
                 self.assertEqual(len(queue.children), 1)
 
                 # Simulate ticker done with rating
@@ -251,13 +325,24 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("✓", rendered)
                 self.assertIn("BUY", rendered)
 
-    async def test_research_analysis_ticker_selection(self):
+    async def test_analysis_run_ticker_selection(self):
         """Verify selecting a ticker in queue changes current_ticker."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
-                await pilot.click("#btn_research")
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH", "159915.SZ"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
                 screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                queue = screen.query_one("#ra_queue", ListView)
+                queue.clear()
+                screen.ticker_ids.clear()
+                screen.current_ticker = None
 
                 # Start two tickers
                 screen._handle_ticker_started(TickerStarted(ticker="510300.SH", total_sections=9))
@@ -265,7 +350,6 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
 
                 # Get the queue ListView
-                queue = screen.query_one("#ra_queue", ListView)
                 self.assertEqual(len(queue.children), 2)
 
                 # Initially first ticker is selected
@@ -285,6 +369,23 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 # Verify current_ticker changed
                 self.assertEqual(screen.current_ticker, "159915.SZ")
 
+    async def test_analysis_run_worker_receives_runner_and_tickers(self):
+        """Starting analysis must pass runner/tickers into the worker callable."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _FakeAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(selected_analysts=["market_flow"]),
+                    runner=runner,
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                await pilot.pause()
+                self.assertEqual(runner.calls[0][0], ["510300.SH"])
+                self.assertEqual(runner.calls[0][2], ["market_flow"])
+
     # --- BacktestScreen (M4: has run inputs) ---
 
     async def test_backtest_screen_has_run_inputs(self):
@@ -300,17 +401,108 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#bt_run_end"))
                 self.assertIsNotNone(screen.query_one("#btn_bt_run"))
 
-    # --- ResearchAnalysisScreen M4: cancel button ---
+    # --- AnalysisRunScreen M4: cancel button ---
 
-    async def test_cancel_button_exists_and_initially_disabled(self):
+    async def test_analysis_run_cancel_button_enables_while_running(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _BlockingAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=runner,
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                cancel = screen.query_one("#btn_ra_cancel", Button)
+                self.assertFalse(cancel.disabled)
+                screen._cancel_analysis()
+                self.assertTrue(runner.cancel_requested)
+
+    async def test_analysis_run_body_defaults_to_overall_progress(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
-                await pilot.click("#btn_research")
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_FakeAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
                 screen = app.screen
-                from textual.widgets import Button
-                cancel = screen.query_one("#btn_ra_cancel", Button)
-                self.assertTrue(cancel.disabled)
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                self.assertEqual(str(screen.query_one("#ra_body_title", Static).render()), "整体进度")
+                body = screen.query_one("#ra_body")
+                self.assertIn("开始分析", body._markdown)
+
+    async def test_analysis_run_report_body_is_scrollable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                self.assertIsInstance(screen.query_one("#ra_body_scroll"), VerticalScroll)
+
+    async def test_analysis_run_shows_cli_runtime_stats_bar(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_FakeAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                stats_bar = str(screen.query_one("#ra_stats_bar", Static).render())
+                self.assertIn("Agents", stats_bar)
+                self.assertIn("Agent", stats_bar)
+                self.assertIn("LLM 2", stats_bar)
+                self.assertIn("Tools 3", stats_bar)
+                self.assertIn("Tokens 1.2k", stats_bar)
+                self.assertIn("Reports", stats_bar)
+
+    async def test_analysis_run_section_click_switches_to_report_or_progress(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_FakeAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                screen._handle_section_done(SectionDone(
+                    ticker="510300.SH",
+                    section_id="market_flow",
+                    content="市场资金流报告正文",
+                    completed=1,
+                    total=9,
+                ))
+                await pilot.pause()
+                sections = screen.query_one("#ra_sections", ListView)
+                event = ListView.Selected(sections, sections.children[0], 0)
+                screen.on_list_view_selected(event)
+                await pilot.pause()
+                self.assertIn("市场与资金流", str(screen.query_one("#ra_body_title", Static).render()))
+                self.assertIn("市场资金流报告正文", screen.query_one("#ra_body")._markdown)
 
     # --- SettingsScreen ---
 
@@ -329,7 +521,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screen = app.screen
                 self.assertIsNotNone(screen.query_one("#sel_theme"))
                 self.assertIsNotNone(screen.query_one("#sel_density"))
-                self.assertIsNotNone(screen.query_one("#inp_pane_width"))
+                self.assertIsNotNone(screen.query_one("#sel_panel_width"))
                 self.assertIsNotNone(screen.query_one("#btn_settings_save"))
 
     # --- PaperTradingScreen M4: buy/sell/login buttons ---
@@ -542,7 +734,23 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 # Should be back on research screen, no runner active
                 self.assertIsInstance(app.screen, ResearchAnalysisScreen)
-                self.assertIsNone(screen._active_runner)
+
+    async def test_analysis_config_ok_opens_dedicated_run_screen(self):
+        """Confirming config should navigate from input screen to the run screen."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _FakeAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                await pilot.click("#btn_acm_ok")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, AnalysisRunScreen)
+                run_screen = app.screen
+                self.assertEqual(run_screen.tickers, ["510300.SH"])
 
     async def test_analysis_config_modal_has_expected_widgets(self):
         """Config modal should have depth, provider, language selects and OK/cancel buttons."""
@@ -559,9 +767,107 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(modal, AnalysisConfigModal)
                 self.assertIsNotNone(modal.query_one("#acm_depth"))
                 self.assertIsNotNone(modal.query_one("#acm_provider"))
+                self.assertIsNotNone(modal.query_one("#acm_quick_model"))
+                self.assertIsNotNone(modal.query_one("#acm_deep_model"))
                 self.assertIsNotNone(modal.query_one("#acm_language"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_ok"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_cancel"))
+
+    async def test_analysis_config_modal_updates_models_for_provider(self):
+        """Changing provider should refresh quick/deep model choices."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                provider_select = modal.query_one("#acm_provider")
+                provider_select.value = "minimax"
+                await pilot.pause()
+                quick_select = modal.query_one("#acm_quick_model")
+                deep_select = modal.query_one("#acm_deep_model")
+                self.assertTrue(str(quick_select.value).startswith("MiniMax"))
+                self.assertTrue(str(deep_select.value).startswith("MiniMax"))
+
+    async def test_analysis_config_modal_depth_options_show_round_counts(self):
+        """Research depth labels should explain debate and risk round counts."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                depth_select = modal.query_one("#acm_depth")
+                labels = {str(option[0]) for option in depth_select._options}
+                self.assertIn("标准 (debate×1, risk×1)", labels)
+                self.assertIn("快速 (debate×0, risk×0)", labels)
+                self.assertIn("全面 (debate×3, risk×3)", labels)
+
+    async def test_analysis_config_modal_lists_all_supported_llm_providers(self):
+        """TUI provider choices should match the supported provider set."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                provider_select = modal.query_one("#acm_provider")
+                option_values = {
+                    option.value if hasattr(option, "value") else option[1]
+                    for option in provider_select._options
+                }
+                option_values = {value for value in option_values if isinstance(value, str)}
+                expected = {provider for _, provider, _ in LLM_PROVIDER_OPTIONS}
+                self.assertEqual(option_values, expected)
+                self.assertIn("vllm", option_values)
+                self.assertIn("ollama", option_values)
+                self.assertIn("minimax", option_values)
+
+    def test_analysis_runner_config_uses_provider_default_models(self):
+        runner = _build_analysis_runner(AnalysisConfig(llm_provider="minimax"))
+
+        self.assertEqual(runner.config["llm_provider"], "minimax")
+        self.assertEqual(runner.config["backend_url"], "https://api.minimax.chat/v1")
+        self.assertTrue(runner.config["quick_think_llm"].startswith("MiniMax"))
+        self.assertTrue(runner.config["deep_think_llm"].startswith("MiniMax"))
+
+    def test_analysis_runner_config_uses_selected_models(self):
+        runner = _build_analysis_runner(AnalysisConfig(
+            llm_provider="minimax",
+            quick_model="MiniMax-M2.7-highspeed",
+            deep_model="MiniMax-M2.7",
+        ))
+
+        self.assertEqual(runner.config["quick_think_llm"], "MiniMax-M2.7-highspeed")
+        self.assertEqual(runner.config["deep_think_llm"], "MiniMax-M2.7")
+
+    async def test_quit_requests_active_analysis_cancel(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _BlockingAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=runner,
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                self.assertIsNotNone(screen._analysis_thread)
+                self.assertTrue(screen._analysis_thread.daemon)
+                app._cancel_active_operations()
+                self.assertTrue(runner.cancel_requested)
 
     # --- Backtest run error ---
 
@@ -630,6 +936,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self,
         results_dir: str,
         *,
+        analysis_runner=None,
         with_paper: bool = False,
         with_backtest: bool = False,
     ) -> ETFAgentsTuiApp:
@@ -641,6 +948,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
             backtest_viewer = BacktestViewer(results_dir)
         return ETFAgentsTuiApp(
             repository=ReportRepository(results_dir),
+            analysis_runner=analysis_runner,
             paper_view_model=paper_vm,
             backtest_viewer=backtest_viewer,
         )

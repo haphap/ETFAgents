@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import csv
 import json
+import re
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -124,50 +125,23 @@ class AnalysisConfig:
     selected_analysts: list[str] = field(default_factory=lambda: list(ANALYST_KEYS))
     depth_name: str = "标准"
     llm_provider: str = "openai"
+    backend_url: str | None = None
+    quick_model: str | None = None
+    deep_model: str | None = None
     output_language: str = "Chinese"
 
 
 # ---------------------------------------------------------------------------
-# TUI settings (persisted to JSON)
+# TUI settings — canonical definitions live in cli.tui.settings
 # ---------------------------------------------------------------------------
 
-SETTINGS_PATH = Path("~/.etfagents/tui_settings.json").expanduser()
-AVAILABLE_THEMES = [
-    "textual-dark", "textual-light", "nord", "gruvbox",
-    "catppuccin-mocha", "dracula", "tokyo-night", "monokai",
-]
-
-
-@dataclass
-class TuiSettings:
-    theme: str = "textual-dark"
-    density: str = "normal"
-    left_pane_width: int = 35
-
-    def save(self, path: Path = SETTINGS_PATH) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {"theme": self.theme, "density": self.density,
-                 "left_pane_width": self.left_pane_width},
-                ensure_ascii=False, indent=2,
-            ),
-            encoding="utf-8",
-        )
-
-    @classmethod
-    def load(cls, path: Path = SETTINGS_PATH) -> TuiSettings:
-        if not path.exists():
-            return cls()
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return cls(
-                theme=data.get("theme", "textual-dark"),
-                density=data.get("density", "normal"),
-                left_pane_width=data.get("left_pane_width", 35),
-            )
-        except (OSError, json.JSONDecodeError, KeyError, AttributeError, TypeError):
-            return cls()
+from cli.tui.settings import (  # noqa: F401, E402
+    AVAILABLE_THEMES,
+    DENSITY_OPTIONS,
+    PANEL_WIDTH_PRESETS,
+    SETTINGS_PATH,
+    TuiSettings,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -567,6 +541,8 @@ class AnalysisRunner:
         self.config = copy.deepcopy(config or DEFAULT_CONFIG)
         self.states: dict[str, TickerState] = {}
         self._cancel_event = threading.Event()
+        from cli.stats_handler import StatsCallbackHandler
+        self.stats_handler = StatsCallbackHandler()
 
     def request_cancel(self) -> None:
         self._cancel_event.set()
@@ -605,13 +581,16 @@ class AnalysisRunner:
 
             yield TickerStarted(ticker=ticker, total_sections=len(SECTION_DEFINITIONS))
 
-            init_state, args, _ = graph.prepare_run(ticker, analysis_date)
+            init_state, args, _ = graph.prepare_run(
+                ticker,
+                analysis_date,
+                callbacks=[self.stats_handler],
+            )
             accumulated = copy.deepcopy(init_state)
 
             from cli.report_utils import merge_stream_state
 
-            already_done: set[str] = set()
-            completed = 0
+            emitted_sections: dict[str, str] = {}
 
             for chunk in graph.graph.stream(init_state, **args):
                 if self._cancel_event.is_set():
@@ -621,9 +600,8 @@ class AnalysisRunner:
 
                 merge_stream_state(accumulated, chunk)
                 for event in self._detect_section_updates(
-                    chunk, accumulated, already_done, ticker
+                    chunk, accumulated, emitted_sections, ticker
                 ):
-                    completed += 1
                     yield event
 
             # Finalize and save (skip if cancelled during stream)
@@ -649,14 +627,11 @@ class AnalysisRunner:
         self,
         chunk: dict,
         accumulated: dict,
-        already_done: set[str],
+        emitted_sections: dict[str, str],
         ticker: str,
     ) -> Iterator[SectionDone]:
         """Yield SectionDone events for newly completed sections."""
         for defn in SECTION_DEFINITIONS:
-            if defn.section_id in already_done:
-                continue
-
             for det_key in defn.detection_keys:
                 value = self._get_chunk_value(chunk, det_key)
                 if value is None:
@@ -666,18 +641,22 @@ class AnalysisRunner:
                 if det_key == defn.state_key:
                     content = str(value)
                 elif det_key == "investment_debate_state":
-                    if not isinstance(value, dict) or not value.get("judge_decision"):
+                    if not isinstance(value, dict):
                         continue
                     content = self._format_research(value)
                 elif det_key == "risk_debate_state":
-                    if not isinstance(value, dict) or not value.get("judge_decision"):
+                    if not isinstance(value, dict):
                         continue
                     content = self._format_risk(value)
                 else:
                     content = str(value)
 
-                already_done.add(defn.section_id)
-                completed = len(already_done)
+                if not content.strip() or emitted_sections.get(defn.section_id) == content:
+                    continue
+
+                is_new_section = defn.section_id not in emitted_sections
+                emitted_sections[defn.section_id] = content
+                completed = len(emitted_sections) if is_new_section else len(emitted_sections)
                 yield SectionDone(
                     ticker=ticker,
                     section_id=defn.section_id,
@@ -719,7 +698,12 @@ class AnalysisRunner:
             selected_analysts=selected_analysts,
             config=self.config,
             debug=False,
+            callbacks=[self.stats_handler],
         )
+
+    def get_stats(self) -> dict[str, Any]:
+        """Return current LLM/tool/token usage stats."""
+        return self.stats_handler.get_stats()
 
     def _save_report(self, state: dict, ticker: str, analysis_date: str) -> Path:
         """Save complete report to disk."""
@@ -755,11 +739,6 @@ class BacktestStarted:
 
 
 @dataclass(frozen=True)
-class BacktestProgress:
-    message: str
-
-
-@dataclass(frozen=True)
 class BacktestFinished:
     output_dir: Path
 
@@ -769,7 +748,7 @@ class BacktestFailed:
     error: str
 
 
-BacktestEvent = BacktestStarted | BacktestProgress | BacktestFinished | BacktestFailed
+BacktestEvent = BacktestStarted | BacktestFinished | BacktestFailed
 
 
 class BacktestRunner:
@@ -789,7 +768,6 @@ class BacktestRunner:
         try:
             from etfagents.graph.etf_graph import EtfAgentsGraph
             from etfagents.backtest import save_backtest_result
-            import re
 
             cfg = copy.deepcopy(config or DEFAULT_CONFIG)
             graph = EtfAgentsGraph(config=cfg, debug=False)
@@ -855,7 +833,7 @@ class PaperTradingViewModel:
         )
 
     def current_user(self) -> str:
-        return self.engine._get_current_user()
+        return self.engine.current_user
 
     def login(self, username: str, password: str) -> bool:
         return self.engine.login(username, password)

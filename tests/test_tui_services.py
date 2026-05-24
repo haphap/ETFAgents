@@ -116,17 +116,19 @@ class TuiSettingsTests(unittest.TestCase):
         s = TuiSettings()
         self.assertEqual(s.theme, "textual-dark")
         self.assertEqual(s.density, "normal")
-        self.assertEqual(s.left_pane_width, 35)
+        self.assertEqual(s.panel_width, "normal")
+        self.assertEqual(s.left_pane_pct, 35)
 
     def test_save_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "settings.json"
-            s = TuiSettings(theme="nord", density="compact", left_pane_width=45)
+            s = TuiSettings(theme="nord", density="compact", panel_width="wide")
             s.save(path)
             loaded = TuiSettings.load(path)
             self.assertEqual(loaded.theme, "nord")
             self.assertEqual(loaded.density, "compact")
-            self.assertEqual(loaded.left_pane_width, 45)
+            self.assertEqual(loaded.panel_width, "wide")
+            self.assertEqual(loaded.left_pane_pct, 40)
 
     def test_corrupt_file_returns_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -146,6 +148,13 @@ class TuiSettingsTests(unittest.TestCase):
             loaded = TuiSettings.load(path)
             self.assertEqual(loaded.theme, "textual-dark")
 
+    def test_validate_clamps_invalid_values(self):
+        s = TuiSettings(theme="nonexistent", density="invalid", panel_width="huge")
+        s.validate()
+        self.assertEqual(s.theme, "textual-dark")
+        self.assertEqual(s.density, "normal")
+        self.assertEqual(s.panel_width, "normal")
+
 
 class _FakePaperEngine:
     def __init__(self):
@@ -162,6 +171,10 @@ class _FakePaperEngine:
 
     def _get_current_user(self):
         return self._logged_in_user
+
+    @property
+    def current_user(self):
+        return self._get_current_user()
 
     def login(self, username, password):
         if password == "correct":
