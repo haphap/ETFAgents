@@ -9,13 +9,13 @@
 - Backlog.md README: https://github.com/MrLesk/Backlog.md
 - 终端 board GIF: https://github.com/MrLesk/Backlog.md/blob/main/.github/backlog-v1.40.gif
 - Web UI 截图: https://github.com/MrLesk/Backlog.md/blob/main/.github/web.jpeg
-- Backlog.md Web 样式基调：slate 深色背景、blue 主强调、green/yellow 语义状态、紧凑任务卡片。
+- Backlog.md Web 样式基调：slate 深色背景、blue 主强调、green/yellow 语义状态、紧凑任务卡片；终端交互借鉴其 board 的文本优先风格，避免大块按钮。
 
 ## Visual Direction
 
-- 视觉关键词：terminal kanban、dark slate、compact dashboard、status chips、task cards。
+- 视觉关键词：terminal kanban、dark slate、compact dashboard、status chips、task cards、text actions。
 - 基底颜色：`#0f172a` / `#111827` 类深色背景，面板使用 `#1e293b`，次级面板使用 `#334155`。
-- 主强调色：蓝色 `#3b82f6` 或 Textual 对应 accent，用于当前选中、主按钮、滚动条和焦点边框。
+- 主强调色：蓝色 `#3b82f6` 或 Textual 对应 accent，用于当前选中、高亮条、滚动条和焦点边框。
 - 状态色：
   - 成功/完成：green。
   - 运行/等待：yellow 或 cyan。
@@ -25,6 +25,18 @@
   - 列表项像 backlog task card：单行可扫读，选中态明显。
   - 面板像 kanban column：标题固定、内容紧凑、边界清晰。
   - 底部统计栏像 status strip：一行展示 Agents、LLM、Tools、Tokens、Reports、Elapsed。
+  - 动作控件尽量像文本命令：不用大面积填充色按钮，使用左侧高亮条、下划线、反色焦点或短状态前缀表达可操作性。
+
+## Minimal Interaction Style
+
+当前 UI 的块状按钮观感过重。重构时按钮仍可使用 Textual `Button` 组件以保留事件和测试 ID，但视觉上应伪装成简约文本动作。
+
+- 导航项：一行文本 + 左侧高亮条。未选中为 muted 文本；hover/focus 只改变左侧 `▌` 或文本前缀，不整块铺蓝底。
+- 主动作：使用 `› Start Analysis`、`› Run Backtest`、`› Buy` 这类文本动作。仅文字或前缀使用 accent，背景保持透明/面板色。
+- 次要动作：使用普通 muted 文本，如 `Refresh`, `Cancel`, `Logout`；危险动作只用红色文字，不用红色实心块。
+- 表单控件：输入框和 Select 保留边框，但边框细、背景接近面板色；focus 时只变边框/标题色。
+- 不使用 rounded pill、厚重按钮、全宽色块按钮。全宽导航可保留点击区域，但视觉必须是文本行。
+- 保留所有 `#btn_*` IDs；“按钮简约化”只改 CSS 和显示文本，不改交互契约。
 
 ## Reference Interfaces
 
@@ -35,10 +47,10 @@
 ```text
 ┌ ETFAgents ───────────────────────────────────────────────────────────────┐
 │ ┌ Navigation ───────────────┐ ┌ Workspace ─────────────────────────────┐ │
-│ │  > Research Analysis       │ │ ETFAgents Interactive Mode             │ │
-│ │    Reports Library         │ │ Multi-agent ETF research workspace     │ │
-│ │    Backtest                │ │                                        │ │
-│ │    Paper Trading           │ │ ┌ Research ───────┐ ┌ Reports ──────┐ │ │
+│ │ ▌ Research Analysis        │ │ ETFAgents Interactive Mode             │ │
+│ │   Reports Library          │ │ Multi-agent ETF research workspace     │ │
+│ │   Backtest                 │ │                                        │ │
+│ │   Paper Trading            │ │ ┌ Research ───────┐ ┌ Reports ──────┐ │ │
 │ │                            │ │ │ Configure ETFs   │ │ Local reports │ │ │
 │ │  ? Help   s Settings       │ │ │ Provider/model   │ │ Section view  │ │ │
 │ │  q Quit                    │ │ └──────────────────┘ └───────────────┘ │ │
@@ -54,7 +66,7 @@ Implementation notes:
 
 - 继续保留 `#btn_research`, `#btn_reports`, `#btn_backtest`, `#btn_paper`。
 - 首页右侧可以新增 `.dashboard-grid` / `.workspace-card`，但不要引入卡片套卡片。
-- 左侧导航按钮保持全宽，选中/hover 用蓝色背景。
+- 左侧导航保留全宽点击区域，但视觉是文本行 + 左侧高亮条；选中/hover 不使用整块蓝色背景。
 
 ### 2. Research Input
 
@@ -66,7 +78,7 @@ Implementation notes:
 │ │ ETF tickers               │ │ New research run                       │ │
 │ │ [510300.SH,159915.SZ   ]  │ │ 1. Enter ETF tickers                   │ │
 │ │                            │ │ 2. Select analysts, provider, models   │ │
-│ │ [ Start Analysis ]         │ │ 3. Track each team output in board     │ │
+│ │ › Start Analysis           │ │ 3. Track each team output in board     │ │
 │ └────────────────────────────┘ └────────────────────────────────────────┘ │
 └───────────────────────────────────────────────────────────────────────────┘
 ```
@@ -74,7 +86,7 @@ Implementation notes:
 Implementation notes:
 
 - 保留 `#ra_ticker_input`, `#btn_ra_start`, `#ra_intro`。
-- 输入框聚焦态用蓝色边框，主按钮用蓝底。
+- 输入框聚焦态用蓝色细边框；开始分析动作显示为文本动作 `› Start Analysis`，不用蓝底块。
 - `#ra_intro` 文案要短，避免说明书式长段落。
 
 ### 3. Analysis Config Modal
@@ -95,7 +107,7 @@ Implementation notes:
                  │ Deep Model                                     │
                  │ [provider default]                             │
                  │                                                │
-                 │ [ Confirm ] [ Cancel ]                         │
+                 │ › Confirm    Cancel                            │
                  └────────────────────────────────────────────────┘
 ```
 
@@ -104,7 +116,7 @@ Implementation notes:
 - 保留 `#acm_*` IDs。
 - checkbox 保持 `compact=True` 或等价低高度，但 label 必须有足够宽度。
 - 弹窗宽度建议 `88` 左右，最大高度限制，必要时改为滚动容器。
-- 按钮横排，主按钮蓝色，取消按钮 slate。
+- 动作横排，主动作只用 accent 文本/前缀，取消动作用 muted 文本；不要实心按钮背景。
 
 ### 4. Analysis Run Board
 
@@ -118,7 +130,7 @@ Implementation notes:
 │ │   depth: 标准    │ │ │ ▒ 舆情与事件    ○ 中观大宗│ ▓▓░ 2/3     │ ░░░ 0/1   │           ││
 │ │   provider:openai│ │ │ ○ 持仓行业      ○ 头部持仓│             │           │           ││
 │ │                  │ │ └──────────────────────────┴─────────────┴───────────┴──────────┘│
-│ │ [ Cancel ]       │ │ ┌ Report ───────────────────────────────────────────────┐ │
+│ │ Cancel           │ │ ┌ Report ───────────────────────────────────────────────┐ │
 │ │                  │ │ │ ## 舆情与事件分析                                       │ │
 │ │ Queue            │ │ │ ...streamed or completed report...                      │ │
 │ │ > 510300.SH      │ │ └───────────────────────────────────────────────────────┘ │
@@ -193,7 +205,7 @@ Implementation notes:
 │ │ New backtest             │ │ │ Return +4.8%  │ DD -2.1%    │ 18 orders   │ │ │
 │ │ [tickers              ]  │ │ │ Sharpe 1.42   │ Vol 12.0%   │ 12 filled   │ │ │
 │ │ [start] [end]            │ │ └───────────────┴─────────────┴─────────────┘ │ │
-│ │ [ Run ] [ Refresh ]      │ │ ┌ Summary / Orders / Trades ───────────────┐ │ │
+│ │ › Run   Refresh          │ │ ┌ Summary / Orders / Trades ───────────────┐ │ │
 │ │ status: idle             │ │ │ markdown summary or selected table        │ │ │
 │ └──────────────────────────┘ └────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────────────┘
@@ -205,7 +217,7 @@ Implementation notes:
 - 右上区域拆成 NAV sparkline + metrics summary，不改变 `BacktestViewer` 或 `BacktestRunner` 的数据契约。
 - `#bt_metrics` 继续用 `DataTable`，但外层用一致的 panel/card 样式，指标按收益/风险/交易三组排序。
 - 空状态显示“暂无回测结果”和一个可直接填写的新回测表单。
-- 回测运行中禁用 Run 按钮，状态用 yellow；成功用 green；失败用 red。
+- 回测运行中禁用 Run 动作，状态文字用 yellow；成功用 green；失败用 red。禁用态降低文字亮度，不显示灰色块。
 - 可选新增 tabs/segmented control 样式文本，用于在 Summary / Orders / Trades 之间切换；如果不实现切换，先保持 Summary 主视图和 metrics table，避免扩大范围。
 
 ### 7. Paper Trading Console
@@ -218,9 +230,9 @@ Implementation notes:
 │ │ user: default           │ │ ┌ Account Snapshot ───────────────────────────┐ │ │
 │ │ status: connected       │ │ │ Total 150,000 | Cash 100,000 | MV 50,000    │ │ │
 │ │                         │ │ │ Unrealized +1,234.56 | Realized -200.00    │ │ │
-│ │ [ Login ] [ Logout ]    │ │ └────────────────────────────────────────────┘ │ │
-│ │ [ Buy  ] [ Sell   ]     │ │ ┌ Positions ─────────────────────────────────┐ │ │
-│ │ [ Refresh ]             │ │ │ 510300.SH  沪深300ETF   +6.67%  +300.00    │ │ │
+│ │ Login   Logout          │ │ └────────────────────────────────────────────┘ │ │
+│ │ › Buy   Sell            │ │ ┌ Positions ─────────────────────────────────┐ │ │
+│ │ Refresh                 │ │ │ 510300.SH  沪深300ETF   +6.67%  +300.00    │ │ │
 │ │                         │ │ │ 159915.SZ  创业板ETF    -9.52%  -100.00    │ │ │
 │ │ order status: idle      │ │ └────────────────────────────────────────────┘ │ │
 │ │                         │ │ ┌ Trades ────────────────────────────────────┐ │ │
@@ -240,13 +252,13 @@ Implementation notes:
 ## Implementation Changes
 
 - `cli/tui/app.py`
-  - 重写全局 CSS，新增统一的 panel/card/list/status/button/form 样式。
+  - 重写全局 CSS，新增统一的 panel/card/list/status/text-action/form 样式。
   - 调整 `.left-pane`, `.right-pane`, `.right-top`, `.right-bottom`, `.nav-pane`, `.dashboard-pane`, `#ra_stats_bar` 的视觉层级。
-  - 新增语义 class：`.workspace-card`, `.status-strip`, `.section-card`, `.muted`, `.success-text`, `.warning-text`, `.error-text`。
+  - 新增语义 class：`.workspace-card`, `.status-strip`, `.section-card`, `.text-action`, `.nav-action`, `.muted`, `.success-text`, `.warning-text`, `.error-text`。
   - 新增看板 class：`.column-active`, `.column-inactive`（活跃列蓝色边框、非活跃灰色边框）。
 - `cli/tui/screens/home.py`
   - 改造首页右侧为任务板式 dashboard。
-  - 保持导航按钮 IDs 和导航行为不变。
+  - 保持导航 Button IDs 和导航行为不变，但视觉改为文本导航 + 左侧高亮条。
 - `cli/tui/screens/research.py`
   - 优化研究输入页提示和布局。
   - 调整 `AnalysisConfigModal` 的分组、宽度、间距。
@@ -266,6 +278,9 @@ Implementation notes:
   - 改成“Account / Actions + Portfolio Board”布局。
   - 强化账户概览、持仓、交易历史和未配置引擎状态。
   - 保留登录、下单、刷新行为和弹窗 IDs。
+- 所有屏幕
+  - `Button` 组件统一加 `text-action` / `nav-action` 等 class，CSS 去掉厚重背景、粗边框和大色块。
+  - 只在焦点、hover、选中态使用短高亮条或前缀色，不使用整块蓝底。
 
 ## Interfaces
 
@@ -293,6 +308,7 @@ Implementation notes:
 - 报告库、回测、模拟交易页面与首页/研究页使用一致配色和组件风格。
 - 回测页呈现 Runs / New Test + Performance Board，NAV、核心指标、状态和空状态清晰可见。
 - 模拟交易页呈现 Account / Actions + Portfolio Board，账户快照、持仓和交易历史清晰可见。
+- 所有按钮视觉简约：文本动作 + 高亮条/前缀/焦点反色，无大面积实心色块。
 - 不改变研究分析、报告读取、回测运行、模拟交易的业务行为。
 
 ## Test Plan
@@ -303,6 +319,7 @@ Implementation notes:
   - `uv run python -m py_compile cli/tui/app.py cli/tui/screens/home.py cli/tui/screens/research.py cli/tui/screens/reports.py cli/tui/screens/backtest.py cli/tui/screens/paper.py tests/test_tui_ui.py`
 - 增加/调整视觉回归类测试：
   - 首页仍显示 4 个主按钮并可导航。
+  - 首页 4 个导航 Button 仍保留原 IDs，但渲染为文本导航样式，不出现厚重实心按钮。
   - 分析配置弹窗仍显示分析师文字。
   - 运行页底部统计栏文本非空且 widget 可见。
   - 运行页团队看板区 4 列正确渲染（分析团队/研究/风险/决策）。
@@ -317,6 +334,7 @@ Implementation notes:
 - 采用"全局外观 + 终端任务板"方案。
 - 这次是 TUI 视觉与布局重构，不改分析流程、不改报告验收逻辑、不新增 Web UI。
 - 参考 Backlog.md 的风格原则，不复制其 React/Tailwind 组件实现。
+- 按钮策略参考 Backlog.md 的终端 board：文本优先，靠高亮条/前缀表达状态，而不是靠大块按钮。
 - 运行页团队看板采用横向 4 列布局（分析团队/研究/风险/决策），不按状态分 3 列（已完成/进行中/待开始），以更直观反映团队协作流程。
 - 分析团队列子项双列排版，研究/风险列子项下方显示辩论进度条 `▓▓░ current/max`。
 - 团队列映射到代码字段：分析团队→`team == "分析师"`；研究→`section_id == "research"`；风险→合成 UI 阶段，来自 `risk_debate_state`；决策→`trader` + `portfolio_manager`。
