@@ -37,6 +37,7 @@
 - 表单控件：输入框和 Select 保留边框，但边框细、背景接近面板色；focus 时只变边框/标题色。
 - 不使用 rounded pill、厚重按钮、全宽色块按钮。全宽导航可保留点击区域，但视觉必须是文本行。
 - 保留所有 `#btn_*` IDs；“按钮简约化”只改 CSS 和显示文本，不改交互契约。
+- Textual `Button` 需要覆盖默认内部样式：`min-width: 0` 或最小可行宽度、`border: none`、`background: transparent`、低 padding、`content-align: left middle`。仅依赖 `compact=True` 不够，首页/侧栏/表单动作都要通过 CSS class 统一处理。
 
 ## Reference Interfaces
 
@@ -65,7 +66,7 @@
 Implementation notes:
 
 - 继续保留 `#btn_research`, `#btn_reports`, `#btn_backtest`, `#btn_paper`。
-- 首页右侧可以新增 `.dashboard-grid` / `.workspace-card`，但不要引入卡片套卡片。
+- 首页右侧可以新增 `.dashboard-grid` / `.workspace-card`，但 `.workspace-card` 应优先用 styled `Static` 文本块或单层 `Vertical` 容器实现，不引入可交互复杂组件，也不要卡片套卡片。
 - 左侧导航保留全宽点击区域，但视觉是文本行 + 左侧高亮条；选中/hover 不使用整块蓝色背景。
 
 ### 2. Research Input
@@ -115,6 +116,7 @@ Implementation notes:
 
 - 保留 `#acm_*` IDs。
 - checkbox 保持 `compact=True` 或等价低高度，但 label 必须有足够宽度。
+- 分析师 checkbox 改为明确的 3×2 网格：优先使用 Textual CSS grid（例如容器 class `.analyst-grid`，`grid-size: 3 2`），避免手工嵌套多层 Horizontal/Vertical 造成对齐和窄宽度问题。
 - 弹窗宽度建议 `88` 左右，最大高度限制，必要时改为滚动容器。
 - 动作横排，主动作只用 accent 文本/前缀，取消动作用 muted 文本；不要实心按钮背景。
 
@@ -125,7 +127,7 @@ Implementation notes:
 ```text
 ┌ Analysis Run ───────────────────────────────────────────────────────────────────┐
 │ ┌ ETF Queue ───────┐ ┌ Board ──────────────────────────────────────────────────┐│
-│ │ 510300.SH        │ │ ┌ 分析团队 (2/6) ──────────┬ 研究 (▒1/1) ┬ 风险 (0/1) ┬ 决策 (0/1) ┐│
+│ │ 510300.SH        │ │ ┌ 分析团队 (2/6) ──────────┬ 研究 (1/1) ┬ 风险 (0/1) ┬ 决策 (0/1) ┐│
 │ │   status: running│ │ │ ✔ 市场与资金流  ✔ 宏观框架│ ▒ 研究团队   │ ○ 交易员   │ ○ PM      ││
 │ │   depth: 标准    │ │ │ ▒ 舆情与事件    ○ 中观大宗│ ▓▓░ 2/3     │ ░░░ 0/1   │           ││
 │ │   provider:openai│ │ │ ○ 持仓行业      ○ 头部持仓│             │           │           ││
@@ -142,12 +144,12 @@ Implementation notes:
 
 列头团队与代码中 team 字段的映射：
 
-| 列头显示 | 代码 team | 子项来源 |
-|----------|-----------|----------|
-| 分析团队 | 分析师 | market_flow, catalyst_sentiment, macro_regime, meso_commodity, holdings_industry, top_holdings |
-| 研究 | 研究 | research |
-| 风险 | 合成 UI 阶段 | risk_debate_state |
-| 决策 | 交易/决策 | trader, portfolio_manager |
+| 列头显示 | UI section id | 底层来源 |
+|----------|---------------|----------|
+| 分析团队 | existing analyst section ids | `team == "分析师"`: market_flow, catalyst_sentiment, macro_regime, meso_commodity, holdings_industry, top_holdings |
+| 研究 | research | existing `section_id == "research"` + `investment_debate_state` |
+| 风险 | risk_debate | synthetic UI-only section, driven by `risk_debate_state` |
+| 决策 | trader, portfolio_manager | UI-only grouping of existing `team == "交易"` and `team == "决策"` |
 
 Implementation notes:
 
@@ -156,16 +158,26 @@ Implementation notes:
   - 不分层，团队名即列头，子项直接平铺在列内
   - 分析团队列内 6 个子项双列排版（3 行 × 2 列），宽框省纵向空间
   - 研究/风险/决策列各仅 1 个子项，列窄
-- 列头含状态图标 + 完成计数：如 `分析团队 (2/6)`、`研究 (▒1/1)`
+- 列头只显示完成计数：如 `分析团队 (2/6)`、`研究 (1/1)`；运行/完成/失败状态由列内子项图标表达。
 - 研究/风险列子项下方显示辩论进度条 `▓▓░ current/max`
   - 研究团队：当前轮次 = `investment_debate_state["count"] // 2`，总轮次 = `max_debate_rounds`
   - 风险阶段：当前轮次 = `(risk_debate_state["count"] + 2) // 3`，总轮次 = `max_risk_discuss_rounds`
   - 风险列不是 `trader` section；当前代码中 `risk_debate_state` 是 `portfolio_manager` 的 detection key，因此实现应把风险列作为合成 UI 阶段，由 `risk_debate_state` 驱动
   - 新增 `DebateProgress` 事件，将辩论 count 变化传递给 UI；不要通过改造 `SectionDone` 重载含义
+  - `AnalysisRunner._watch_graph()` 在读取 stream chunk 时检测 `investment_debate_state["count"]` 和 `risk_debate_state["count"]` 是否变化；变化时 emit `DebateProgress`，并继续按现有逻辑 emit `SectionDone`（两者并行，不互相替代）
+  - `DebateProgress.section_id` 对研究用 `"research"`，对风险用 synthetic `"risk_debate"`
+- 风险列状态规则：
+  - `risk_debate_state["count"] > 0` 且未达到 `3 * max_risk_discuss_rounds` 时显示 `▒`
+  - 达到 `3 * max_risk_discuss_rounds` 后显示 `✔`
+  - 风险列不接收 `SectionDone` 内容事件；它只消费 `DebateProgress` 和可选的最终 state snapshot
+- 决策列状态规则：
+  - `trader` 子项按现有 `SectionDone(section_id="trader")` 完成后显示 `✔`
+  - `portfolio_manager` 子项按现有 `SectionDone(section_id="portfolio_manager")` 或 `TickerDone` 后显示 `✔`
+  - 决策列把 `trader` 与 `portfolio_manager` 合并展示只是 UI 分组，不改变底层 `SectionDef.team` 值
 - 活跃列（当前正在产出报告的团队列）`.column-active` 蓝色边框，其余 `.column-inactive` 灰色边框
-- `ListItem` label 使用稳定状态前缀：`✔`, `▒`, `○`, `✘`
+- `ListItem` label 使用稳定状态前缀：`✔`, `▒`, `○`, `✘`。列头不再把运行图标塞进计数，使用 `研究 (1/1)` + 子项图标表达状态，避免 `研究 (▒1/1)` 的语义混乱。
 - 右下报告正文区高度填满剩余空间
-- `#ra_stats_bar` 高度固定为 3，padding 不导致文字消失
+- `#ra_stats_bar` 采用固定单行 status strip：优先移除边框或改用无边框高亮顶线；如果保留 `border: solid`，高度必须提高到 `5`。不要维持 `height: 3 + border` 的组合，因为边框会挤占内容行。
 - 当前选中的子项用蓝色高亮，已完成项绿色文字，失败项红色文字
 
 ### 5. Report Library
@@ -249,6 +261,17 @@ Implementation notes:
 - 登录/下单弹窗沿用全局 modal 样式；不改变登录、买入、卖出、刷新逻辑。
 - 未配置模拟交易引擎时显示可见 warning panel，不只在右侧孤立显示一句话。
 
+### 8. Settings
+
+目标：保留现有设置页的主题、密度、面板宽度能力，但避免新 slate 视觉方向和 Textual theme selector 互相误导。
+
+Implementation notes:
+
+- 保留 `#sel_theme`, `#sel_density`, `#sel_panel_width`, `#btn_settings_save`, `#btn_settings_reset`, `#settings_status`。
+- slate/kanban 外观应实现为应用 CSS 的默认视觉层，不硬编码到业务屏幕；`theme` selector 继续控制 Textual 基础 theme，但文案应说明它是“终端基础主题”，不是完整品牌皮肤。
+- 如果 slate palette 覆盖了大多数颜色，设置页需要同步文案，避免用户选择其他 Textual theme 后期待完整换肤。
+- 密度和面板宽度 presets 继续生效，不能被新布局绕过。
+
 ## Implementation Changes
 
 - `cli/tui/app.py`
@@ -265,7 +288,7 @@ Implementation notes:
   - 运行页团队区域从纵向单列改为横向 4 列看板（分析团队/研究/风险/决策），不设嵌套层级，子项直接平铺。
   - 分析团队列内 6 个子项双列排版（3 行 × 2 列），宽框省纵向空间。
   - 研究/风险列子项下方显示辩论进度条 `▓▓░ current/max`。
-  - 新增 `DebateProgress` 事件，将 `investment_debate_state["count"]` / `risk_debate_state["count"]` 变化传递给 UI。
+  - 新增 `DebateProgress` 事件，将 `investment_debate_state["count"]` / `risk_debate_state["count"]` 变化传递给 UI；事件由 `AnalysisRunner._watch_graph()` 在 count 变化时发出。
   - 保持现有 `SectionDone` 内容更新语义，不把 section 内容事件和进度事件混用。
 - `cli/tui/screens/reports.py`
   - 报告库按 backlog browser 风格重排列表、章节和正文空状态。
@@ -278,6 +301,9 @@ Implementation notes:
   - 改成“Account / Actions + Portfolio Board”布局。
   - 强化账户概览、持仓、交易历史和未配置引擎状态。
   - 保留登录、下单、刷新行为和弹窗 IDs。
+- `cli/tui/screens/settings_screen.py`
+  - 保留现有设置项和 IDs。
+  - 更新文案说明主题 selector 是 Textual 基础主题；密度/面板宽度继续作用于新布局。
 - 所有屏幕
   - `Button` 组件统一加 `text-action` / `nav-action` 等 class，CSS 去掉厚重背景、粗边框和大色块。
   - 只在焦点、hover、选中态使用短高亮条或前缀色，不使用整块蓝底。
@@ -294,13 +320,16 @@ Implementation notes:
   - `#pt_user_status`, `#btn_pt_login`, `#btn_pt_logout`, `#btn_pt_buy`, `#btn_pt_sell`, `#btn_pt_refresh`, `#pt_account`, `#pt_positions`, `#pt_trades`
 - 允许新增 CSS class 和少量 `Static` 文本块，但不破坏现有测试可查询对象。
 - 新增 `DebateProgress` 事件类型，携带 `ticker`, `section_id`, `current_round`, `max_rounds` 字段，用于驱动研究/风险列的辩论进度条。
-- 风险列作为合成 UI 阶段，数据来自 `risk_debate_state`，不要把它绑定到 `trader` section。
+- `DebateProgress` 由 `AnalysisRunner._watch_graph()` 发出：当 `investment_debate_state["count"]` 或 `risk_debate_state["count"]` 相对上次 chunk 变化时 emit。
+- 风险列使用 synthetic `section_id == "risk_debate"`，数据来自 `risk_debate_state`，不要把它绑定到 `trader` section。
+- 现有 `_format_research()` / `_format_risk()` 继续负责 Markdown 内容渲染；看板进度从 raw debate state 的 `count` 读取，不从格式化后的 Markdown 反解析。
 
 ## Acceptance Criteria
 
 - 首页第一屏有明确工作台质感：左侧导航清晰，右侧模块状态块紧凑可读。
 - 分析配置弹窗中，所有分析师 label 在 `140x40` 和常见窄宽度下可见。
 - 分析运行页的底部统计栏始终显示非空内容，不被 padding/border 挤掉。
+- 底部统计栏使用无边框单行 strip，或在保留边框时高度至少为 `5`；不得保留会裁剪内容的 `height: 3 + border` 组合。
 - 运行页团队看板区 4 列横向排列（分析团队/研究/风险/决策），不设嵌套层级，子项直接平铺。
 - 分析团队列内 6 个子项双列排版（3 行 × 2 列），不过度占用纵向空间。
 - 研究/风险列子项下方显示辩论进度条 `▓▓░ current/max`，数据来自 debate_state 的 count 字段。
@@ -325,6 +354,8 @@ Implementation notes:
   - 运行页团队看板区 4 列正确渲染（分析团队/研究/风险/决策）。
   - 分析团队列双列排版显示 6 个子项，不过度占用纵向空间。
   - 研究/风险列辩论进度条在 debate_state 更新时正确刷新。
+  - `_watch_graph()` 在 debate count 变化时 emit `DebateProgress`，且不影响现有 `SectionDone` emit。
+  - 风险列使用 synthetic `risk_debate` 进度，`portfolio_manager` 最终输出仍按原 section 完成。
   - 回测页保留运行表单、结果列表、sparkline、metrics 和 summary。
   - 模拟交易页保留账户、登录/登出、买卖、刷新、持仓、交易历史。
   - 关键页面在 `140x40` 尺寸下无关键控件缺失。
@@ -335,6 +366,7 @@ Implementation notes:
 - 这次是 TUI 视觉与布局重构，不改分析流程、不改报告验收逻辑、不新增 Web UI。
 - 参考 Backlog.md 的风格原则，不复制其 React/Tailwind 组件实现。
 - 按钮策略参考 Backlog.md 的终端 board：文本优先，靠高亮条/前缀表达状态，而不是靠大块按钮。
+- `max_risk_discuss_rounds` 是当前代码中的实际配置键，计划沿用该名称。
 - 运行页团队看板采用横向 4 列布局（分析团队/研究/风险/决策），不按状态分 3 列（已完成/进行中/待开始），以更直观反映团队协作流程。
 - 分析团队列子项双列排版，研究/风险列子项下方显示辩论进度条 `▓▓░ current/max`。
-- 团队列映射到代码字段：分析团队→`team == "分析师"`；研究→`section_id == "research"`；风险→合成 UI 阶段，来自 `risk_debate_state`；决策→`trader` + `portfolio_manager`。
+- 团队列映射到代码字段：分析团队→`team == "分析师"`；研究→`section_id == "research"`；风险→synthetic `risk_debate`，来自 `risk_debate_state`；决策→UI-only grouping of `trader` + `portfolio_manager`，不改变底层 team assignments。
