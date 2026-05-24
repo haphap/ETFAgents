@@ -19,6 +19,7 @@ from etfagents.agents.utils.report_leads import (
     has_invalid_opening_cap,
     post_judge_clean,
     pre_judge_clean,
+    starts_without_overview_paragraph,
 )
 from etfagents.agents.utils.validate_refine import AnalystReportSpec, validate_and_refine
 from etfagents.agents.utils.state_keys import get_asset_symbol, with_state_aliases
@@ -104,6 +105,42 @@ def _looks_like_complete_meso_commodity_report(report: str) -> bool:
         and contains_markdown_table(content)
         and _has_meso_commodity_overview_table_section(content)
     )
+
+
+def _ensure_meso_commodity_opening_cap(report: str) -> str:
+    """Restore a visible opening cap when the model starts directly at section one."""
+    if not report or not starts_without_overview_paragraph(report):
+        return report or ""
+
+    lines = report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    first_heading_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip().startswith("一、")
+        ),
+        None,
+    )
+    if first_heading_index is None:
+        return report
+
+    lead_lines: list[str] = []
+    in_lead = False
+    for line in lines[first_heading_index + 1:]:
+        stripped = line.strip()
+        if not stripped:
+            if in_lead:
+                break
+            continue
+        if stripped.startswith(("（", "二、", "三、", "四、", "|", "-", "*")):
+            break
+        in_lead = True
+        lead_lines.append(stripped)
+
+    opening = " ".join(lead_lines).strip()
+    if not opening:
+        return report
+    return f"{opening}\n\n{report}"
 
 
 def create_etf_structure_analyst(llm):
@@ -193,7 +230,7 @@ def create_etf_structure_analyst(llm):
             "| --- | --- | --- | --- | --- | --- |\n"
             "| 示例合约 | 依工具数据填写 | 依工具数据填写 | 依工具数据填写 | 依工具数据填写 | 依工具数据填写 |\n\n"
             "## 风格要求\n"
-            "- 直接以一中的核心矛盾论点开篇。不得以'本报告将…'、'以下是…'、'本分析基于…'等元描述开头。\n"
+            "- 正文第一段必须是独立开篇帽段，位于'一、核心矛盾与主线判断'之前；帽段直接写一中的核心矛盾论点，不得以'本报告将…'、'以下是…'、'本分析基于…'等元描述开头。\n"
             "- 开篇帽段不得使用括号插入名词解释、术语解释、英文简称或白话注释；若必须解释术语，直接融入句子，不要写成'（……）'。\n"
             "- 当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用'分别为'连接，不得逐个单独陈述。\n"
             "- 若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出'数据缺失''数据不足'等提示。\n"
@@ -254,6 +291,7 @@ def create_etf_structure_analyst(llm):
         report = pre_judge_clean(report) if report else report
         report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
         report = post_judge_clean(report) if report else report
+        report = _ensure_meso_commodity_opening_cap(report) if report else report
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

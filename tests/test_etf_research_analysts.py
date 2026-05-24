@@ -23,6 +23,7 @@ from etfagents.agents.analysts.social_media_analyst import (
 )
 from etfagents.agents.analysts.etf_structure_analyst import (
     create_etf_structure_analyst,
+    _ensure_meso_commodity_opening_cap,
     _looks_like_complete_meso_commodity_report,
 )
 from etfagents.agents.analysts.etf_stock_research_analyst import (
@@ -502,6 +503,7 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
         self.assertIn("（一）基准情景 — 概率估计 (%)", system_msg)
         self.assertNotIn("（一）基准情景 (", system_msg)
         self.assertIn("不得使用'判断：'", system_msg)
+        self.assertIn("位于'一、核心矛盾与主线判断'之前", system_msg)
         self.assertIn("反面示例（禁止）", system_msg)
         self.assertIn("正面示例（目标风格）", system_msg)
         self.assertIn("冲突驱动", system_msg)
@@ -594,6 +596,27 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
                 )
             )
         )
+
+    def test_meso_commodity_final_guard_restores_opening_cap(self):
+        report = (
+            "一、核心矛盾与主线判断\n"
+            "铜与热卷需求强势尚未传导到焦煤仓单去化，黑色链利润仍会被上游成本挤压，ETF配置应先保持防守。\n\n"
+            "（一）制造业复苏与上游需求\n"
+            "报告内容。\n\n"
+            "二、矛盾推演\n"
+            "报告内容。\n\n"
+            "三、情景推演与策略启示\n"
+            "报告内容。\n\n"
+            "四、近期合约表现总览\n"
+            "| 合约 | 最新水平 | 信号备注 |\n"
+            "| --- | --- | --- |\n"
+            "| CU | 80000 | 需求验证 |"
+        )
+
+        restored = _ensure_meso_commodity_opening_cap(report)
+
+        self.assertTrue(restored.startswith("铜与热卷需求强势尚未传导到焦煤仓单去化"))
+        self.assertIn("\n\n一、核心矛盾与主线判断", restored)
 
 
 class EtfMarketAnalystPromptTests(unittest.TestCase):
