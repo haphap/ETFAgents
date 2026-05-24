@@ -495,6 +495,11 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Tools 3", stats_bar)
                 self.assertIn("Tokens 1.2k", stats_bar)
                 self.assertIn("Reports", stats_bar)
+                stats_widget = screen.query_one("#ra_stats_bar", Static)
+                self.assertGreater(stats_widget.size.height, 0)
+                screenshot = app.export_screenshot()
+                self.assertIn("Agents", screenshot)
+                self.assertIn("LLM", screenshot)
 
     async def test_analysis_run_section_click_switches_to_report_or_progress(self):
         with tempfile.TemporaryDirectory() as tmp:
