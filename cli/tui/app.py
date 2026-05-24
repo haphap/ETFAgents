@@ -186,7 +186,7 @@ class ETFAgentsTuiApp(App):
     #ra_stats_bar {
         height: 3;
         margin: 0 1 1 1;
-        padding: 1 2;
+        padding: 0 2;
         border: solid $panel;
         background: $background;
         color: $accent;

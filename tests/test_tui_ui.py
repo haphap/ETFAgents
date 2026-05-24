@@ -386,6 +386,26 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(runner.calls[0][0], ["510300.SH"])
                 self.assertEqual(runner.calls[0][2], ["market_flow"])
 
+    async def test_analysis_run_sections_follow_selected_analysts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _FakeAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(selected_analysts=["market_flow"]),
+                    runner=runner,
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                self.assertIsInstance(screen, AnalysisRunScreen)
+                sections = screen.query_one("#ra_sections", ListView)
+                self.assertEqual(len(sections.children), 4)
+                labels = [str(item.query_one(Label).render()) for item in sections.children]
+                self.assertIn("分析师 / 市场与资金流", labels)
+                self.assertNotIn("分析师 / 宏观框架", labels)
+
     # --- BacktestScreen (M4: has run inputs) ---
 
     async def test_backtest_screen_has_run_inputs(self):
@@ -475,6 +495,11 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Tools 3", stats_bar)
                 self.assertIn("Tokens 1.2k", stats_bar)
                 self.assertIn("Reports", stats_bar)
+                stats_widget = screen.query_one("#ra_stats_bar", Static)
+                self.assertGreater(stats_widget.size.height, 0)
+                screenshot = app.export_screenshot()
+                self.assertIn("Agents", screenshot)
+                self.assertIn("LLM", screenshot)
 
     async def test_analysis_run_section_click_switches_to_report_or_progress(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -772,6 +797,22 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(modal.query_one("#acm_language"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_ok"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_cancel"))
+
+    async def test_analysis_config_modal_shows_analyst_labels(self):
+        """Analyst checkboxes must render their visible labels in the modal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                self.assertIsInstance(modal, AnalysisConfigModal)
+                screenshot = app.export_screenshot()
+                self.assertIn("市场与资金流", screenshot)
+                self.assertIn("宏观框架", screenshot)
 
     async def test_analysis_config_modal_updates_models_for_provider(self):
         """Changing provider should refresh quick/deep model choices."""

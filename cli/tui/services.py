@@ -116,6 +116,19 @@ SECTION_DEFINITIONS: tuple[SectionDef, ...] = (
 SECTION_BY_ID = {defn.section_id: defn for defn in SECTION_DEFINITIONS}
 
 
+def section_definitions_for(selected_analysts: list[str] | None = None) -> tuple[SectionDef, ...]:
+    """Return sections that should be visible for the selected analysis config."""
+    if selected_analysts is None:
+        selected = set(ANALYST_KEYS)
+    else:
+        selected = set(selected_analysts)
+    return tuple(
+        defn
+        for defn in SECTION_DEFINITIONS
+        if defn.team != "分析师" or defn.section_id in selected
+    )
+
+
 # ---------------------------------------------------------------------------
 # Analysis configuration
 # ---------------------------------------------------------------------------
@@ -578,7 +591,8 @@ class AnalysisRunner:
             self.states[ticker] = TickerState.RUNNING
             graph = self._make_graph(selected_analysts)
 
-            yield TickerStarted(ticker=ticker, total_sections=len(SECTION_DEFINITIONS))
+            active_sections = section_definitions_for(selected_analysts)
+            yield TickerStarted(ticker=ticker, total_sections=len(active_sections))
 
             init_state, args, _ = graph.prepare_run(
                 ticker,
@@ -599,7 +613,7 @@ class AnalysisRunner:
 
                 merge_stream_state(accumulated, chunk)
                 for event in self._detect_section_updates(
-                    chunk, accumulated, emitted_sections, ticker
+                    chunk, accumulated, emitted_sections, ticker, active_sections
                 ):
                     yield event
 
@@ -628,6 +642,7 @@ class AnalysisRunner:
         accumulated: dict,
         emitted_sections: dict[str, str],
         ticker: str,
+        section_definitions: tuple[SectionDef, ...] = SECTION_DEFINITIONS,
     ) -> Iterator[SectionDone]:
         """Yield SectionDone events when section content changes.
 
@@ -638,7 +653,7 @@ class AnalysisRunner:
         content equality (``emitted_sections[id] == content``), so unchanged
         chunks are silently skipped.
         """
-        for defn in SECTION_DEFINITIONS:
+        for defn in section_definitions:
             for det_key in defn.detection_keys:
                 value = self._get_chunk_value(chunk, det_key)
                 if value is None:
@@ -669,7 +684,7 @@ class AnalysisRunner:
                     section_id=defn.section_id,
                     content=content,
                     completed=completed,
-                    total=len(SECTION_DEFINITIONS),
+                    total=len(section_definitions),
                 )
                 break
 

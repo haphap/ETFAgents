@@ -73,6 +73,32 @@ class AnalysisRunnerContractTests(unittest.TestCase):
                     self.assertEqual(events[-1].ticker, "510300.SH")
                     self.assertEqual(events[-1].rating, "BUY")
 
+    def test_selected_analysts_limit_visible_runner_sections(self):
+        """Configured analyst selection should drive progress totals and emitted sections."""
+        runner = AnalysisRunner()
+
+        with patch.object(runner, "_make_graph") as mock_make_graph:
+            with patch.object(runner, "_save_report") as mock_save_report:
+                with patch.object(runner, "_extract_rating_from_report") as mock_rating:
+                    fake_graph = _FakeGraph()
+                    mock_make_graph.return_value = fake_graph
+                    mock_save_report.return_value = Path("/fake/report.md")
+                    mock_rating.return_value = None
+
+                    def fake_stream(init_state, **kwargs):
+                        yield {"market_flow_report": "Market"}
+                        yield {"macro_regime_report": "Macro should be hidden"}
+                        yield {"trader_allocation_plan": "Trader"}
+
+                    fake_graph.stream = fake_stream
+
+                    events = list(runner.run_queue(["510300.SH"], selected_analysts=["market_flow"]))
+
+                    self.assertEqual(events[0].total_sections, 4)
+                    section_done = [e for e in events if isinstance(e, SectionDone)]
+                    self.assertEqual([e.section_id for e in section_done], ["market_flow", "trader"])
+                    self.assertEqual([e.total for e in section_done], [4, 4])
+
     def test_cancel_emits_cancelled_and_stops_processing(self):
         """request_cancel() must cause remaining tickers to yield TickerCancelled
         and must NOT call _make_graph/finalize_run/_save_report for them."""

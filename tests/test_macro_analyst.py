@@ -109,6 +109,14 @@ class MacroAnalystTests(unittest.TestCase):
         )
 
         self.assertTrue(_looks_like_complete_macro_report(valid_report))
+        self.assertTrue(
+            _looks_like_complete_macro_report(
+                "煤价下行和全球利率分化正在压缩煤炭ETF的风险溢价，当前配置应以防守等待为主。\n\n"
+                "一、暴露与宏观主线\nETF暴露集中在煤炭链条。\n\n"
+                "二、异常信号与情景推演\n实际利率和煤价构成主要压力。\n\n"
+                "三、催化窗口与失效条件\n跟踪政策与库存数据。"
+            )
+        )
         self.assertFalse(
             _looks_like_complete_macro_report(
                 "概述：煤炭ETF宏观压力仍在。\n\n"
