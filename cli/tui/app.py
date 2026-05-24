@@ -1,4 +1,4 @@
-"""Textual application for ETFAgents — M1: Report Library + Paper Trading."""
+"""Textual application for ETFAgents — M4: Interactive Enhancements."""
 
 from __future__ import annotations
 
@@ -7,9 +7,10 @@ from typing import Any
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
+    Checkbox,
     DataTable,
     Footer,
     Header,
@@ -18,22 +19,34 @@ from textual.widgets import (
     ListItem,
     ListView,
     Markdown,
+    Select,
     Static,
 )
 
 from cli.tui.services import (
+    AVAILABLE_THEMES,
+    AnalysisConfig,
     AnalysisEvent,
     AnalysisRunner,
+    BacktestEvent,
+    BacktestFailed,
+    BacktestFinished,
     BacktestRecord,
+    BacktestRunner,
+    BacktestStarted,
     BacktestViewer,
     BacktestViewModel,
     IdRegistry,
+    OrderResult,
     PaperTradingSnapshot,
     PaperTradingViewModel,
+    RESEARCH_DEPTH_REQUIREMENTS,
     ReportRecord,
     ReportRepository,
+    SECTION_BY_ID,
     SECTION_DEFINITIONS,
     SectionDone,
+    TuiSettings,
     TickerCancelled,
     TickerDone,
     TickerFailed,
@@ -76,10 +89,68 @@ class HomeScreen(Screen):
 # ResearchAnalysisScreen (M2)
 # ---------------------------------------------------------------------------
 
+class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
+    """Modal to configure analysis parameters before running."""
+
+    DEFAULT_CSS = """
+    AnalysisConfigModal { align: center middle; }
+    #acm_container { width: 70; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+    #acm_container .acm-row { height: auto; margin: 0 0 1 0; }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="acm_container"):
+            yield Static("分析配置", classes="pane-title")
+            yield Static("选择分析师:")
+            for defn in SECTION_DEFINITIONS:
+                if defn.section_id in SECTION_BY_ID and defn.team == "分析师":
+                    yield Checkbox(defn.title, value=True, id=f"acm_cb_{defn.section_id}")
+            yield Static("研究深度:")
+            depth_options = [(name, name) for name in RESEARCH_DEPTH_REQUIREMENTS]
+            yield Select(depth_options, value="标准", id="acm_depth")
+            yield Static("LLM提供商:")
+            provider_options = [
+                ("OpenAI", "openai"), ("Anthropic", "anthropic"),
+                ("Google", "google"), ("DeepSeek", "deepseek"),
+            ]
+            yield Select(provider_options, value="openai", id="acm_provider")
+            yield Static("输出语言:")
+            lang_options = [("中文", "Chinese"), ("English", "English")]
+            yield Select(lang_options, value="Chinese", id="acm_language")
+            with Horizontal(classes="acm-row"):
+                yield Button("确定", id="btn_acm_ok", variant="primary")
+                yield Button("取消", id="btn_acm_cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_acm_ok":
+            from cli.tui.services import ANALYST_KEYS
+            selected = [
+                k for k in ANALYST_KEYS
+                if self._checkbox_checked(f"acm_cb_{k}")
+            ]
+            depth = self.query_one("#acm_depth", Select).value
+            provider = self.query_one("#acm_provider", Select).value
+            language = self.query_one("#acm_language", Select).value
+            self.dismiss(AnalysisConfig(
+                selected_analysts=selected or list(ANALYST_KEYS),
+                depth_name=str(depth) if depth != Select.BLANK else "标准",
+                llm_provider=str(provider) if provider != Select.BLANK else "openai",
+                output_language=str(language) if language != Select.BLANK else "Chinese",
+            ))
+        elif event.button.id == "btn_acm_cancel":
+            self.dismiss(None)
+
+    def _checkbox_checked(self, widget_id: str) -> bool:
+        try:
+            return self.query_one(f"#{widget_id}", Checkbox).value
+        except Exception:
+            return False
+
+
 class ResearchAnalysisScreen(Screen):
     """Run ETF analysis and stream results in real-time.
 
-    Left pane: ticker input + start button + status list.
+    Left pane: ticker input + start/cancel buttons + status list.
     Right-top: section status circles (○●).
     Right-bottom: Markdown body for selected section.
     """
@@ -87,12 +158,14 @@ class ResearchAnalysisScreen(Screen):
     def __init__(self, runner: AnalysisRunner | None = None, repository: ReportRepository | None = None):
         super().__init__()
         self.runner = runner
+        self._active_runner: AnalysisRunner | None = None
         self.repository = repository or ReportRepository()
         self.ticker_ids = IdRegistry("rtk")
         self.section_contents: dict[tuple[str, str], str] = {}
         self.section_status: dict[tuple[str, str], bool] = {}
         self.current_ticker: str | None = None
         self.current_section: str = "portfolio_manager"
+        self._analysis_config: AnalysisConfig | None = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -102,6 +175,7 @@ class ResearchAnalysisScreen(Screen):
                 yield Static("输入 ETF 代码（逗号分隔）:", id="ra_label")
                 yield Input(id="ra_ticker_input", classes="fill-list")
                 yield Button("开始分析", id="btn_ra_start", variant="primary")
+                yield Button("取消", id="btn_ra_cancel", variant="warning", disabled=True)
                 yield Static("分析队列", classes="pane-title")
                 yield ListView(id="ra_queue")
             with Vertical(classes="right-pane"):
@@ -123,7 +197,15 @@ class ResearchAnalysisScreen(Screen):
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_ra_start":
-            self._start_analysis()
+            self.app.push_screen(AnalysisConfigModal(), self._on_config_result)
+        elif event.button.id == "btn_ra_cancel":
+            self._cancel_analysis()
+
+    def _on_config_result(self, config: AnalysisConfig | None) -> None:
+        if config is None:
+            return
+        self._analysis_config = config
+        self._start_analysis()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         item_id = event.item.id or ""
@@ -150,16 +232,57 @@ class ResearchAnalysisScreen(Screen):
         queue = self.query_one("#ra_queue", ListView)
         queue.clear()
 
-        runner = self.runner or AnalysisRunner()
+        runner = self.runner or self._build_runner()
+        self._active_runner = runner
+        self.query_one("#btn_ra_cancel", Button).disabled = False
         self.run_worker(self._run_analysis, runner, tickers, thread=True, exclusive=True)
+
+    def _build_runner(self) -> AnalysisRunner:
+        cfg = self._analysis_config
+        if cfg is None:
+            return AnalysisRunner()
+        from etfagents.default_config import DEFAULT_CONFIG
+        import copy
+        config = copy.deepcopy(DEFAULT_CONFIG)
+        config["llm_provider"] = cfg.llm_provider
+        config["output_language"] = cfg.output_language
+        depth_req = RESEARCH_DEPTH_REQUIREMENTS.get(cfg.depth_name, {})
+        if depth_req:
+            config["max_debate_rounds"] = depth_req.get("debate_rounds", 1)
+            config["max_risk_discuss_rounds"] = depth_req.get("risk_rounds", 1)
+        return AnalysisRunner(config=config)
+
+    def _cancel_analysis(self) -> None:
+        if self._active_runner:
+            self._active_runner.request_cancel()
+        self.query_one("#btn_ra_cancel", Button).disabled = True
 
     def _run_analysis(self, runner: AnalysisRunner, tickers: list[str]) -> None:
         """Worker thread: stream analysis events."""
+        cfg = self._analysis_config
+        selected = cfg.selected_analysts if cfg else None
         try:
-            for event in runner.run_queue(tickers):
-                self.app.call_from_thread(self._apply_event, event)
+            for event in runner.run_queue(tickers, selected_analysts=selected):
+                self._safe_call_from_thread(self._apply_event, event)
         except Exception as exc:
-            self.app.call_from_thread(self._show_error, str(exc))
+            self._safe_call_from_thread(self._show_error, str(exc))
+        finally:
+            self._safe_call_from_thread(self._on_analysis_done)
+
+    def _safe_call_from_thread(self, callback: Any, *args: Any) -> None:
+        try:
+            if not getattr(self.app, "_running", False):
+                return
+            self.app.call_from_thread(callback, *args)
+        except (RuntimeError, EOFError):
+            pass
+
+    def _on_analysis_done(self) -> None:
+        self._active_runner = None
+        try:
+            self.query_one("#btn_ra_cancel", Button).disabled = True
+        except Exception:
+            pass
 
     def _apply_event(self, event: AnalysisEvent) -> None:
         """UI thread: handle event."""
@@ -330,16 +453,17 @@ class ReportLibraryScreen(Screen):
 # ---------------------------------------------------------------------------
 
 class BacktestScreen(Screen):
-    """View existing backtest results.
+    """View existing backtest results and run new backtests.
 
-    Left pane: list of runs + refresh button.
+    Left pane: list of runs + refresh button + run inputs.
     Right-top: metrics table + sparkline.
     Right-bottom: summary markdown.
     """
 
-    def __init__(self, viewer: BacktestViewer | None = None) -> None:
+    def __init__(self, viewer: BacktestViewer | None = None, runner: BacktestRunner | None = None) -> None:
         super().__init__()
         self._viewer = viewer
+        self._runner = runner
         self.records: list[BacktestRecord] = []
         self.current: BacktestRecord | None = None
         self._load_count = 0  # Counter for unique IDs across refreshes
@@ -351,6 +475,12 @@ class BacktestScreen(Screen):
                 yield Static("回测结果", classes="pane-title")
                 yield ListView(id="bt_list")
                 yield Button("刷新", id="btn_bt_refresh", variant="primary")
+                yield Static("运行新回测", classes="pane-title")
+                yield Input(placeholder="ETF代码（逗号分隔）", id="bt_run_tickers")
+                yield Input(placeholder="开始日期 (YYYY-MM-DD)", id="bt_run_start")
+                yield Input(placeholder="结束日期 (YYYY-MM-DD)", id="bt_run_end")
+                yield Button("运行回测", id="btn_bt_run", variant="success")
+                yield Static("", id="bt_run_status")
             with Vertical(classes="right-pane"):
                 with Vertical(classes="right-top"):
                     yield Static("NAV走势", classes="pane-title")
@@ -367,9 +497,44 @@ class BacktestScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_bt_refresh":
             self._start_loading()
+        elif event.button.id == "btn_bt_run":
+            self._start_backtest()
 
     async def action_refresh_reports(self) -> None:
         self._start_loading()
+
+    def _start_backtest(self) -> None:
+        tickers_str = self.query_one("#bt_run_tickers", Input).value.strip()
+        start = self.query_one("#bt_run_start", Input).value.strip()
+        end = self.query_one("#bt_run_end", Input).value.strip()
+        if not tickers_str or not start or not end:
+            self.query_one("#bt_run_status", Static).update("请填写所有字段")
+            return
+        tickers = [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
+        self.query_one("#bt_run_status", Static).update("回测运行中...")
+        self.query_one("#btn_bt_run", Button).disabled = True
+        runner = self._runner or BacktestRunner()
+        self.run_worker(
+            lambda: self._run_backtest(runner, tickers, start, end),
+            thread=True,
+            exclusive=True,
+        )
+
+    def _run_backtest(self, runner: BacktestRunner, tickers: list[str], start: str, end: str) -> None:
+        for event in runner.run(tickers, start, end):
+            self._safe_call_from_thread(self._apply_backtest_event, event)
+
+    def _apply_backtest_event(self, event: BacktestEvent) -> None:
+        status = self.query_one("#bt_run_status", Static)
+        if isinstance(event, BacktestStarted):
+            status.update(f"回测中: {','.join(event.tickers)} {event.start_date}~{event.end_date}")
+        elif isinstance(event, BacktestFinished):
+            status.update(f"回测完成: {event.output_dir.name}")
+            self.query_one("#btn_bt_run", Button).disabled = False
+            self._start_loading()
+        elif isinstance(event, BacktestFailed):
+            status.update(f"回测失败: {event.error}")
+            self.query_one("#btn_bt_run", Button).disabled = False
 
     def _start_loading(self) -> None:
         self.query_one("#bt_sparkline", Static).update("加载中...")
@@ -509,10 +674,130 @@ class BacktestScreen(Screen):
 # PaperTradingScreen (M1)
 # ---------------------------------------------------------------------------
 
-class PaperTradingScreen(Screen):
-    """Read-only paper trading dashboard.
+class LoginModal(ModalScreen[bool]):
+    """Login modal for paper trading."""
 
-    Left pane: account summary + refresh button.
+    DEFAULT_CSS = """
+    LoginModal { align: center middle; }
+    #login_container { width: 50; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+    """
+
+    def __init__(self, view_model: PaperTradingViewModel) -> None:
+        super().__init__()
+        self._view_model = view_model
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="login_container"):
+            yield Static("登录", classes="pane-title")
+            yield Input(placeholder="用户名", id="login_user")
+            yield Input(placeholder="密码", id="login_pass", password=True)
+            yield Static("", id="login_error")
+            with Horizontal():
+                yield Button("登录", id="btn_login_ok", variant="primary")
+                yield Button("取消", id="btn_login_cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_login_ok":
+            username = self.query_one("#login_user", Input).value.strip()
+            password = self.query_one("#login_pass", Input).value
+            if not username or not password:
+                self.query_one("#login_error", Static).update("请输入用户名和密码")
+                return
+            self.run_worker(
+                lambda: self._do_login(username, password),
+                thread=True,
+            )
+        elif event.button.id == "btn_login_cancel":
+            self.dismiss(False)
+
+    def _do_login(self, username: str, password: str) -> None:
+        ok = self._view_model.login(username, password)
+        self._safe_call_from_thread(self._on_login_result, ok)
+
+    def _on_login_result(self, ok: bool) -> None:
+        if ok:
+            self.dismiss(True)
+        else:
+            self.query_one("#login_error", Static).update("登录失败：用户名或密码错误")
+
+    def _safe_call_from_thread(self, callback: Any, *args: Any) -> None:
+        try:
+            if not getattr(self.app, "_running", False):
+                return
+            self.app.call_from_thread(callback, *args)
+        except (RuntimeError, EOFError):
+            pass
+
+
+class OrderModal(ModalScreen[None]):
+    """Buy/sell order modal for paper trading."""
+
+    DEFAULT_CSS = """
+    OrderModal { align: center middle; }
+    #order_container { width: 50; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+    """
+
+    def __init__(self, side: str, view_model: PaperTradingViewModel) -> None:
+        super().__init__()
+        self.side = side
+        self._view_model = view_model
+
+    def compose(self) -> ComposeResult:
+        title = "买入" if self.side == "buy" else "卖出"
+        with Vertical(id="order_container"):
+            yield Static(title, classes="pane-title")
+            yield Input(placeholder="ETF代码", id="order_ticker")
+            yield Input(placeholder="数量", id="order_quantity", restrict=r"[0-9]*")
+            yield Static("", id="order_error")
+            with Horizontal():
+                yield Button("确认", id="btn_order_ok", variant="primary")
+                yield Button("取消", id="btn_order_cancel")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_order_ok":
+            ticker = self.query_one("#order_ticker", Input).value.strip().upper()
+            qty_str = self.query_one("#order_quantity", Input).value.strip()
+            if not ticker or not qty_str:
+                self.query_one("#order_error", Static).update("请填写所有字段")
+                return
+            try:
+                quantity = int(qty_str)
+            except ValueError:
+                self.query_one("#order_error", Static).update("数量必须为整数")
+                return
+            self.run_worker(
+                lambda: self._do_order(ticker, quantity),
+                thread=True,
+            )
+        elif event.button.id == "btn_order_cancel":
+            self.dismiss(None)
+
+    def _do_order(self, ticker: str, quantity: int) -> None:
+        if self.side == "buy":
+            result = self._view_model.buy(ticker, quantity)
+        else:
+            result = self._view_model.sell(ticker, quantity)
+        self._safe_call_from_thread(self._on_order_result, result)
+
+    def _on_order_result(self, result: OrderResult) -> None:
+        if result.success:
+            self.dismiss(None)
+        else:
+            self.query_one("#order_error", Static).update(result.message)
+
+    def _safe_call_from_thread(self, callback: Any, *args: Any) -> None:
+        try:
+            if not getattr(self.app, "_running", False):
+                return
+            self.app.call_from_thread(callback, *args)
+        except (RuntimeError, EOFError):
+            pass
+
+
+class PaperTradingScreen(Screen):
+    """Paper trading dashboard with buy/sell/login.
+
+    Left pane: account summary + user status + action buttons.
     Right-top: positions DataTable.
     Right-bottom: trade history DataTable.
     """
@@ -526,8 +811,13 @@ class PaperTradingScreen(Screen):
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane"):
                 yield Static("模拟交易", classes="pane-title")
+                yield Static("", id="pt_user_status")
                 yield Static("加载中...", id="pt_account")
                 yield Button("刷新", id="btn_pt_refresh", variant="primary")
+                yield Button("登录", id="btn_pt_login")
+                yield Button("登出", id="btn_pt_logout")
+                yield Button("买入", id="btn_pt_buy", variant="success")
+                yield Button("卖出", id="btn_pt_sell", variant="error")
             with Vertical(classes="right-pane"):
                 with Vertical(classes="right-top"):
                     yield Static("持仓", classes="pane-title")
@@ -543,6 +833,29 @@ class PaperTradingScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_pt_refresh":
             self._start_loading()
+        elif event.button.id == "btn_pt_login":
+            self.app.push_screen(LoginModal(self.view_model), self._on_login_result)
+        elif event.button.id == "btn_pt_logout":
+            self.view_model.logout()
+            self._update_user_status()
+            self._start_loading()
+        elif event.button.id == "btn_pt_buy":
+            self.app.push_screen(OrderModal("buy", self.view_model), self._on_order_done)
+        elif event.button.id == "btn_pt_sell":
+            self.app.push_screen(OrderModal("sell", self.view_model), self._on_order_done)
+
+    def _on_login_result(self, ok: bool) -> None:
+        self._update_user_status()
+        if ok:
+            self._start_loading()
+
+    def _on_order_done(self, _: None) -> None:
+        self._start_loading()
+
+    def _update_user_status(self) -> None:
+        user = self.view_model.current_user()
+        status = self.query_one("#pt_user_status", Static)
+        status.update(f"当前用户: {user}" if user != "default" else "未登录")
 
     async def action_refresh_reports(self) -> None:
         self._start_loading()
@@ -575,6 +888,7 @@ class PaperTradingScreen(Screen):
             pass
 
     def _apply_snapshot(self, snap: PaperTradingSnapshot) -> None:
+        self._update_user_status()
         acct = snap.account
         self.query_one("#pt_account", Static).update(
             f"总资产: {acct.get('total_assets', 'N/A')}\n"
@@ -635,6 +949,85 @@ class PaperTradingScreen(Screen):
 
 
 # ---------------------------------------------------------------------------
+# SettingsScreen (M4)
+# ---------------------------------------------------------------------------
+
+class SettingsScreen(Screen):
+    """TUI settings: theme, density, pane width."""
+
+    BINDINGS = [("escape", "pop_screen", "返回")]
+
+    def __init__(self, settings_path: Path | None = None) -> None:
+        super().__init__()
+        self._settings_path = settings_path
+        self._settings: TuiSettings | None = None
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+        with Vertical(id="settings_body"):
+            yield Static("设置", classes="pane-title")
+            yield Static("主题:")
+            theme_options = [(t, t) for t in AVAILABLE_THEMES]
+            yield Select(theme_options, value="textual-dark", id="sel_theme")
+            yield Static("密度:")
+            density_options = [("紧凑", "compact"), ("普通", "normal"), ("舒适", "comfortable")]
+            yield Select(density_options, value="normal", id="sel_density")
+            yield Static("左侧面板宽度 (%):")
+            yield Input(value="35", id="inp_pane_width", restrict=r"[0-9]*")
+            yield Button("保存", id="btn_settings_save", variant="primary")
+            yield Static("", id="settings_status")
+        yield Footer()
+
+    def on_mount(self) -> None:
+        path = self._settings_path or None
+        settings = TuiSettings.load(path) if path else TuiSettings.load()
+        self._settings = settings
+        try:
+            self.query_one("#sel_theme", Select).value = settings.theme
+        except Exception:
+            pass
+        try:
+            self.query_one("#sel_density", Select).value = settings.density
+        except Exception:
+            pass
+        self.query_one("#inp_pane_width", Input).value = str(settings.left_pane_width)
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_settings_save":
+            self._save_settings()
+
+    def _save_settings(self) -> None:
+        theme_val = self.query_one("#sel_theme", Select).value
+        density_val = self.query_one("#sel_density", Select).value
+        width_str = self.query_one("#inp_pane_width", Input).value.strip()
+        try:
+            width = int(width_str)
+            width = max(20, min(60, width))
+        except ValueError:
+            width = 35
+        settings = TuiSettings(
+            theme=str(theme_val) if theme_val != Select.BLANK else "textual-dark",
+            density=str(density_val) if density_val != Select.BLANK else "normal",
+            left_pane_width=width,
+        )
+        path = self._settings_path
+        if path:
+            settings.save(path)
+        else:
+            settings.save()
+        self._settings = settings
+        self.app.theme = settings.theme
+        self._apply_layout(settings)
+        self.query_one("#settings_status", Static).update("设置已保存")
+
+    def _apply_layout(self, settings: TuiSettings) -> None:
+        """Apply density and pane width to the app."""
+        if hasattr(self.app, "_tui_settings"):
+            self.app._tui_settings = settings
+        _apply_pane_settings(self.app, settings)
+
+
+# ---------------------------------------------------------------------------
 # HelpScreen
 # ---------------------------------------------------------------------------
 
@@ -649,20 +1042,40 @@ class HelpScreen(Screen):
 | `q` | 退出 |
 | `Escape` | 返回上一屏 |
 | `r` | 刷新当前数据 |
+| `s` | 打开设置 |
 | `?` | 显示本帮助 |
 
 ## 功能
 
-- **研究分析**：输入 ETF 代码，运行多 agent 分析，实时查看进度和报告。
+- **研究分析**：输入 ETF 代码，配置分析参数，运行多 agent 分析，支持取消。
 - **研究报告库**：浏览历史分析报告，按 ticker/日期/章节切换。
-- **回测**：查看已有回测结果，包括 NAV 走势和关键指标。
-- **模拟交易**：查看模拟账户持仓和交易历史。
+- **回测**：查看已有回测结果，运行新回测。
+- **模拟交易**：登录、买入、卖出，查看持仓和交易历史。
+- **设置**：切换主题、密度、面板宽度。
 """
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Markdown(self.HELP_TEXT)
         yield Footer()
+
+
+# ---------------------------------------------------------------------------
+# Layout helper
+# ---------------------------------------------------------------------------
+
+def _apply_pane_settings(app: App, settings: TuiSettings) -> None:
+    """Apply pane width and density padding to all visible left/right panes."""
+    lw = settings.left_pane_width
+    rw = 100 - lw
+    density_padding = {"compact": (0, 0), "normal": (0, 1), "comfortable": (1, 2)}
+    pad_tb, pad_lr = density_padding.get(settings.density, (0, 1))
+    for pane in app.query(".left-pane"):
+        pane.styles.width = f"{lw}%"
+        pane.styles.padding = (pad_tb, pad_lr)
+    for pane in app.query(".right-pane"):
+        pane.styles.width = f"{rw}%"
+        pane.styles.padding = (pad_tb, pad_lr)
 
 
 # ---------------------------------------------------------------------------
@@ -694,6 +1107,7 @@ class ETFAgentsTuiApp(App):
         ("escape", "pop_screen", "返回"),
         ("?", "show_help", "帮助"),
         ("r", "refresh_reports", "刷新"),
+        ("s", "open_settings", "设置"),
     ]
 
     def __init__(
@@ -702,12 +1116,15 @@ class ETFAgentsTuiApp(App):
         analysis_runner: Any | None = None,
         backtest_viewer: BacktestViewer | None = None,
         paper_view_model: PaperTradingViewModel | None = None,
+        settings_path: Path | None = None,
     ):
         super().__init__()
         self.report_repository = repository or ReportRepository()
         self.analysis_runner = analysis_runner
         self._backtest_viewer = backtest_viewer
         self.paper_view_model = paper_view_model
+        self._settings_path = settings_path
+        self._settings = TuiSettings.load(settings_path) if settings_path else TuiSettings.load()
 
     @property
     def backtest_viewer(self) -> BacktestViewer:
@@ -717,6 +1134,8 @@ class ETFAgentsTuiApp(App):
         return self._backtest_viewer
 
     def on_mount(self) -> None:
+        self.theme = self._settings.theme
+        self._tui_settings = self._settings
         self.install_screen(HomeScreen(), name="home")
         self.install_screen(
             ResearchAnalysisScreen(
@@ -737,11 +1156,19 @@ class ETFAgentsTuiApp(App):
             PaperTradingScreen(view_model=self.paper_view_model),
             name="paper",
         )
+        self.install_screen(SettingsScreen(settings_path=self._settings_path), name="settings")
         self.install_screen(HelpScreen(), name="help")
         self.push_screen("home")
 
+    def on_screen_resume(self) -> None:
+        """Apply layout settings when a screen becomes active."""
+        _apply_pane_settings(self, self._tui_settings)
+
     def action_show_help(self) -> None:
         self.push_screen("help")
+
+    def action_open_settings(self) -> None:
+        self.push_screen("settings")
 
     async def action_refresh_reports(self) -> None:
         screen = self.screen

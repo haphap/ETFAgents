@@ -7,10 +7,14 @@ from pathlib import Path
 _textual_modules_before = {m for m in sys.modules if m == "textual" or m.startswith("textual.")}
 
 from cli.tui.services import (
+    BacktestFailed,
+    BacktestRunner,
+    BacktestStarted,
     BacktestViewer,
     IdRegistry,
     PaperTradingViewModel,
     ReportRepository,
+    TuiSettings,
 )
 
 _textual_modules_after = {m for m in sys.modules if m == "textual" or m.startswith("textual.")}
@@ -107,7 +111,39 @@ class BacktestViewerTests(unittest.TestCase):
             self.assertTrue(model.sparkline)
 
 
+class TuiSettingsTests(unittest.TestCase):
+    def test_default_values(self):
+        s = TuiSettings()
+        self.assertEqual(s.theme, "textual-dark")
+        self.assertEqual(s.density, "normal")
+        self.assertEqual(s.left_pane_width, 35)
+
+    def test_save_load_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.json"
+            s = TuiSettings(theme="nord", density="compact", left_pane_width=45)
+            s.save(path)
+            loaded = TuiSettings.load(path)
+            self.assertEqual(loaded.theme, "nord")
+            self.assertEqual(loaded.density, "compact")
+            self.assertEqual(loaded.left_pane_width, 45)
+
+    def test_corrupt_file_returns_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "settings.json"
+            path.write_text("{bad json", encoding="utf-8")
+            loaded = TuiSettings.load(path)
+            self.assertEqual(loaded.theme, "textual-dark")
+
+    def test_missing_file_returns_defaults(self):
+        loaded = TuiSettings.load(Path("/nonexistent/settings.json"))
+        self.assertEqual(loaded.theme, "textual-dark")
+
+
 class _FakePaperEngine:
+    def __init__(self):
+        self._logged_in_user = "default"
+
     def get_account(self, user_id=None):
         return {"user_id": user_id or "default", "cash": 100.0}
 
@@ -116,6 +152,28 @@ class _FakePaperEngine:
 
     def get_trades(self, user_id=None, limit=20):
         return [{"ticker": "510300.SH", "quantity": 100, "limit": limit}]
+
+    def _get_current_user(self):
+        return self._logged_in_user
+
+    def login(self, username, password):
+        if password == "correct":
+            self._logged_in_user = username
+            return True
+        return False
+
+    def logout(self):
+        name = self._logged_in_user
+        self._logged_in_user = "default"
+        return name
+
+    def buy(self, ticker, quantity, user_id=None, analysis_id=None):
+        return {"ticker": ticker, "quantity": quantity, "status": "filled"}
+
+    def sell(self, ticker, quantity, user_id=None, analysis_id=None):
+        if quantity > 500:
+            raise ValueError("Insufficient quantity")
+        return {"ticker": ticker, "quantity": quantity, "status": "filled"}
 
 
 class PaperTradingViewModelTests(unittest.TestCase):
@@ -127,6 +185,70 @@ class PaperTradingViewModelTests(unittest.TestCase):
         self.assertEqual(snapshot.account["user_id"], "alice")
         self.assertEqual(snapshot.positions[0]["ticker"], "510300.SH")
         self.assertEqual(snapshot.trades[0]["limit"], 5)
+
+    def test_login_success(self):
+        vm = PaperTradingViewModel(_FakePaperEngine())
+        self.assertTrue(vm.login("alice", "correct"))
+        self.assertEqual(vm.current_user(), "alice")
+
+    def test_login_failure(self):
+        vm = PaperTradingViewModel(_FakePaperEngine())
+        self.assertFalse(vm.login("alice", "wrong"))
+        self.assertEqual(vm.current_user(), "default")
+
+    def test_logout(self):
+        vm = PaperTradingViewModel(_FakePaperEngine())
+        vm.login("alice", "correct")
+        result = vm.logout()
+        self.assertEqual(result, "alice")
+        self.assertEqual(vm.current_user(), "default")
+
+    def test_buy_success(self):
+        vm = PaperTradingViewModel(_FakePaperEngine())
+        result = vm.buy("510300.SH", 100)
+        self.assertTrue(result.success)
+        self.assertEqual(result.message, "买入成功")
+
+    def test_sell_failure_propagates(self):
+        vm = PaperTradingViewModel(_FakePaperEngine())
+        result = vm.sell("510300.SH", 1000)
+        self.assertFalse(result.success)
+        self.assertIn("Insufficient", result.message)
+
+
+class BacktestRunnerTests(unittest.TestCase):
+    def test_yields_started_then_failed_on_graph_error(self):
+        from unittest.mock import patch
+        runner = BacktestRunner()
+        with patch("etfagents.graph.etf_graph.EtfAgentsGraph", side_effect=RuntimeError("no graph")):
+            events = list(runner.run(["510300.SH"], "2026-01-01", "2026-03-31"))
+        self.assertIsInstance(events[0], BacktestStarted)
+        self.assertEqual(events[0].tickers, ["510300.SH"])
+        self.assertIsInstance(events[1], BacktestFailed)
+        self.assertIn("no graph", events[1].error)
+
+    def test_yields_finished_with_output_dir(self):
+        from unittest.mock import MagicMock, patch
+        from cli.tui.services import BacktestFinished
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_result = MagicMock()
+            mock_graph = MagicMock()
+            mock_graph.backtest_candidate_pool.return_value = fake_result
+            with patch("etfagents.graph.etf_graph.EtfAgentsGraph", return_value=mock_graph):
+                with patch("etfagents.backtest.save_backtest_result") as mock_save:
+                    import copy
+                    from etfagents.default_config import DEFAULT_CONFIG
+                    cfg = copy.deepcopy(DEFAULT_CONFIG)
+                    cfg["results_dir"] = tmp
+                    events = list(BacktestRunner().run(
+                        ["510300.SH"], "2026-01-01", "2026-03-31",
+                        config=cfg,
+                    ))
+            self.assertIsInstance(events[0], BacktestStarted)
+            finished = [e for e in events if isinstance(e, BacktestFinished)]
+            self.assertEqual(len(finished), 1)
+            self.assertTrue(finished[0].output_dir.is_relative_to(Path(tmp)))
+            mock_save.assert_called_once()
 
 
 if __name__ == "__main__":

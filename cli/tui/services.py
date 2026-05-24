@@ -16,6 +16,9 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from etfagents.default_config import DEFAULT_CONFIG
+from etfagents.llm_clients.model_catalog import (
+    RESEARCH_DEPTH_REQUIREMENTS as RESEARCH_DEPTH_REQUIREMENTS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +113,61 @@ SECTION_DEFINITIONS: tuple[SectionDef, ...] = (
 )
 
 SECTION_BY_ID = {defn.section_id: defn for defn in SECTION_DEFINITIONS}
+
+
+# ---------------------------------------------------------------------------
+# Analysis configuration
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AnalysisConfig:
+    selected_analysts: list[str] = field(default_factory=lambda: list(ANALYST_KEYS))
+    depth_name: str = "标准"
+    llm_provider: str = "openai"
+    output_language: str = "Chinese"
+
+
+# ---------------------------------------------------------------------------
+# TUI settings (persisted to JSON)
+# ---------------------------------------------------------------------------
+
+SETTINGS_PATH = Path("~/.etfagents/tui_settings.json").expanduser()
+AVAILABLE_THEMES = [
+    "textual-dark", "textual-light", "nord", "gruvbox",
+    "catppuccin-mocha", "dracula", "tokyo-night", "monokai",
+]
+
+
+@dataclass
+class TuiSettings:
+    theme: str = "textual-dark"
+    density: str = "normal"
+    left_pane_width: int = 35
+
+    def save(self, path: Path = SETTINGS_PATH) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(
+                {"theme": self.theme, "density": self.density,
+                 "left_pane_width": self.left_pane_width},
+                ensure_ascii=False, indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+    @classmethod
+    def load(cls, path: Path = SETTINGS_PATH) -> TuiSettings:
+        if not path.exists():
+            return cls()
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return cls(
+                theme=data.get("theme", "textual-dark"),
+                density=data.get("density", "normal"),
+                left_pane_width=data.get("left_pane_width", 35),
+            )
+        except (OSError, json.JSONDecodeError, KeyError):
+            return cls()
 
 
 # ---------------------------------------------------------------------------
@@ -686,6 +744,83 @@ class AnalysisRunner:
 
 
 # ---------------------------------------------------------------------------
+# Backtest runner (M4)
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class BacktestStarted:
+    tickers: list[str]
+    start_date: str
+    end_date: str
+
+
+@dataclass(frozen=True)
+class BacktestProgress:
+    message: str
+
+
+@dataclass(frozen=True)
+class BacktestFinished:
+    output_dir: Path
+
+
+@dataclass(frozen=True)
+class BacktestFailed:
+    error: str
+
+
+BacktestEvent = BacktestStarted | BacktestProgress | BacktestFinished | BacktestFailed
+
+
+class BacktestRunner:
+    """Run a backtest, yielding events.  Designed for worker threads."""
+
+    def run(
+        self,
+        tickers: list[str],
+        start_date: str,
+        end_date: str,
+        rebalance_interval_days: int = 21,
+        top_k: int = 3,
+        initial_cash: float = 1_000_000.0,
+        config: dict[str, Any] | None = None,
+    ) -> Iterator[BacktestEvent]:
+        yield BacktestStarted(tickers=tickers, start_date=start_date, end_date=end_date)
+        try:
+            from etfagents.graph.etf_graph import EtfAgentsGraph
+            from etfagents.backtest import save_backtest_result
+            import re
+
+            cfg = copy.deepcopy(config or DEFAULT_CONFIG)
+            graph = EtfAgentsGraph(config=cfg, debug=False)
+            result = graph.backtest_candidate_pool(
+                tickers,
+                start_date=start_date,
+                end_date=end_date,
+                rebalance_interval_days=rebalance_interval_days,
+                top_k=top_k,
+                initial_cash=initial_cash,
+            )
+            # Compute output directory mirroring CLI flow
+            visible = tickers[:3]
+            slug = "__".join(visible)
+            if len(tickers) > 3:
+                slug += f"__plus_{len(tickers) - 3}"
+            slug = re.sub(r"[^A-Za-z0-9._-]+", "_", slug)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = (
+                Path(cfg["results_dir"]).expanduser()
+                / "backtest" / slug
+                / f"{start_date}_to_{end_date}"
+                / timestamp
+            )
+            save_backtest_result(result, output_dir)
+            yield BacktestFinished(output_dir=output_dir)
+        except Exception as exc:
+            yield BacktestFailed(error=str(exc))
+
+
+# ---------------------------------------------------------------------------
 # Paper trading
 # ---------------------------------------------------------------------------
 
@@ -696,8 +831,15 @@ class PaperTradingSnapshot:
     trades: list[dict[str, Any]]
 
 
+@dataclass
+class OrderResult:
+    success: bool
+    message: str
+    detail: dict[str, Any] = field(default_factory=dict)
+
+
 class PaperTradingViewModel:
-    """Wraps PaperTradingEngine.  v1 only exposes snapshot() (read-only)."""
+    """Wraps PaperTradingEngine for the TUI."""
 
     def __init__(self, engine: Any | None = None):
         if engine is None:
@@ -711,3 +853,26 @@ class PaperTradingViewModel:
             positions=self.engine.get_positions(user_id=user_id),
             trades=self.engine.get_trades(user_id=user_id, limit=trade_limit),
         )
+
+    def current_user(self) -> str:
+        return self.engine._get_current_user()
+
+    def login(self, username: str, password: str) -> bool:
+        return self.engine.login(username, password)
+
+    def logout(self) -> str:
+        return self.engine.logout()
+
+    def buy(self, ticker: str, quantity: int) -> OrderResult:
+        try:
+            result = self.engine.buy(ticker, quantity)
+            return OrderResult(success=True, message="买入成功", detail=result)
+        except Exception as exc:
+            return OrderResult(success=False, message=str(exc))
+
+    def sell(self, ticker: str, quantity: int) -> OrderResult:
+        try:
+            result = self.engine.sell(ticker, quantity)
+            return OrderResult(success=True, message="卖出成功", detail=result)
+        except Exception as exc:
+            return OrderResult(success=False, message=str(exc))

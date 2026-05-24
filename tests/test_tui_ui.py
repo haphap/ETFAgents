@@ -1,3 +1,4 @@
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -10,24 +11,32 @@ if Static is None:
     raise unittest.SkipTest("Textual not installed; skipping TUI UI tests")
 
 from cli.tui.app import (
+    AnalysisConfigModal,
     ETFAgentsTuiApp,
     HomeScreen,
+    LoginModal,
+    OrderModal,
     ResearchAnalysisScreen,
     ReportLibraryScreen,
     BacktestScreen,
     PaperTradingScreen,
+    SettingsScreen,
     HelpScreen,
 )
 from cli.tui.services import (
     BacktestViewer,
     PaperTradingViewModel,
     ReportRepository,
+    TickerFailed,
     TickerStarted,
     TickerDone,
 )
 
 
 class _FakePaperEngine:
+    def __init__(self):
+        self._logged_in_user = "default"
+
     def get_account(self, user_id=None):
         return {
             "user_id": user_id or "default",
@@ -74,6 +83,26 @@ class _FakePaperEngine:
                 "pnl": 0,
             },
         ]
+
+    def _get_current_user(self):
+        return self._logged_in_user
+
+    def login(self, username, password):
+        if password == "correct":
+            self._logged_in_user = username
+            return True
+        return False
+
+    def logout(self):
+        name = self._logged_in_user
+        self._logged_in_user = "default"
+        return name
+
+    def buy(self, ticker, quantity, user_id=None, analysis_id=None):
+        return {"ticker": ticker, "quantity": quantity, "status": "filled"}
+
+    def sell(self, ticker, quantity, user_id=None, analysis_id=None):
+        return {"ticker": ticker, "quantity": quantity, "status": "filled"}
 
 
 class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
@@ -256,24 +285,65 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 # Verify current_ticker changed
                 self.assertEqual(screen.current_ticker, "159915.SZ")
 
-    # --- BacktestScreen ---
+    # --- BacktestScreen (M4: has run inputs) ---
 
-    async def test_backtest_screen_is_view_only(self):
-        """BacktestScreen (M0 placeholder) should not contain Input or run-backtest Button."""
+    async def test_backtest_screen_has_run_inputs(self):
+        """BacktestScreen M4 should have ticker/date inputs and a run button."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
                 await pilot.click("#btn_backtest")
                 screen = app.screen
                 self.assertIsInstance(screen, BacktestScreen)
-                from textual.widgets import Input, Button
-                inputs = screen.query(Input)
-                self.assertEqual(len(inputs), 0)
-                run_buttons = [
-                    b for b in screen.query(Button)
-                    if "运行" in (b.label or "")
-                ]
-                self.assertEqual(len(run_buttons), 0)
+                self.assertIsNotNone(screen.query_one("#bt_run_tickers"))
+                self.assertIsNotNone(screen.query_one("#bt_run_start"))
+                self.assertIsNotNone(screen.query_one("#bt_run_end"))
+                self.assertIsNotNone(screen.query_one("#btn_bt_run"))
+
+    # --- ResearchAnalysisScreen M4: cancel button ---
+
+    async def test_cancel_button_exists_and_initially_disabled(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                from textual.widgets import Button
+                cancel = screen.query_one("#btn_ra_cancel", Button)
+                self.assertTrue(cancel.disabled)
+
+    # --- SettingsScreen ---
+
+    async def test_settings_screen_opens_via_keybinding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.press("s")
+                self.assertIsInstance(app.screen, SettingsScreen)
+
+    async def test_settings_screen_has_theme_and_density_widgets(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.press("s")
+                screen = app.screen
+                self.assertIsNotNone(screen.query_one("#sel_theme"))
+                self.assertIsNotNone(screen.query_one("#sel_density"))
+                self.assertIsNotNone(screen.query_one("#inp_pane_width"))
+                self.assertIsNotNone(screen.query_one("#btn_settings_save"))
+
+    # --- PaperTradingScreen M4: buy/sell/login buttons ---
+
+    async def test_paper_screen_has_buy_sell_login_buttons(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp, with_paper=True)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_paper")
+                screen = app.screen
+                self.assertIsNotNone(screen.query_one("#btn_pt_login"))
+                self.assertIsNotNone(screen.query_one("#btn_pt_logout"))
+                self.assertIsNotNone(screen.query_one("#btn_pt_buy"))
+                self.assertIsNotNone(screen.query_one("#btn_pt_sell"))
 
     # --- PaperTradingScreen ---
 
@@ -437,6 +507,122 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 # Verify list is not duplicated (should still be 1, not 2)
                 refreshed_count = len(bt_list.children)
                 self.assertEqual(refreshed_count, 1)
+
+    # --- Analysis config modal ---
+
+    async def test_analysis_config_modal_opens_on_start(self):
+        """Clicking start analysis should open config modal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                self.assertIsInstance(screen, ResearchAnalysisScreen)
+                # Type a ticker so start button will proceed
+                input_widget = screen.query_one("#ra_ticker_input")
+                input_widget.value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                # Config modal should now be on top
+                self.assertIsInstance(app.screen, AnalysisConfigModal)
+
+    async def test_analysis_config_modal_cancel_does_not_start(self):
+        """Cancelling config modal should not start analysis."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                input_widget = screen.query_one("#ra_ticker_input")
+                input_widget.value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                # Cancel the modal
+                await pilot.click("#btn_acm_cancel")
+                await pilot.pause()
+                # Should be back on research screen, no runner active
+                self.assertIsInstance(app.screen, ResearchAnalysisScreen)
+                self.assertIsNone(screen._active_runner)
+
+    async def test_analysis_config_modal_has_expected_widgets(self):
+        """Config modal should have depth, provider, language selects and OK/cancel buttons."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                input_widget = screen.query_one("#ra_ticker_input")
+                input_widget.value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                self.assertIsInstance(modal, AnalysisConfigModal)
+                self.assertIsNotNone(modal.query_one("#acm_depth"))
+                self.assertIsNotNone(modal.query_one("#acm_provider"))
+                self.assertIsNotNone(modal.query_one("#acm_language"))
+                self.assertIsNotNone(modal.query_one("#btn_acm_ok"))
+                self.assertIsNotNone(modal.query_one("#btn_acm_cancel"))
+
+    # --- Backtest run error ---
+
+    async def test_backtest_run_shows_error_on_empty_fields(self):
+        """Clicking run with empty fields should show error status."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_backtest")
+                await pilot.pause()
+                await pilot.pause()
+                screen = app.screen
+                # Click run with empty fields
+                await pilot.click("#btn_bt_run")
+                await pilot.pause()
+                status = screen.query_one("#bt_run_status", Static)
+                self.assertIn("请填写", str(status.render()))
+
+    # --- Login modal ---
+
+    async def test_login_modal_opens_and_cancels(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp, with_paper=True)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_paper")
+                await pilot.pause()
+                await pilot.pause()
+                await pilot.click("#btn_pt_login")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, LoginModal)
+                await pilot.click("#btn_login_cancel")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, PaperTradingScreen)
+
+    # --- Order modal ---
+
+    async def test_order_modal_opens_for_buy(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp, with_paper=True)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_paper")
+                await pilot.pause()
+                await pilot.pause()
+                await pilot.click("#btn_pt_buy")
+                await pilot.pause()
+                modal = app.screen
+                self.assertIsInstance(modal, OrderModal)
+                self.assertEqual(modal.side, "buy")
+
+    async def test_order_modal_opens_for_sell(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp, with_paper=True)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_paper")
+                await pilot.pause()
+                await pilot.pause()
+                await pilot.click("#btn_pt_sell")
+                await pilot.pause()
+                modal = app.screen
+                self.assertIsInstance(modal, OrderModal)
+                self.assertEqual(modal.side, "sell")
 
     # --- helpers ---
 
