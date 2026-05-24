@@ -68,6 +68,22 @@ def _looks_like_complete_holdings_industry_report(report: str) -> bool:
     )
 
 
+def _looks_like_holdings_industry_draft(report: str) -> bool:
+    """Accept report-shaped drafts so validate_and_refine can repair lead issues."""
+    content = report or ""
+    if not content.strip() or has_invalid_opening_cap(content):
+        return False
+
+    section_marks = collect_top_section_marks(content)
+    if not _HOLDINGS_INDUSTRY_REQUIRED_TOP_SECTIONS.issubset(section_marks):
+        return False
+
+    return (
+        all(marker in content for marker in _HOLDINGS_INDUSTRY_REQUIRED_MARKERS)
+        and contains_markdown_table(content)
+    )
+
+
 def create_etf_industry_research_analyst(llm):
     def etf_industry_research_node(state):
         current_date = state["trade_date"]
@@ -119,17 +135,21 @@ def create_etf_industry_research_analyst(llm):
             "不得写'本章''本节''本部分''旨在''梳理''等自指式开头，也不得写'导语：'标签。"
             "不得在结论段与首个子章节之间插入额外空行、重复标题行或松散填充。\n\n"
             "一、行业主线与分歧焦点\n"
+            "[直接写1-2句引导句：点明券商共识来源、分歧来源和ETF配置含义]\n"
             "  （一）共识主线\n\n"
             "  （二）分歧焦点\n\n"
             "二、景气、政策与产业链验证\n"
+            "[直接写1-2句引导句：用价格、库存、政策或产业链证据说明景气验证结论]\n"
             "  （一）景气与价格对比\n\n"
             "  （二）机构观点分布\n\n"
             "  （三）政策传导\n\n"
             "  （四）产业链验证\n\n"
             "三、未解问题与风险边界\n"
+            "[直接写1-2句引导句：说明未解问题、主要风险和ETF配置边界]\n"
             "  （一）未解问题\n\n"
             "  （二）风险边界\n\n"
             "四、ETF影响与研报总览\n"
+            "[直接写1-2句引导句：把行业结论映射到ETF暴露、权重贡献和配置节奏]\n"
             "  （一）ETF暴露与配置含义\n\n"
             "  （二）研报总览表\n\n"
             "## 质量要求\n"
@@ -183,8 +203,7 @@ def create_etf_industry_research_analyst(llm):
             tool_names=", ".join(tool.name for tool in tools),
             current_date=current_date,
             instrument_context=instrument_context,
-            report_acceptance_check=_looks_like_complete_holdings_industry_report,
-            rejected_report_fallback="last_attempt",
+            report_acceptance_check=_looks_like_holdings_industry_draft,
             unexecuted_tool_recovery={
                 "trigger_tool_names": [tool.name for tool in tools],
                 "tool_payloads": [
@@ -203,6 +222,8 @@ def create_etf_industry_research_analyst(llm):
         report = pre_judge_clean(report) if report else report
         report = validate_and_refine(report, llm, _REPORT_SPEC) if report else report
         report = post_judge_clean(report) if report else report
+        if report and not _looks_like_complete_holdings_industry_report(report):
+            report = ""
         if report and not getattr(result, "tool_calls", None):
             result = AIMessage(content=report)
 

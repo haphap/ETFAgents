@@ -6,6 +6,7 @@ from langchain_core.runnables import RunnableLambda
 
 from etfagents.agents.analysts.etf_industry_research_analyst import (
     create_etf_industry_research_analyst,
+    _looks_like_holdings_industry_draft,
     _looks_like_complete_holdings_industry_report,
 )
 from etfagents.agents.analysts.etf_market_analyst import (
@@ -159,6 +160,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         self.assertNotIn("## 第一步：数据获取", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一级标题 -> 1-2句引导句 -> 子章节标题", system_msg)
+        self.assertIn("[直接写1-2句引导句", system_msg)
         self.assertIn("开篇帽段负责统领全文", system_msg)
         self.assertIn("第一章标题后的引导句只负责导入本章", system_msg)
         self.assertIn("第一章引导句要承接'行业主线与分歧焦点'", system_msg)
@@ -166,7 +168,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         self.assertIn("do NOT lean on a single repeated word such as '反噬'", system_msg)
         self.assertIs(
             captured["acceptance_check"],
-            _looks_like_complete_holdings_industry_report,
+            _looks_like_holdings_industry_draft,
         )
 
     def test_holdings_industry_acceptance_rejects_delivery_preamble(self):
@@ -269,13 +271,50 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
             fake_industry.calls,
         )
 
-    def test_holdings_industry_keeps_last_draft_when_shape_gate_rejects(self):
-        incomplete_report = (
+    def test_holdings_industry_draft_gate_allows_refine_to_fix_missing_leads(self):
+        draft_report = (
             "券商行业研究显示ETF主导暴露仍受政策和库存变量牵制，配置应等待行业景气扩散确认。\n\n"
             "一、行业主线与分歧焦点\n"
-            "券商共识集中在政策托底，分歧集中在库存去化节奏。"
+            "（一）共识主线\n"
+            "报告内容。\n\n"
+            "二、景气、政策与产业链验证\n"
+            "（一）景气与价格对比\n"
+            "报告内容。\n\n"
+            "三、未解问题与风险边界\n"
+            "（一）未解问题\n"
+            "报告内容。\n\n"
+            "四、ETF影响与研报总览\n"
+            "（一）ETF暴露与配置含义\n"
+            "ETF暴露需要等待需求验证。\n\n"
+            "（二）研报总览表\n"
+            "| 券商 | 行业关键词 | 立场 |\n"
+            "| --- | --- | --- |\n"
+            "| 示例券商 | 工业金属 | 中性 |"
         )
-        llm = _IntentThenFinalLLM(final_content=incomplete_report)
+        refined_report = (
+            "券商行业研究显示ETF主导暴露仍受政策和库存变量牵制，配置应等待行业景气扩散确认。\n\n"
+            "一、行业主线与分歧焦点\n"
+            "券商共识集中在政策托底，分歧集中在库存去化节奏。\n\n"
+            "（一）共识主线\n"
+            "报告内容。\n\n"
+            "二、景气、政策与产业链验证\n"
+            "景气验证依赖价格、库存和政策传导同时改善，否则ETF暴露仍难扩散。\n\n"
+            "（一）景气与价格对比\n"
+            "报告内容。\n\n"
+            "三、未解问题与风险边界\n"
+            "未解问题集中在需求斜率和盈利修正，风险边界应围绕库存去化重新定价。\n\n"
+            "（一）未解问题\n"
+            "报告内容。\n\n"
+            "四、ETF影响与研报总览\n"
+            "ETF暴露需要把行业盈利弹性转化为权重贡献，当前应等待需求验证后再提高仓位。\n\n"
+            "（一）ETF暴露与配置含义\n"
+            "ETF暴露需要等待需求验证。\n\n"
+            "（二）研报总览表\n"
+            "| 券商 | 行业关键词 | 立场 |\n"
+            "| --- | --- | --- |\n"
+            "| 示例券商 | 工业金属 | 中性 |"
+        )
+        llm = _IntentThenFinalLLM(final_content=draft_report)
         node = create_etf_industry_research_analyst(llm)
         fake_industry = _FakeTool("get_etf_industry_research", "industry research data")
 
@@ -286,7 +325,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
             ),
             patch(
                 "etfagents.agents.analysts.etf_industry_research_analyst.validate_and_refine",
-                side_effect=lambda report, *_args, **_kwargs: report,
+                side_effect=lambda report, *_args, **_kwargs: refined_report,
             ),
         ):
             output = node(
@@ -297,7 +336,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
                 }
             )
 
-        self.assertEqual(incomplete_report, output["holdings_industry_report"])
+        self.assertEqual(refined_report, output["holdings_industry_report"])
 
 
 class EtfStockResearchAnalystPromptTests(unittest.TestCase):
