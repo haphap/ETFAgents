@@ -379,22 +379,27 @@ class ResearchAnalysisScreen(Screen):
         self.runner = runner
         self.repository = repository or ReportRepository()
         self._analysis_config: AnalysisConfig | None = None
+        self._selected_tickers: list[str] = []
 
     def compose(self) -> ComposeResult:
         recent_tickers = self._recent_etf_tickers()
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane research-entry-pane"):
-                yield Static("Create Research Run", classes="pane-title")
-                yield Static("ETF tickers", classes="input-label")
-                yield Input(placeholder="510300.SH,159915.SZ", id="ra_ticker_input")
-                yield Static("Use comma or space to separate tickers", classes="entry-help")
-                yield Static("", id="ra_entry_status", classes="status-strip")
-                yield Button("▶ Start Analysis", id="btn_ra_start", classes="entry-primary")
-                yield Static("Enter to configure", classes="entry-hint")
+                yield Static("创建研究任务", classes="pane-title")
+                yield Static("ETF 代码", classes="input-label")
+                yield Input(placeholder="输入代码后按 Enter 生成标签", id="ra_ticker_input")
+                yield Static("可输入多个代码，用逗号或空格分隔。", classes="entry-help")
+                with Horizontal(id="selected_ticker_tags", classes="selected-tags"):
+                    yield Static("尚未选择 ETF", id="selected_ticker_empty", classes="selected-empty")
+                yield Static("已选择 0 个 ETF", id="selected_ticker_count", classes="selected-count")
+                with Horizontal(classes="entry-actions"):
+                    yield Button("开始分析", id="btn_ra_start", classes="entry-primary")
+                    yield Button("⚙ 配置", id="btn_ra_config", classes="entry-config")
                 yield Static("近期 ETF", classes="entry-section-title")
-                for ticker in recent_tickers:
-                    yield Button(ticker, id=f"recent-{IdRegistry('recent').register(ticker)}", classes="ticker-chip")
-            with Vertical(classes="right-pane"):
+                with Horizontal(classes="recent-etf-row"):
+                    for ticker in recent_tickers:
+                        yield Button(ticker, id=f"recent-{IdRegistry('recent').register(ticker)}", classes="ticker-chip")
+            with Vertical(classes="right-pane research-board-pane"):
                 yield Static("自选股看板 / Watchlist Monitor", classes="pane-title")
                 with ScrollableContainer(id="watchlist_cards"):
                     yield Static("加载自选股看板...", id="watchlist_status", classes="watchlist-status")
@@ -406,36 +411,61 @@ class ResearchAnalysisScreen(Screen):
         self._start_watchlist_loading()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn_ra_start":
+        if event.button.id in {"btn_ra_start", "btn_ra_config"}:
             self._start_config_flow()
         elif (event.button.id or "").startswith("recent-"):
-            self._append_ticker_to_input(str(event.button.label))
+            self._add_tickers_to_selection([str(event.button.label)])
         elif (event.button.id or "").startswith("wl-"):
-            self._append_ticker_to_input(str(event.button.label))
+            self._add_tickers_to_selection([str(event.button.label)])
+        elif (event.button.id or "").startswith("sel-"):
+            self._remove_ticker_from_selection(str(event.button.label))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "ra_ticker_input":
-            self._start_config_flow()
+            self._commit_input_tickers()
 
     def _start_config_flow(self) -> None:
         tickers = self._read_tickers()
         if not tickers:
-            self.query_one("#ra_entry_status", Static).update("请输入至少一个 ETF 代码。")
+            self.query_one("#selected_ticker_count", Static).update("请输入至少一个 ETF 代码。")
             return
-        self.query_one("#ra_entry_status", Static).update(f"准备分析 {', '.join(tickers)}")
         self.app.push_screen(AnalysisConfigModal(), self._on_config_result)
 
-    def _append_ticker_to_input(self, ticker: str) -> None:
-        cleaned = ticker.strip().upper()
-        if not cleaned:
-            return
+    def _commit_input_tickers(self) -> None:
         input_widget = self.query_one("#ra_ticker_input", Input)
-        tickers = self._read_tickers()
-        if cleaned not in tickers:
-            tickers.append(cleaned)
-        input_widget.value = ",".join(tickers)
+        tickers = self._parse_tickers(input_widget.value)
+        self._add_tickers_to_selection(tickers)
+        input_widget.value = ""
         input_widget.focus()
-        self.query_one("#ra_entry_status", Static).update(f"已添加 {cleaned}")
+
+    def _add_tickers_to_selection(self, tickers: list[str]) -> None:
+        changed = False
+        for ticker in tickers:
+            cleaned = ticker.strip().upper()
+            if cleaned and cleaned not in self._selected_tickers:
+                self._selected_tickers.append(cleaned)
+                changed = True
+        if changed:
+            self._refresh_selected_ticker_tags()
+        self.query_one("#ra_ticker_input", Input).focus()
+
+    def _refresh_selected_ticker_tags(self) -> None:
+        tags = self.query_one("#selected_ticker_tags", Horizontal)
+        for child in list(tags.children):
+            child.remove()
+        if not self._selected_tickers:
+            tags.mount(Static("尚未选择 ETF", id="selected_ticker_empty", classes="selected-empty"))
+        else:
+            registry = IdRegistry("sel")
+            for ticker in self._selected_tickers:
+                tags.mount(Button(ticker, id=f"sel-{registry.register(ticker)}", classes="selected-chip"))
+        self.query_one("#selected_ticker_count", Static).update(f"已选择 {len(self._selected_tickers)} 个 ETF")
+
+    def _remove_ticker_from_selection(self, ticker: str) -> None:
+        cleaned = ticker.strip().upper()
+        self._selected_tickers = [existing for existing in self._selected_tickers if existing != cleaned]
+        self._refresh_selected_ticker_tags()
+        self.query_one("#ra_ticker_input", Input).focus()
 
     def _start_watchlist_loading(self) -> None:
         threading.Thread(
@@ -517,8 +547,14 @@ class ResearchAnalysisScreen(Screen):
         )
 
     def _read_tickers(self) -> list[str]:
-        tickers_str = self.query_one("#ra_ticker_input", Input).value.strip()
-        return [t.strip().upper() for t in re.split(r"[\s,]+", tickers_str) if t.strip()]
+        tickers: list[str] = list(self._selected_tickers)
+        for ticker in self._parse_tickers(self.query_one("#ra_ticker_input", Input).value):
+            if ticker not in tickers:
+                tickers.append(ticker)
+        return tickers
+
+    def _parse_tickers(self, raw: str) -> list[str]:
+        return [t.strip().upper() for t in re.split(r"[\s,]+", raw.strip()) if t.strip()]
 
     def _on_config_result(self, config: AnalysisConfig | None) -> None:
         if config is None:

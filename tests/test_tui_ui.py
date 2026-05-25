@@ -316,7 +316,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertEqual(app.focused.id, "ra_ticker_input")
 
-    async def test_research_analysis_enter_opens_config_modal(self):
+    async def test_research_analysis_enter_converts_input_to_selected_tag(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -325,7 +325,11 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screen.query_one("#ra_ticker_input").value = "510300.SH"
                 await pilot.press("enter")
                 await pilot.pause()
-                self.assertIsInstance(app.screen, AnalysisConfigModal)
+                self.assertIsInstance(app.screen, ResearchAnalysisScreen)
+                self.assertEqual(screen.query_one("#ra_ticker_input").value, "")
+                selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                self.assertEqual(selected_labels, ["510300.SH"])
+                self.assertIn("已选择 1 个 ETF", str(screen.query_one("#selected_ticker_count", Static).render()))
 
     async def test_research_watchlist_cards_render_snapshot(self):
         snapshot = WatchlistBoardSnapshot(
@@ -366,7 +370,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("减仓", rendered)
                     self.assertIn("MACD死叉", rendered)
 
-    async def test_research_watchlist_card_click_adds_ticker_to_input(self):
+    async def test_research_watchlist_card_click_adds_ticker_to_selection(self):
         snapshot = WatchlistBoardSnapshot(
             rows=[
                 WatchlistBoardRow(
@@ -386,10 +390,11 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.pause()
                     await pilot.click("#wl-wl_510300_SH")
                     screen = app.screen
-                    self.assertEqual(screen.query_one("#ra_ticker_input").value, "510300.SH")
+                    selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                    self.assertEqual(selected_labels, ["510300.SH"])
                     self.assertEqual(app.focused.id, "ra_ticker_input")
 
-    async def test_research_watchlist_card_click_does_not_duplicate_ticker(self):
+    async def test_research_watchlist_card_click_does_not_duplicate_selection(self):
         snapshot = WatchlistBoardSnapshot(
             rows=[
                 WatchlistBoardRow(
@@ -409,8 +414,10 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.pause()
                     screen = app.screen
                     screen.query_one("#ra_ticker_input").value = "159915.SZ,510300.SH"
+                    await pilot.press("enter")
                     await pilot.click("#wl-wl_510300_SH")
-                    self.assertEqual(screen.query_one("#ra_ticker_input").value, "159915.SZ,510300.SH")
+                    selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                    self.assertEqual(selected_labels, ["159915.SZ", "510300.SH"])
 
     # --- AnalysisRunScreen: board layout ---
 

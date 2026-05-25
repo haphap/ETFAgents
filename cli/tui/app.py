@@ -291,7 +291,13 @@ class ETFAgentsTuiApp(App):
     /* ── Home: nav + dashboard ────────────────────────────── */
     /* ── Research entry: input + watchlist cards ──────────── */
     .research-entry-pane {
+        width: 34%;
+        min-width: 48;
         padding: 1 1;
+    }
+
+    .research-board-pane {
+        width: 66%;
     }
 
     .input-label {
@@ -307,10 +313,53 @@ class ETFAgentsTuiApp(App):
         margin: 0 0 1 0;
     }
 
-    .entry-primary {
-        width: 100%;
+    .selected-tags {
         height: 3;
-        margin: 1 0 0 0;
+        margin: 0 0 1 0;
+        border: solid $surface;
+        padding: 0 1;
+    }
+
+    .selected-empty {
+        height: 1;
+        color: $text-muted;
+        content-align: left middle;
+    }
+
+    .selected-chip {
+        width: auto;
+        height: 1;
+        min-width: 10;
+        margin: 0 1 0 0;
+        padding: 0 1;
+        border: none;
+        background: $surface;
+        color: $accent;
+        content-align: center middle;
+    }
+
+    .selected-chip:hover,
+    .selected-chip:focus {
+        color: $surface;
+        background: $accent;
+        text-style: bold;
+    }
+
+    .selected-count {
+        height: 1;
+        color: $success;
+        margin: 0 0 1 0;
+    }
+
+    .entry-actions {
+        height: 3;
+        margin: 1 0 1 0;
+    }
+
+    .entry-primary {
+        width: 2fr;
+        height: 3;
+        margin: 0 1 0 0;
         background: $accent;
         color: $surface;
         text-style: bold;
@@ -324,11 +373,22 @@ class ETFAgentsTuiApp(App):
         text-style: bold underline;
     }
 
-    .entry-hint {
-        height: 1;
+    .entry-config {
+        width: 1fr;
+        height: 3;
+        min-width: 10;
+        border: solid $panel;
+        background: transparent;
         color: $text-muted;
-        text-align: center;
-        margin: 1 0 1 0;
+        content-align: center middle;
+    }
+
+    .entry-config:hover,
+    .entry-config:focus {
+        border: solid $accent;
+        color: $accent;
+        background: transparent;
+        text-style: bold;
     }
 
     .entry-section-title {
@@ -338,11 +398,16 @@ class ETFAgentsTuiApp(App):
         margin: 1 0 1 0;
     }
 
-    .ticker-chip {
-        width: 100%;
+    .recent-etf-row {
         height: 3;
+    }
+
+    .ticker-chip {
+        width: 1fr;
+        height: 1;
         min-width: 0;
-        margin: 0 0 1 0;
+        margin: 0 1 0 0;
+        padding: 0;
         border: solid $panel;
         background: transparent;
         color: $text-muted;
