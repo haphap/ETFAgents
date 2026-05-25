@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from textual.app import App
+from textual.theme import Theme
 
 from cli.tui.services import (
     BacktestViewer,
@@ -248,7 +249,7 @@ class ETFAgentsTuiApp(App):
     }
 
     .right-top {
-        height: 35%;
+        height: 25%;
         border: none;
         padding: 0 1;
         margin-bottom: 1;
@@ -281,6 +282,8 @@ class ETFAgentsTuiApp(App):
         color: $text-muted;
         height: auto;
         margin-bottom: 1;
+        padding: 0 1;
+        border: solid $surface;
     }
 
     #ra_etf_detail {
@@ -296,6 +299,17 @@ class ETFAgentsTuiApp(App):
         scrollbar-size: 1 1;
         scrollbar-background: $background;
         scrollbar-color: $accent;
+        overflow-x: auto;
+        overflow-y: auto;
+    }
+
+    #lib_body_scroll {
+        height: 1fr;
+        scrollbar-size: 1 1;
+        scrollbar-background: $background;
+        scrollbar-color: $accent;
+        overflow-x: auto;
+        overflow-y: auto;
     }
 
     #ra_body {
@@ -336,7 +350,7 @@ class ETFAgentsTuiApp(App):
     .stats-seg-surface {
         background: $surface;
         color: $text-muted;
-        content-align: right middle;
+        content-align: center middle;
     }
 
     .board-column {
@@ -491,7 +505,28 @@ class ETFAgentsTuiApp(App):
             self._backtest_viewer = BacktestViewer()
         return self._backtest_viewer
 
+    def _register_transparent_theme(self, theme_name: str) -> None:
+        base = self.get_theme(theme_name)
+        transparent = Theme(
+            name=theme_name,
+            primary=base.primary,
+            secondary=base.secondary,
+            warning=base.warning,
+            error=base.error,
+            success=base.success,
+            accent=base.accent,
+            foreground=base.foreground,
+            background="transparent",
+            surface=base.surface,
+            panel=base.panel,
+            boost=base.boost,
+            dark=base.dark,
+            variables=base.variables,
+        )
+        self.register_theme(transparent)
+
     def on_mount(self) -> None:
+        self._register_transparent_theme(self._settings.theme)
         self.theme = self._settings.theme
         self._tui_settings = self._settings
         self.install_screen(HomeScreen(), name="home")
