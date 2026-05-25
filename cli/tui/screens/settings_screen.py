@@ -37,21 +37,21 @@ class SettingsScreen(Screen):
         from cli.tui.settings import DENSITY_OPTIONS, PANEL_WIDTH_PRESETS
         yield Header(show_clock=True)
         with Vertical(id="settings_body"):
-            yield Static("设置", classes="pane-title")
-            yield Static("主题:")
+            yield Static("Settings", classes="pane-title")
+            yield Static("Terminal base theme:")
             theme_options = [(t, t) for t in AVAILABLE_THEMES]
             yield Select(theme_options, value="textual-dark", id="sel_theme")
-            yield Static("密度:")
+            yield Static("Density:")
             density_labels = {"compact": "紧凑", "normal": "普通", "spacious": "宽松"}
             density_options = [(density_labels.get(d, d), d) for d in DENSITY_OPTIONS]
             yield Select(density_options, value="normal", id="sel_density")
-            yield Static("面板宽度:")
+            yield Static("Panel width:")
             width_labels = {"narrow": "窄", "normal": "普通", "wide": "宽"}
             width_options = [(width_labels.get(k, k), k) for k in PANEL_WIDTH_PRESETS]
             yield Select(width_options, value="normal", id="sel_panel_width")
             with Horizontal():
-                yield Button("保存", id="btn_settings_save", variant="primary")
-                yield Button("重置", id="btn_settings_reset")
+                yield Button("› Save", id="btn_settings_save", classes="text-action")
+                yield Button("Reset", id="btn_settings_reset", classes="text-action muted")
             yield Static("", id="settings_status")
         yield Footer()
 

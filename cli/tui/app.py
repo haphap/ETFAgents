@@ -42,6 +42,7 @@ from cli.tui.services import PaperTradingViewModel  # noqa: F401
 
 class ETFAgentsTuiApp(App):
     CSS = """
+    /* ── Base ─────────────────────────────────────────────── */
     Screen {
         background: $surface;
         color: $text;
@@ -50,7 +51,7 @@ class ETFAgentsTuiApp(App):
     Header {
         background: $surface;
         color: $text;
-        border: solid $panel;
+        border-bottom: solid $panel;
         height: 3;
         text-style: bold;
     }
@@ -70,7 +71,6 @@ class ETFAgentsTuiApp(App):
     .subtitle {
         color: $text-muted;
         margin-bottom: 1;
-        text-style: italic;
     }
 
     .screen-body {
@@ -108,11 +108,16 @@ class ETFAgentsTuiApp(App):
         color: $text;
     }
 
+    /* ── Form controls ───────────────────────────────────── */
     Input {
         background: $background;
         color: $text;
-        border: tall $accent;
+        border: tall $panel;
         margin: 0 0 1 0;
+    }
+
+    Input:focus {
+        border: tall $accent;
     }
 
     Select {
@@ -122,34 +127,95 @@ class ETFAgentsTuiApp(App):
         margin: 0 0 1 0;
     }
 
+    Select:focus {
+        border: tall $accent;
+    }
+
+    /* ── Buttons — minimal text actions ───────────────────── */
     Button {
-        background: $panel;
-        color: $text;
+        background: transparent;
+        color: $text-muted;
         text-style: bold;
         border: none;
+        min-width: 0;
+        height: 1;
         margin: 0 0 1 0;
+        padding: 0 1;
+        content-align: left middle;
     }
 
     Button:hover {
-        background: $accent;
-        color: $surface;
+        color: $accent;
+        background: transparent;
+        text-style: bold underline;
+    }
+
+    Button:focus {
+        color: $accent;
+        background: $panel;
     }
 
     Button.-primary {
-        background: $accent;
-        color: $surface;
+        color: $accent;
+        background: transparent;
     }
 
     Button.-warning {
-        background: $warning;
-        color: $surface;
+        color: $warning;
+        background: transparent;
     }
 
     Button.-success {
-        background: $success;
-        color: $surface;
+        color: $success;
+        background: transparent;
     }
 
+    Button:disabled {
+        color: $text-disabled;
+        background: transparent;
+        text-style: none;
+    }
+
+    /* ── Text-action / nav-action button classes ─────────── */
+    .text-action {
+        background: transparent;
+        color: $accent;
+        min-width: 0;
+        height: 1;
+        padding: 0 1;
+    }
+
+    .text-action:hover {
+        text-style: bold underline;
+        background: transparent;
+    }
+
+    .nav-action {
+        width: 100%;
+        background: transparent;
+        color: $text-muted;
+        min-width: 0;
+        height: 1;
+        padding: 0 1;
+        content-align: left middle;
+    }
+
+    .nav-action:hover {
+        color: $accent;
+        background: transparent;
+    }
+
+    .nav-action:focus {
+        color: $accent;
+        background: $panel;
+    }
+
+    .nav-action.-primary {
+        color: $text;
+        background: transparent;
+    }
+
+    /* ── Lists ────────────────────────────────────────────── */
     ListView {
         width: 100%;
         background: $surface;
@@ -166,44 +232,26 @@ class ETFAgentsTuiApp(App):
         text-style: bold;
     }
 
+    /* ── Markdown ─────────────────────────────────────────── */
     Markdown {
         height: auto;
         background: $surface;
         color: $text;
     }
 
-    #ra_body_scroll {
-        height: 1fr;
-        scrollbar-size: 1 1;
-        scrollbar-background: $background;
-        scrollbar-color: $accent;
-    }
-
-    #ra_body {
-        height: auto;
-    }
-
-    #ra_stats_bar {
-        height: 3;
-        margin: 0 1 1 1;
-        padding: 0 2;
-        border: solid $panel;
-        background: $background;
-        color: $accent;
-        text-style: bold;
-    }
-
+    /* ── DataTable ────────────────────────────────────────── */
     DataTable {
         height: 1fr;
         background: $surface;
         color: $text;
     }
 
+    /* ── Panel layout ─────────────────────────────────────── */
     .left-pane {
         height: 100%;
         width: 30%;
         min-width: 34;
-        border: solid $accent;
+        border: solid $panel;
         padding: 1 2;
         background: $surface;
     }
@@ -212,7 +260,7 @@ class ETFAgentsTuiApp(App):
         height: 100%;
         width: 70%;
         padding: 0 1;
-        border: solid $accent;
+        border: solid $panel;
         background: $surface;
     }
 
@@ -244,6 +292,7 @@ class ETFAgentsTuiApp(App):
     .density-normal .left-pane,   .density-normal .right-pane   { padding: 0 1; }
     .density-spacious .left-pane, .density-spacious .right-pane { padding: 1 2; }
 
+    /* ── Home: nav + dashboard ────────────────────────────── */
     .nav-pane {
         width: 22%;
         min-width: 28;
@@ -254,31 +303,165 @@ class ETFAgentsTuiApp(App):
         padding: 1 3;
     }
 
-    .nav-button {
-        width: 100%;
-        content-align: left middle;
+    .dashboard-grid {
+        height: auto;
+        margin: 0;
+    }
+
+    .workspace-card {
+        height: auto;
+        width: 1fr;
+        border: solid $panel;
+        padding: 1 2;
+        margin: 0 1 1 0;
         background: $surface;
+    }
+
+    .workspace-card-title {
+        text-style: bold;
+        color: $accent;
+        height: 1;
+    }
+
+    /* ── Analysis run: board layout ───────────────────────── */
+    #ra_body_scroll {
+        height: 1fr;
+        scrollbar-size: 1 1;
+        scrollbar-background: $background;
+        scrollbar-color: $accent;
+    }
+
+    #ra_body {
+        height: auto;
+    }
+
+    #ra_stats_bar {
+        height: 1;
+        margin: 0 1;
+        padding: 0 2;
+        background: $panel;
+        color: $accent;
+        text-style: bold;
+    }
+
+    .board-column {
+        height: 100%;
+        width: 1fr;
+        padding: 0 1;
+        border: solid $panel;
+        margin-right: 1;
+    }
+
+    .board-column:last-of-type {
+        margin-right: 0;
+    }
+
+    .column-active {
+        border: solid $accent;
+    }
+
+    .column-inactive {
+        border: solid $panel;
+    }
+
+    .column-header {
+        text-style: bold;
         color: $text;
+        height: 1;
+        margin-bottom: 1;
     }
 
-    .nav-button:hover {
-        background: $accent;
-        color: $surface;
+    .board-col-wide {
+        width: 2fr;
     }
 
-    .dashboard-card {
+    .board-row {
+        height: auto;
+    }
+
+    .board-item {
+        width: 1fr;
+        height: 1;
+        min-width: 0;
+        padding: 0;
+        margin: 0;
+        background: transparent;
+        color: $text-muted;
+        text-style: none;
+        content-align: left middle;
+    }
+
+    .board-item:hover {
+        color: $accent;
+        background: transparent;
+        text-style: none;
+    }
+
+    .board-item:focus {
+        color: $accent;
+        background: $panel;
+        text-style: bold;
+    }
+
+    .board-item-done {
+        color: $success;
+    }
+
+    .board-item-failed {
+        color: $error;
+    }
+
+    .debate-progress {
+        color: $text-muted;
+        height: 1;
+    }
+
+    /* ── Semantic text classes ─────────────────────────────── */
+    .muted {
+        color: $text-muted;
+    }
+
+    .success-text {
+        color: $success;
+    }
+
+    .warning-text {
+        color: $warning;
+    }
+
+    .error-text {
+        color: $error;
+    }
+
+    .status-strip {
+        height: auto;
+        padding: 0 1;
+        color: $text-muted;
+    }
+
+    .section-card {
         height: auto;
         border: solid $panel;
         padding: 1 2;
-        margin: 1 0;
+        margin: 0 0 1 0;
         background: $surface;
     }
 
-    .ascii-logo {
-        height: 1fr;
-        content-align: center middle;
+    /* ── Placeholder panel ────────────────────────────────── */
+    .placeholder-panel {
+        height: auto;
+        border: dashed $panel;
+        padding: 1 2;
         color: $text-muted;
-        text-style: bold;
+        content-align: center middle;
+    }
+
+    /* ── Config modal ─────────────────────────────────────── */
+    .analyst-grid {
+        layout: grid;
+        grid-size: 3 2;
+        grid-gutter: 0 1;
+        height: auto;
     }
     """
 

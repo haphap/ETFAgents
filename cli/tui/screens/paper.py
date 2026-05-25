@@ -27,7 +27,8 @@ class LoginModal(ModalScreen[bool]):
 
     DEFAULT_CSS = """
     LoginModal { align: center middle; }
-    #login_container { width: 50; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+    #login_container { width: 50; height: auto; border: solid $accent; background: $surface; padding: 1 2; }
+    #login_container .text-action { margin: 0 1 0 0; }
     """
 
     def __init__(self, view_model: PaperTradingViewModel) -> None:
@@ -39,10 +40,10 @@ class LoginModal(ModalScreen[bool]):
             yield Static("登录", classes="pane-title")
             yield Input(placeholder="用户名", id="login_user")
             yield Input(placeholder="密码", id="login_pass", password=True)
-            yield Static("", id="login_error")
+            yield Static("", id="login_error", classes="error-text")
             with Horizontal():
-                yield Button("登录", id="btn_login_ok", variant="primary")
-                yield Button("取消", id="btn_login_cancel")
+                yield Button("› Login", id="btn_login_ok", classes="text-action")
+                yield Button("Cancel", id="btn_login_cancel", classes="text-action muted")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_login_ok":
@@ -75,7 +76,8 @@ class OrderModal(ModalScreen[None]):
 
     DEFAULT_CSS = """
     OrderModal { align: center middle; }
-    #order_container { width: 50; height: auto; border: thick $accent; background: $surface; padding: 1 2; }
+    #order_container { width: 50; height: auto; border: solid $accent; background: $surface; padding: 1 2; }
+    #order_container .text-action { margin: 0 1 0 0; }
     """
 
     def __init__(self, side: str, view_model: PaperTradingViewModel) -> None:
@@ -89,10 +91,10 @@ class OrderModal(ModalScreen[None]):
             yield Static(title, classes="pane-title")
             yield Input(placeholder="ETF代码", id="order_ticker")
             yield Input(placeholder="数量", id="order_quantity", restrict=r"[0-9]*")
-            yield Static("", id="order_error")
+            yield Static("", id="order_error", classes="error-text")
             with Horizontal():
-                yield Button("确定", id="btn_order_ok", variant="primary")
-                yield Button("取消", id="btn_order_cancel")
+                yield Button("› Confirm", id="btn_order_ok", classes="text-action")
+                yield Button("Cancel", id="btn_order_cancel", classes="text-action muted")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_order_ok":
@@ -129,7 +131,7 @@ class OrderModal(ModalScreen[None]):
 
 
 class PaperTradingScreen(Screen):
-    """Paper trading with account, positions, trades, and order flow."""
+    """Account / Actions + Portfolio Board layout."""
 
     def __init__(self, view_model: PaperTradingViewModel | None = None) -> None:
         super().__init__()
@@ -139,21 +141,21 @@ class PaperTradingScreen(Screen):
         yield Header(show_clock=True)
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane"):
-                yield Static("模拟交易", classes="pane-title")
-                yield Static("", id="pt_user_status")
-                yield Button("登录", id="btn_pt_login", variant="primary")
-                yield Button("登出", id="btn_pt_logout")
-                yield Button("买入", id="btn_pt_buy", variant="success")
-                yield Button("卖出", id="btn_pt_sell", variant="warning")
-                yield Button("刷新", id="btn_pt_refresh", variant="primary")
+                yield Static("Account / Actions", classes="pane-title")
+                yield Static("", id="pt_user_status", classes="status-strip")
+                yield Button("Login", id="btn_pt_login", classes="text-action")
+                yield Button("Logout", id="btn_pt_logout", classes="text-action muted")
+                yield Button("› Buy", id="btn_pt_buy", classes="text-action")
+                yield Button("› Sell", id="btn_pt_sell", classes="text-action warning-text")
+                yield Button("Refresh", id="btn_pt_refresh", classes="text-action muted")
             with Vertical(classes="right-pane"):
                 with Vertical(classes="right-top"):
-                    yield Static("账户信息", classes="pane-title")
+                    yield Static("Account Snapshot", classes="pane-title")
                     yield Static("加载中...", id="pt_account")
                 with Vertical(classes="right-bottom"):
-                    yield Static("持仓", classes="pane-title")
+                    yield Static("Positions", classes="pane-title")
                     yield DataTable(id="pt_positions")
-                    yield Static("交易历史", classes="pane-title")
+                    yield Static("Trades", classes="pane-title")
                     yield DataTable(id="pt_trades")
         yield Footer()
 
@@ -161,7 +163,9 @@ class PaperTradingScreen(Screen):
         if self.view_model:
             self._start_loading()
         else:
-            self.query_one("#pt_account", Static).update("未配置模拟交易引擎。")
+            self.query_one("#pt_account", Static).update(
+                "未配置模拟交易引擎。请参考文档配置 PaperTradingEngine。"
+            )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_pt_login":
@@ -207,17 +211,14 @@ class PaperTradingScreen(Screen):
         unrealized_pnl = acct.get("unrealized_pnl", 0)
         realized_pnl = acct.get("realized_pnl", 0)
         self.query_one("#pt_account", Static).update(
-            f"总资产: {total_assets:,.2f}\n"
-            f"现金: {cash:,.2f}\n"
-            f"市值: {market_value:,.2f}\n"
-            f"浮动盈亏: {unrealized_pnl:+,.2f}\n"
-            f"已实现盈亏: {realized_pnl:+,.2f}"
+            f"Total {total_assets:,.2f} | Cash {cash:,.2f} | MV {market_value:,.2f}\n"
+            f"Unrealized {unrealized_pnl:+,.2f} | Realized {realized_pnl:+,.2f}"
         )
 
         # User status
         if self.view_model:
             user = self.view_model.current_user()
-            self.query_one("#pt_user_status", Static).update(f"当前用户: {user}")
+            self.query_one("#pt_user_status", Static).update(f"user: {user}")
 
         # Positions table
         pos_table = self.query_one("#pt_positions", DataTable)
