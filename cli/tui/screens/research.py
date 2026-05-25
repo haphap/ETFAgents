@@ -415,8 +415,9 @@ class ResearchAnalysisScreen(Screen):
         if event.button.id == "btn_ra_start":
             self._start_config_flow()
         elif (event.button.id or "").startswith("ex-"):
-            self.query_one("#ra_ticker_input", Input).value = str(event.button.label)
-            self.query_one("#ra_ticker_input", Input).focus()
+            self._append_ticker_to_input(str(event.button.label))
+        elif (event.button.id or "").startswith("wl-"):
+            self._append_ticker_to_input(str(event.button.label))
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         if event.input.id == "ra_ticker_input":
@@ -429,6 +430,18 @@ class ResearchAnalysisScreen(Screen):
             return
         self.query_one("#ra_entry_status", Static).update(f"准备分析 {', '.join(tickers)}")
         self.app.push_screen(AnalysisConfigModal(), self._on_config_result)
+
+    def _append_ticker_to_input(self, ticker: str) -> None:
+        cleaned = ticker.strip().upper()
+        if not cleaned:
+            return
+        input_widget = self.query_one("#ra_ticker_input", Input)
+        tickers = self._read_tickers()
+        if cleaned not in tickers:
+            tickers.append(cleaned)
+        input_widget.value = ",".join(tickers)
+        input_widget.focus()
+        self.query_one("#ra_entry_status", Static).update(f"已添加 {cleaned}")
 
     def _start_watchlist_loading(self) -> None:
         threading.Thread(
@@ -483,7 +496,8 @@ class ResearchAnalysisScreen(Screen):
         rating = row.rating or "--"
         rating_date = row.rating_date or "--"
         return Vertical(
-            Static(f"{row.ticker}\n{row.name}", classes="watchlist-card-title"),
+            Button(row.ticker, id=f"wl-{IdRegistry('wl').register(row.ticker)}", classes="watchlist-card-title"),
+            Static(row.name, classes="watchlist-card-name"),
             Static(
                 f"现价 {_fmt_price(row.close)}   涨跌 {_fmt_pct(row.pct_chg)}   份额 {_fmt_pct(row.share_change_pct)}",
                 classes=f"watchlist-card-price {price_class} {share_class}",

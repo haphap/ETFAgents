@@ -337,11 +337,60 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.pause()
                     screen = app.screen
                     cards = screen.query_one("#watchlist_cards")
-                    rendered = "\n".join(str(widget.render()) for widget in cards.query(Static))
+                    rendered = "\n".join(
+                        [str(widget.render()) for widget in cards.query(Static)]
+                        + [str(widget.label) for widget in cards.query(Button)]
+                    )
                     self.assertIn("510300.SH", rendered)
                     self.assertIn("沪深300ETF", rendered)
                     self.assertIn("减仓", rendered)
                     self.assertIn("MACD死叉", rendered)
+
+    async def test_research_watchlist_card_click_adds_ticker_to_input(self):
+        snapshot = WatchlistBoardSnapshot(
+            rows=[
+                WatchlistBoardRow(
+                    ticker="510300.SH",
+                    name="沪深300ETF",
+                    action="持有",
+                    rationale="区间震荡，观察为主。",
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            with patch("cli.tui.screens.research.load_watchlist_board", return_value=snapshot):
+                async with app.run_test(size=(140, 40)) as pilot:
+                    await pilot.click("#btn_research")
+                    await pilot.pause()
+                    await pilot.pause()
+                    await pilot.click("#wl-wl_510300_SH")
+                    screen = app.screen
+                    self.assertEqual(screen.query_one("#ra_ticker_input").value, "510300.SH")
+                    self.assertEqual(app.focused.id, "ra_ticker_input")
+
+    async def test_research_watchlist_card_click_does_not_duplicate_ticker(self):
+        snapshot = WatchlistBoardSnapshot(
+            rows=[
+                WatchlistBoardRow(
+                    ticker="510300.SH",
+                    name="沪深300ETF",
+                    action="持有",
+                    rationale="区间震荡，观察为主。",
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            with patch("cli.tui.screens.research.load_watchlist_board", return_value=snapshot):
+                async with app.run_test(size=(140, 40)) as pilot:
+                    await pilot.click("#btn_research")
+                    await pilot.pause()
+                    await pilot.pause()
+                    screen = app.screen
+                    screen.query_one("#ra_ticker_input").value = "159915.SZ,510300.SH"
+                    await pilot.click("#wl-wl_510300_SH")
+                    self.assertEqual(screen.query_one("#ra_ticker_input").value, "159915.SZ,510300.SH")
 
     # --- AnalysisRunScreen: board layout ---
 

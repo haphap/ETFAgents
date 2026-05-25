@@ -416,9 +416,28 @@ class ETFAgentsTuiApp(App):
     }
 
     .watchlist-card-title {
-        height: 2;
+        width: 100%;
+        height: 1;
+        min-width: 0;
+        padding: 0;
+        margin: 0;
+        background: transparent;
         color: $text;
         text-style: bold;
+        content-align: left middle;
+    }
+
+    .watchlist-card-title:hover,
+    .watchlist-card-title:focus {
+        color: $accent;
+        background: transparent;
+        text-style: bold underline;
+    }
+
+    .watchlist-card-name {
+        height: 1;
+        color: $text-muted;
+        margin: 0 0 1 0;
     }
 
     .watchlist-card-price {
