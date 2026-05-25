@@ -105,68 +105,45 @@ def _format_tokens(n: int) -> str:
 def _format_detail_text(detail: dict) -> str:
     lines: list[str] = []
     name = detail.get("name") or detail.get("ticker", "")
+    ticker = detail.get("ticker", "")
     close = detail.get("close")
     pct = detail.get("pct_chg")
 
-    # Title line: name + price + change
+    if name:
+        suffix = f" ({ticker})" if ticker and ticker != name else ""
+        lines.append(f"名称：{name}{suffix}")
+
     if close is not None:
-        pct_str = ""
+        pct_str = "--"
         if pct is not None:
             sign = "+" if pct >= 0 else ""
-            pct_str = f" {sign}{pct:.2f}%"
-        lines.append(f"📌 {name} {close:.3f}{pct_str}" if name else f"📌 {close:.3f}{pct_str}")
-    elif name:
-        lines.append(f"📌 {name}")
+            pct_str = f"{sign}{pct:.2f}%"
+        lines.append(f"收盘：{close:.3f} ({pct_str})")
 
-    # Price range: open / high / low
-    _open = detail.get("open")
-    high = detail.get("high")
-    low = detail.get("low")
-    range_parts: list[str] = []
-    if _open is not None:
-        range_parts.append(f"开{_open:.3f}")
-    if high is not None:
-        range_parts.append(f"高{high:.3f}")
-    if low is not None:
-        range_parts.append(f"低{low:.3f}")
-    if range_parts:
-        lines.append(f"📊 {' / '.join(range_parts)}")
-
-    # Volume + amount
     vol = detail.get("volume")
-    amt = detail.get("amount")
-    if vol is not None or amt is not None:
-        vol_parts: list[str] = []
-        if vol is not None:
-            vol_parts.append(f"量{vol / 1e4:.0f}万手")
-        if amt is not None:
-            vol_parts.append(f"额{amt / 1e4:.0f}万")
-        lines.append(f"💹 {' / '.join(vol_parts)}")
+    if vol is not None:
+        vc = detail.get("volume_change_pct")
+        vc_str = "--"
+        if vc is not None:
+            vc_str = f"{vc:+.1f}%"
+        lines.append(f"交易量：{vol / 1e4:.0f}万手 ({vc_str})")
 
-    # Fund size + change
     share = detail.get("fund_share")
     if share is not None:
-        share_line = f"💰 规模 {share / 1e8:.0f}亿"
         sc = detail.get("share_change_pct")
+        sc_str = "--"
         if sc is not None:
-            share_line += f" ({sc:+.1f}%)"
-        lines.append(share_line)
+            sc_str = f"{sc:+.1f}%"
+        lines.append(f"份额：{share / 1e8:.0f}亿份 ({sc_str})")
 
-    # Fund info: type + manager
-    fund_type = detail.get("fund_type")
-    manager = detail.get("manager")
-    if fund_type or manager:
-        info_parts = [p for p in [fund_type, manager] if p]
-        lines.append(f"🏷️ {' · '.join(info_parts)}")
-
-    # Top holdings
     holdings = detail.get("holdings") or []
     if holdings:
-        lines.append("📋 持仓:")
-        for h in holdings[:5]:
+        holding_parts: list[str] = []
+        for index, h in enumerate(holdings[:5], 1):
             w = h.get("weight_pct")
             w_str = f"{w:.1f}%" if w is not None else "?"
-            lines.append(f"   {h.get('name', '?')} {w_str}")
+            holding_parts.append(f"{index}. {h.get('name') or h.get('code') or '?'} {w_str}")
+        lines.append(f"头部持仓：{'；'.join(holding_parts)}")
 
     return "\n".join(lines) if lines else "无数据"
 
@@ -514,7 +491,8 @@ class AnalysisRunScreen(Screen):
                                         id=f"rsec-{defn.section_id}",
                                         classes="board-item",
                                     )
-                                yield Static("", id="research_progress", classes="debate-progress")
+                                    if defn.section_id == "research_debate":
+                                        yield Static("", id="research_progress", classes="debate-progress")
                         # Column 3: Risk
                         if risk_defs:
                             with Vertical(classes="board-column column-inactive", id="col_risk"):
@@ -529,7 +507,8 @@ class AnalysisRunScreen(Screen):
                                         id=f"rsec-{defn.section_id}",
                                         classes="board-item",
                                     )
-                                yield Static("", id="risk_progress", classes="debate-progress")
+                                    if defn.section_id == "risk_debate":
+                                        yield Static("", id="risk_progress", classes="debate-progress")
                         # Column 4: Decision
                         with Vertical(classes="board-column column-inactive", id="col_decision"):
                             yield Static(
@@ -613,9 +592,10 @@ class AnalysisRunScreen(Screen):
         cfg = self._analysis_config
         depth = _depth_option_label(cfg.depth_name)
         return (
-            f"📅 {cfg.analysis_date or 'today'}  📊 {depth}\n"
-            f"🤖 {cfg.llm_provider}  ⚡ {cfg.quick_model or 'default'}\n"
-            f"🧠 {cfg.deep_model or 'default'}"
+            f"日期：{cfg.analysis_date or 'today'}\n"
+            f"深度：{depth}\n"
+            f"提供商：{cfg.llm_provider}\n"
+            f"模型：{cfg.quick_model or 'default'} / {cfg.deep_model or 'default'}"
         )
 
     def _cancel_analysis(self) -> None:

@@ -2747,6 +2747,24 @@ _POSITIONING_EXECUTION_CUES = (
 # English positioning advice can use the same idea once English report rendering needs it.
 
 
+_POSITIONING_NUMBERED_ITEM_RE = re.compile(
+    r"^\s*(?:\d+[.．、]|[-*•])\s+\S"
+)
+
+
+def _space_numbered_positioning_blocks(content: str) -> str:
+    lines = content.splitlines()
+    if not lines:
+        return content
+
+    spaced: list[str] = []
+    for line in lines:
+        if _POSITIONING_NUMBERED_ITEM_RE.match(line) and spaced and spaced[-1].strip():
+            spaced.append("")
+        spaced.append(line)
+    return "\n".join(spaced).strip()
+
+
 def _normalize_manager_section_key(title: str) -> str:
     cleaned = (title or "").strip()
     cleaned = re.sub(r"^[一二三四五六七八九十]+[、.．]?\s*", "", cleaned)
@@ -2852,12 +2870,10 @@ def format_chinese_positioning_recommendation(text: str) -> str:
     # numbered items and no remaining inline markers (i.e. the LLM already produced
     # a usable numbered list).
     line_anchored_count = sum(
-        1
-        for line in content.splitlines()
-        if re.match(r"^\s*(?:\d+[.．、]|[-*•])\s+\S", line)
+        1 for line in content.splitlines() if _POSITIONING_NUMBERED_ITEM_RE.match(line)
     )
     if line_anchored_count >= 2:
-        return content
+        return _space_numbered_positioning_blocks(content)
 
     if len(re.sub(r"\s+", "", content)) < 120:
         return content
@@ -2915,7 +2931,7 @@ def format_chinese_positioning_recommendation(text: str) -> str:
                 lines.append(f"{index}. {title}{remainder}")
                 continue
         lines.append(f"{index}. {title}。{chunk}")
-    return "\n".join(lines)
+    return "\n\n".join(lines)
 
 
 def _normalize_manager_positioning_subsections(text: str) -> str:

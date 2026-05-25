@@ -48,6 +48,10 @@ class ETFAgentsTuiApp(App):
         color: $text;
     }
 
+    ETFAgentsTuiApp, Container, Vertical, Horizontal, ScrollableContainer {
+        background: transparent;
+    }
+
     Header {
         background: transparent;
         color: $text;
@@ -283,7 +287,7 @@ class ETFAgentsTuiApp(App):
     #ra_run_config {
         color: $text-muted;
         height: auto;
-        margin-bottom: 1;
+        margin-bottom: 0;
         padding: 0 1;
         border: solid $surface;
     }
@@ -299,7 +303,7 @@ class ETFAgentsTuiApp(App):
     #ra_body_scroll {
         height: 1fr;
         scrollbar-size: 1 1;
-        scrollbar-background: $background;
+        scrollbar-background: transparent;
         scrollbar-color: $accent;
         overflow-x: auto;
         overflow-y: auto;
@@ -308,7 +312,7 @@ class ETFAgentsTuiApp(App):
     #lib_body_scroll {
         height: 1fr;
         scrollbar-size: 1 1;
-        scrollbar-background: $background;
+        scrollbar-background: transparent;
         scrollbar-color: $accent;
         overflow-x: auto;
         overflow-y: auto;
@@ -356,7 +360,7 @@ class ETFAgentsTuiApp(App):
     }
 
     .board-column {
-        height: auto;
+        height: 9;
         width: 1fr;
         padding: 0 1;
         border: solid $panel;
@@ -380,6 +384,7 @@ class ETFAgentsTuiApp(App):
         color: $text;
         height: 1;
         margin-bottom: 1;
+        content-align: center middle;
     }
 
     .board-col-wide {

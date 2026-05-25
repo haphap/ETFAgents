@@ -24,6 +24,7 @@ from etfagents.agents.risk_mgmt.conservative_debator import create_conservative_
 from etfagents.agents.risk_mgmt.neutral_debator import create_neutral_debator
 from etfagents.agents.trader.trader import create_trader
 from etfagents.agents.utils.agent_utils import (
+    format_chinese_positioning_recommendation,
     get_localized_final_proposal_instruction,
     normalize_chinese_manager_terms,
     normalize_chinese_role_terms,
@@ -800,6 +801,19 @@ class OutputLanguagePropagationTests(unittest.TestCase):
         self.assertIn("2. 加仓触发条件", rendered)
         self.assertIn("跟踪验证与再平衡", rendered)
         self.assertIn("减仓触发的核心条件", rendered)
+
+    def test_manager_positioning_numbered_blocks_keep_blank_lines(self):
+        rendered = format_chinese_positioning_recommendation(
+            "1. 初始仓位与执行节奏 — 先维持底仓。"
+            "\n2. 加仓触发条件 — 放量突破后再加仓。"
+            "\n3. 减仓与止损条件 — 跌破支撑则减仓。"
+        )
+
+        self.assertIn(
+            "1. 初始仓位与执行节奏 — 先维持底仓。\n\n"
+            "2. 加仓触发条件 — 放量突破后再加仓。",
+            rendered,
+        )
 
     def test_trader_numbered_blocks_reorder_buckets_into_canonical_execution_flow(self):
         rendered = _format_trader_numbered_blocks(

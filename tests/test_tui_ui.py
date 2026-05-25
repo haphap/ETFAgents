@@ -28,6 +28,7 @@ from cli.tui.app import (
     SettingsScreen,
     HelpScreen,
 )
+from cli.tui.screens.research import _format_detail_text
 from cli.tui.services import (
     AnalysisConfig,
     BacktestViewer,
@@ -326,6 +327,26 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(screen.query_one("#rsec-trader").parent.id, "col_risk")
 
+    async def test_analysis_run_places_research_progress_under_debate_item(self):
+        """Research debate progress belongs directly below the debate item."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                research_col = screen.query_one("#col_research")
+                child_ids = [child.id for child in research_col.children]
+                self.assertLess(
+                    child_ids.index("research_progress"),
+                    child_ids.index("rsec-research"),
+                )
+
     async def test_analysis_run_board_analysts_dual_column(self):
         """Analyst column should have 6 items in 3x2 grid."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -343,6 +364,28 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 from cli.tui.services import ANALYST_KEYS
                 for key in ANALYST_KEYS:
                     self.assertIsNotNone(screen.query_one(f"#rsec-{key}", Button))
+
+    def test_format_detail_text_uses_requested_single_line_items(self):
+        text = _format_detail_text({
+            "ticker": "510300.SH",
+            "name": "沪深300ETF",
+            "close": 4.12,
+            "pct_chg": 1.25,
+            "volume": 123450000,
+            "volume_change_pct": 23.45,
+            "fund_share": 12_530_000_000,
+            "share_change_pct": -1.2,
+            "holdings": [
+                {"name": "贵州茅台", "weight_pct": 5.23},
+                {"name": "五粮液", "weight_pct": 3.12},
+            ],
+        })
+
+        self.assertIn("名称：沪深300ETF (510300.SH)", text)
+        self.assertIn("收盘：4.120 (+1.25%)", text)
+        self.assertIn("交易量：12345万手 (+23.4%)", text)
+        self.assertIn("份额：125亿份 (-1.2%)", text)
+        self.assertIn("头部持仓：1. 贵州茅台 5.2%；2. 五粮液 3.1%", text)
 
     async def test_analysis_run_board_follows_selected_analysts(self):
         """Board should only show selected analysts."""
