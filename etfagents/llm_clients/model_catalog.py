@@ -337,6 +337,35 @@ MODEL_OPTIONS: ProviderModeOptions = {
 }
 
 
+def fetch_local_models(base_url: str, provider: str = "vllm") -> List[ModelOption]:
+    """Fetch available models from a local vLLM or Ollama server.
+
+    Returns a list of (display_label, model_id) tuples, or an empty list
+    on connection failure.
+    """
+    import requests
+
+    try:
+        if provider == "ollama":
+            # Ollama uses /api/tags (base_url typically ends with /v1)
+            api_base = base_url.rstrip("/").removesuffix("/v1")
+            resp = requests.get(f"{api_base}/api/tags", timeout=3)
+            resp.raise_for_status()
+            models = resp.json().get("models", [])
+            return [(m["name"], m["name"]) for m in models if m.get("name")]
+        else:
+            # OpenAI-compatible /v1/models (vLLM, llama.cpp, etc.)
+            url = base_url.rstrip("/")
+            if not url.endswith("/v1/models"):
+                url = url.rstrip("/") + "/models" if url.endswith("/v1") else url + "/v1/models"
+            resp = requests.get(url, timeout=3)
+            resp.raise_for_status()
+            models = resp.json().get("data", [])
+            return [(m["id"], m["id"]) for m in models if m.get("id")]
+    except Exception:
+        return []
+
+
 def get_model_options(provider: str, mode: str) -> List[ModelOption]:
     """Return shared model options for a provider and selection mode."""
     return MODEL_OPTIONS[provider.lower()][mode]

@@ -92,6 +92,14 @@ def _depth_option_label(depth_name: str) -> str:
 def _model_select_options(provider: str, mode: str) -> list[tuple[str, str]]:
     from etfagents.llm_clients.model_catalog import get_model_options
 
+    if provider in ("vllm", "ollama"):
+        from etfagents.llm_clients.model_catalog import fetch_local_models
+
+        base_url = LLM_PROVIDER_ENDPOINTS.get(provider, "")
+        live = fetch_local_models(base_url, provider)
+        if live:
+            return [(name, value) for name, value in live]
+
     options = get_model_options(provider, mode)
     if options:
         return [(_short_model_label(label), value) for label, value in options]
@@ -270,7 +278,7 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
     #acm_container Static { height: 1; margin: 0; }
     #acm_container Checkbox { height: 1; margin: 0; }
     #acm_container Select { height: auto; margin: 0; }
-    #acm_container Input { height: 3; margin: 0; }
+    #acm_container Input { height: auto; margin: 0; }
     #acm_container .acm-label { color: $text-muted; text-style: bold; }
     #acm_container .analyst-panel { height: auto; border: solid $panel; padding: 0 1; margin: 0 0 1 0; }
     #acm_container .analyst-groups { height: auto; }

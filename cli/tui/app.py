@@ -352,13 +352,13 @@ class ETFAgentsTuiApp(App):
     }
 
     .entry-actions {
-        height: 4;
+        height: 3;
         margin: 1 0 1 0;
     }
 
     .entry-primary {
         width: 1fr;
-        height: 4;
+        height: 3;
         margin: 0;
         border: solid $accent;
         background: $accent;
@@ -372,11 +372,11 @@ class ETFAgentsTuiApp(App):
         border: solid $accent;
         background: $accent;
         color: $surface;
-        text-style: bold underline;
+        text-style: bold;
     }
 
     .entry-primary:disabled {
-        border: solid $surface;
+        border: solid $panel;
         background: $surface;
         color: $text-disabled;
         text-style: none;
@@ -384,7 +384,7 @@ class ETFAgentsTuiApp(App):
 
     .entry-config {
         width: 1fr;
-        height: 4;
+        height: 3;
         margin: 0;
         border: solid $accent;
         background: transparent;
@@ -413,10 +413,10 @@ class ETFAgentsTuiApp(App):
 
     .recent-card {
         width: 100%;
-        height: 4;
-        margin: 0 0 1 0;
+        height: 2;
+        margin: 0;
         padding: 0 1;
-        border: solid $panel;
+        border: none;
         background: transparent;
         color: $text-muted;
         content-align: left middle;
@@ -424,7 +424,6 @@ class ETFAgentsTuiApp(App):
 
     .recent-card:hover,
     .recent-card:focus {
-        border: solid $accent;
         color: $accent;
         background: transparent;
         text-style: bold;
