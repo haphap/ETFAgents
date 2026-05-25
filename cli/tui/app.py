@@ -404,14 +404,19 @@ class ETFAgentsTuiApp(App):
         margin: 1 0 1 0;
     }
 
+    .recent-etf-grid {
+        height: auto;
+    }
+
     .recent-etf-row {
         height: 3;
+        margin: 0 0 1 0;
     }
 
     .ticker-chip {
         width: 1fr;
         height: 3;
-        min-width: 0;
+        min-width: 10;
         margin: 0 1 0 0;
         padding: 0;
         border: solid $panel;

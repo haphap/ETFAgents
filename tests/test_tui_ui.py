@@ -288,6 +288,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#btn_ra_start"))
                 self.assertIsNotNone(screen.query_one("#watchlist_cards"))
                 self.assertEqual(len(screen.query(".ticker-chip")), 5)
+                self.assertTrue(all(len(row.children) <= 2 for row in screen.query(".recent-etf-row")))
                 self.assertTrue(screen.query_one("#btn_ra_start", Button).disabled)
                 with self.assertRaises(Exception):
                     screen.query_one("#wl_total")

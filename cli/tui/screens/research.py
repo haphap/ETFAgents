@@ -397,9 +397,15 @@ class ResearchAnalysisScreen(Screen):
                     yield Button("开始分析", id="btn_ra_start", classes="entry-primary", disabled=True)
                     yield Button("⚙ 配置", id="btn_ra_config", classes="entry-config")
                 yield Static("近期 ETF", classes="entry-section-title")
-                with Horizontal(classes="recent-etf-row"):
-                    for ticker in recent_tickers:
-                        yield Button(ticker, id=f"recent-{IdRegistry('recent').register(ticker)}", classes="ticker-chip")
+                with Vertical(classes="recent-etf-grid"):
+                    for index in range(0, len(recent_tickers), 2):
+                        with Horizontal(classes="recent-etf-row"):
+                            for ticker in recent_tickers[index:index + 2]:
+                                yield Button(
+                                    ticker,
+                                    id=f"recent-{IdRegistry('recent').register(ticker)}",
+                                    classes="ticker-chip",
+                                )
                 yield Static("最近任务", classes="entry-section-title")
                 with Vertical(classes="recent-task-list"):
                     if recent_tasks:
