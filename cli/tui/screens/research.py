@@ -941,7 +941,7 @@ class AnalysisRunScreen(Screen):
 
     def _stats_right_text(self) -> str:
         elapsed = self._elapsed_text()
-        return f"{elapsed}  ? s q Esc "
+        return f"{elapsed}  ?帮助  s设置  q退出"
 
     def _read_runner_stats(self) -> dict[str, Any]:
         runner = self._active_runner or self.runner

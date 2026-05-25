@@ -248,7 +248,7 @@ class ETFAgentsTuiApp(App):
     }
 
     .right-top {
-        height: 35%;
+        height: 25%;
         border: none;
         padding: 0 1;
         margin-bottom: 1;
@@ -281,6 +281,8 @@ class ETFAgentsTuiApp(App):
         color: $text-muted;
         height: auto;
         margin-bottom: 1;
+        padding: 0 1;
+        border: solid $surface;
     }
 
     #ra_etf_detail {
@@ -336,7 +338,7 @@ class ETFAgentsTuiApp(App):
     .stats-seg-surface {
         background: $surface;
         color: $text-muted;
-        content-align: right middle;
+        content-align: center middle;
     }
 
     .board-column {
