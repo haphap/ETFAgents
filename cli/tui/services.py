@@ -10,6 +10,7 @@ import csv
 import json
 import re
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from enum import Enum
@@ -482,29 +483,37 @@ def load_watchlist_board(
         if cached is not None:
             return cached
 
-    rows: list[WatchlistBoardRow] = []
-    error_count = 0
-    for entry in entries:
+    from etfagents.detail import get_etf_detail
+
+    valid_entries = [
+        e for e in entries if str(e.get("ticker", "")).strip()
+    ]
+
+    def _fetch_one(entry: dict[str, Any]) -> WatchlistBoardRow:
         ticker = str(entry.get("ticker", "")).strip().upper()
-        if not ticker:
-            continue
         name = str(entry.get("name") or ticker)
         report = reports_by_ticker.get(ticker)
         try:
-            from etfagents.detail import get_etf_detail
             detail = get_etf_detail(ticker, curr_date=curr_date)
-            rows.append(_build_watchlist_row(ticker, name, detail, report))
+            return _build_watchlist_row(ticker, name, detail, report)
         except Exception as exc:
-            error_count += 1
-            rows.append(
-                WatchlistBoardRow(
-                    ticker=ticker,
-                    name=name,
-                    rating=report.rating if report else None,
-                    rating_date=report.date if report else None,
-                    error=f"{type(exc).__name__}: {exc}",
-                )
+            return WatchlistBoardRow(
+                ticker=ticker,
+                name=name,
+                rating=report.rating if report else None,
+                rating_date=report.date if report else None,
+                error=f"{type(exc).__name__}: {exc}",
             )
+
+    rows: list[WatchlistBoardRow] = []
+    error_count = 0
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        futures = {pool.submit(_fetch_one, e): e for e in valid_entries}
+        for future in as_completed(futures):
+            row = future.result()
+            if row.error:
+                error_count += 1
+            rows.append(row)
     rows.sort(key=lambda row: (row.pct_chg is None, -(row.pct_chg or 0), row.ticker))
     snapshot = WatchlistBoardSnapshot(rows=rows, error_count=error_count)
     if use_cache:

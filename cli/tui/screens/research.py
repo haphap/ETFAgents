@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from rich.text import Text
+
 from textual.app import ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen, Screen
@@ -170,6 +172,96 @@ def _format_detail_text(detail: dict) -> str:
         lines.append(f"头部持仓：{'；'.join(holding_parts)}")
 
     return "\n".join(lines) if lines else "无数据"
+
+
+def _format_price_rich(close: float | None, pct_chg: float | None) -> Text:
+    """Rich Text with bold price and A-share colored change (red=up, green=down)."""
+    price_str = f"{close:.3f}" if close is not None else "--"
+    text = Text()
+    text.append(price_str, style="bold")
+    text.append("  ")
+    if pct_chg is not None:
+        sign = "+" if pct_chg >= 0 else ""
+        pct_str = f"{sign}{pct_chg:.2f}%"
+        if pct_chg > 0:
+            text.append(pct_str, style="bold red")
+        elif pct_chg < 0:
+            text.append(pct_str, style="bold green")
+        else:
+            text.append(pct_str, style="dim")
+    else:
+        text.append("--", style="dim")
+    return text
+
+
+def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 4) -> Text:
+    """Unicode bar chart for top holdings. E.g. '████ 宁德 5.2%'."""
+    if not holdings:
+        return Text("无持仓数据", style="dim")
+    top = holdings[:5]
+    weights = [h.get("weight_pct") or 0 for h in top]
+    max_w = max(weights) if weights else 1
+    text = Text()
+    for i, h in enumerate(top):
+        w = h.get("weight_pct") or 0
+        bar_len = round(w / max_w * max_bar) if max_w > 0 else 0
+        bar = "█" * max(bar_len, 1)
+        pad = " " * (max_bar - len(bar))
+        name = (h.get("name") or h.get("code") or "?")[:2]
+        w_str = f"{w:.1f}%" if w else "?"
+        if i > 0:
+            text.append("\n")
+        text.append(f"{bar}{pad} ", style="bold")
+        text.append(f"{name} {w_str}")
+    return text
+
+
+def _format_detail_rich(detail: dict) -> dict[str, Any]:
+    """Parse ETF detail dict into structured Rich renderables for card widgets."""
+    name = detail.get("name") or detail.get("ticker", "")
+    ticker = detail.get("ticker", "")
+    suffix = f" ({ticker})" if ticker and ticker != name else ""
+    name_text = Text(f"{name}{suffix}", style="bold")
+
+    close = detail.get("close")
+    pct_chg = detail.get("pct_chg")
+    price_text = _format_price_rich(close, pct_chg)
+
+    parts: list[str] = []
+    vol = detail.get("volume")
+    if vol is not None:
+        vc = detail.get("volume_change_pct")
+        vc_str = f"{vc:+.1f}%" if vc is not None else "--"
+        parts.append(f"量：{vol / 1e4:.0f}万手({vc_str})")
+    share = detail.get("fund_share")
+    if share is not None:
+        sc = detail.get("share_change_pct")
+        sc_str = f"{sc:+.1f}%" if sc is not None else "--"
+        parts.append(f"份额：{share / 1e8:.0f}亿份({sc_str})")
+    metrics_text = "  ".join(parts) if parts else ""
+
+    holdings_bars = _format_holdings_bars(detail.get("holdings"))
+
+    return {
+        "name_text": name_text,
+        "price_text": price_text,
+        "metrics_text": metrics_text,
+        "holdings_bars": holdings_bars,
+    }
+
+
+def _extract_ai_summary(pm_content: str) -> str:
+    """Extract a one-line conclusion from portfolio manager content."""
+    if not pm_content:
+        return ""
+    for marker in ("结论", "建议", "Decision Summary", "recommendation", "决策摘要"):
+        for line in pm_content.splitlines():
+            if marker.lower() in line.lower():
+                clean = re.sub(r"^[#*\-\s]+", "", line).strip()
+                clean = re.sub(r"^(结论|建议|Decision Summary|决策摘要)[：:]\s*", "", clean)
+                if clean:
+                    return clean[:60]
+    return ""
 
 
 def _fmt_price(value: float | None) -> str:
@@ -736,9 +828,17 @@ class AnalysisRunScreen(Screen):
             with Horizontal(classes="screen-body run-main"):
                 with Vertical(classes="left-pane"):
                     yield Static("ETF Queue", classes="pane-title")
-                    yield Static(self._config_summary(), id="ra_run_config")
-                    yield Static("", id="ra_etf_detail")
-                    yield Button("Cancel", id="btn_ra_cancel", classes="text-action warning-text", disabled=True)
+                    with Vertical(id="ra_etf_card", classes="sidebar-card etf-card"):
+                        yield Static("", id="ra_etf_name", classes="etf-name")
+                        yield Static("", id="ra_etf_price", classes="etf-price-line")
+                        yield Static("", id="ra_etf_metrics", classes="etf-metrics")
+                        yield Static("", id="ra_etf_holdings", classes="etf-holdings")
+                    yield Static("", id="ra_ai_summary", classes="ai-summary")
+                    yield Static("", id="ra_etf_detail", classes="hidden-widget")
+                    with Vertical(id="ra_config_card", classes="sidebar-card config-card"):
+                        yield Static(self._config_summary(), id="ra_run_config")
+                    yield Button("⏹ 取消分析", id="btn_ra_cancel", classes="cancel-btn warning-text", disabled=True)
+                    yield Static("⏳分析中  ✓完成  ✗失败  ⊘取消", classes="queue-legend")
                     yield ListView(id="ra_queue")
                 with Vertical(classes="right-pane"):
                     # Board (right-top)
@@ -891,7 +991,10 @@ class AnalysisRunScreen(Screen):
 
     def _load_etf_detail(self, ticker: str) -> None:
         try:
-            self.query_one("#ra_etf_detail", Static).update("加载中...")
+            self.query_one("#ra_etf_name", Static).update(ticker)
+            self.query_one("#ra_etf_price", Static).update("加载中...")
+            self.query_one("#ra_etf_metrics", Static).update("")
+            self.query_one("#ra_etf_holdings", Static).update("")
         except Exception:
             pass
 
@@ -901,12 +1004,34 @@ class AnalysisRunScreen(Screen):
             try:
                 from etfagents.detail import get_etf_detail
                 detail = get_etf_detail(ticker, curr_date=analysis_date)
-                text = _format_detail_text(detail)
             except Exception as exc:
-                text = f"详情不可用: {type(exc).__name__}: {exc}"
-            _safe_call_from_thread(self, self._update_etf_detail, text)
+                detail = {"ticker": ticker, "_error": f"{type(exc).__name__}: {exc}"}
+            _safe_call_from_thread(self, self._update_etf_card, detail)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _update_etf_card(self, detail: dict) -> None:
+        """Populate the structured ETF card widgets from a detail dict."""
+        error = detail.get("_error")
+        if error:
+            try:
+                self.query_one("#ra_etf_price", Static).update(f"详情不可用: {error}")
+            except Exception:
+                pass
+            return
+        try:
+            components = _format_detail_rich(detail)
+            self.query_one("#ra_etf_name", Static).update(components["name_text"])
+            self.query_one("#ra_etf_price", Static).update(components["price_text"])
+            self.query_one("#ra_etf_metrics", Static).update(components["metrics_text"])
+            self.query_one("#ra_etf_holdings", Static).update(components["holdings_bars"])
+        except Exception:
+            pass
+        # Also update hidden legacy widget
+        try:
+            self.query_one("#ra_etf_detail", Static).update(_format_detail_text(detail))
+        except Exception:
+            pass
 
     def _update_etf_detail(self, text: str) -> None:
         try:
@@ -1024,6 +1149,15 @@ class AnalysisRunScreen(Screen):
         self.repository.invalidate()
         self._append_progress(f"{event.ticker}: 分析完成{rating_str}")
         self._refresh_board()
+
+        # Show AI summary from portfolio manager content
+        pm_content = self.section_contents.get((event.ticker, "portfolio_manager"), "")
+        summary = _extract_ai_summary(pm_content)
+        if summary and self.current_ticker == event.ticker:
+            try:
+                self.query_one("#ra_ai_summary", Static).update(f"💡 {summary}")
+            except Exception:
+                pass
 
     def _handle_ticker_failed(self, event: TickerFailed) -> None:
         ticker_id = self.ticker_ids.register(event.ticker)

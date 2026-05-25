@@ -527,12 +527,61 @@ class ETFAgentsTuiApp(App):
     }
 
     /* ── Analysis run: board layout ───────────────────────── */
-    #ra_run_config {
+
+    .hidden-widget {
+        display: none;
+    }
+
+    .sidebar-card {
+        height: auto;
+        border: solid $surface;
+        padding: 0 1;
+        margin-bottom: 1;
+        background: transparent;
+    }
+
+    .etf-card {
+        border: solid $accent;
+    }
+
+    .etf-name {
+        height: 1;
+        text-style: bold;
+        color: $text;
+    }
+
+    .etf-price-line {
+        height: 1;
+        text-style: bold;
+    }
+
+    .etf-metrics {
+        height: auto;
         color: $text-muted;
+    }
+
+    .etf-holdings {
+        height: auto;
+        margin-top: 1;
+    }
+
+    .ai-summary {
+        height: auto;
+        color: $warning;
+        margin-bottom: 1;
+        padding: 0 1;
+    }
+
+    .config-card {
+        border: solid $surface;
+    }
+
+    #ra_run_config {
+        color: $text-disabled;
         height: auto;
         margin-bottom: 0;
-        padding: 0 1;
-        border: solid $surface;
+        padding: 0;
+        border: none;
     }
 
     #ra_etf_detail {
@@ -541,6 +590,36 @@ class ETFAgentsTuiApp(App):
         margin-bottom: 1;
         padding: 0 1;
         border: solid $surface;
+    }
+
+    .cancel-btn {
+        width: 100%;
+        height: 3;
+        min-width: 0;
+        margin: 0 0 1 0;
+        border: solid $warning;
+        background: transparent;
+        color: $warning;
+        text-style: bold;
+        content-align: center middle;
+    }
+
+    .cancel-btn:hover {
+        background: $warning;
+        color: $surface;
+        text-style: bold;
+    }
+
+    .cancel-btn:disabled {
+        border: solid $panel;
+        color: $text-disabled;
+        background: transparent;
+        text-style: none;
+    }
+
+    .queue-legend {
+        height: 1;
+        color: $text-disabled;
     }
 
     #ra_body_scroll {
