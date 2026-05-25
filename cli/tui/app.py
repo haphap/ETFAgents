@@ -750,8 +750,12 @@ class ETFAgentsTuiApp(App):
     }
 
     .debate-progress {
+        width: 1fr;
+        height: 1;
+        padding: 0;
+        margin: 0;
         color: $text-muted;
-        height: auto;
+        content-align: left middle;
     }
 
     /* ── Semantic text classes ─────────────────────────────── */

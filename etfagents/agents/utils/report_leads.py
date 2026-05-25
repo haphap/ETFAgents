@@ -51,7 +51,7 @@ OPENING_STRUCTURE_RE = re.compile(
     r"^\s*(?:"
     r"#{1,6}\s+\S|"
     r"[一二三四五六七八九十]+、|"
-    r"（[一二三四五六七八九十\d]+）|"
+    r"[（(][一二三四五六七八九十\d]+[）)]|"
     r"(?:[-*•]|\d+[.．、)])\s+\S|"
     r"\|"
     r")"
@@ -288,8 +288,13 @@ def _remove_duplicate_title_lines(report: str, title: str) -> str:
 
 def _looks_like_section_heading(line: str) -> bool:
     stripped = (line or "").strip()
-    return stripped.startswith("#") or bool(
-        re.match(r"^(?:[一二三四五六七八九十]+、|（[一二三四五六七八九十\d]+）)", stripped)
+    if stripped.startswith("#"):
+        return True
+    # Strip leading bold markers (** or *) before checking heading patterns
+    bare = re.sub(r"^\*{1,2}", "", stripped)
+    # Accept both fullwidth （一） and ASCII (一) parentheses
+    return bool(
+        re.match(r"^(?:[一二三四五六七八九十]+、|[（(][一二三四五六七八九十\d]+[）)])", bare)
     )
 
 
@@ -352,6 +357,14 @@ def _strip_box_edge_line(line: str) -> str:
     return stripped.strip("│").strip()
 
 
+_INLINE_SECTION_HEADING_RE = re.compile(
+    r"(?<=[。！？.!?\s])\s*"  # preceded by sentence-ending punct or whitespace
+    r"(\*{0,2}"  # optional bold marker
+    r"(?:[一二三四五六七八九十]+、|[（(][一二三四五六七八九十\d]+[）)])"  # heading marker
+    r")"
+)
+
+
 def normalize_boxed_text_wrapping(report: str) -> str:
     """Remove leaked TUI box edges and merge accidental hard-wraps in prose."""
     if not report:
@@ -359,6 +372,23 @@ def normalize_boxed_text_wrapping(report: str) -> str:
 
     raw_lines = report.replace("\r\n", "\n").replace("\r", "\n").splitlines()
     lines = [_strip_box_edge_line(line) for line in raw_lines]
+
+    # Pre-pass: split mid-line section headings onto their own line
+    split_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or _looks_like_section_heading(stripped):
+            split_lines.append(line)
+            continue
+        m = _INLINE_SECTION_HEADING_RE.search(stripped)
+        if m and m.start() > 0:
+            split_lines.append(stripped[: m.start()].rstrip())
+            split_lines.append("")
+            split_lines.append(stripped[m.start() :])
+        else:
+            split_lines.append(line)
+    lines = split_lines
+
     merged: list[str] = []
     for line in lines:
         if not merged:
