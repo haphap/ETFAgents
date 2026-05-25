@@ -1,12 +1,24 @@
+from __future__ import annotations
+
 import threading
-from typing import Any, Dict, List, Union
+import logging
+from typing import Any
 
-from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.outputs import LLMResult
-from langchain_core.messages import AIMessage
+logger = logging.getLogger(__name__)
+
+try:
+    from langchain_core.callbacks import BaseCallbackHandler
+    from langchain_core.outputs import LLMResult
+    from langchain_core.messages import AIMessage
+    _LANGCHAIN_AVAILABLE = True
+except ImportError:
+    BaseCallbackHandler = object  # type: ignore[assignment,misc]
+    LLMResult = None  # type: ignore[assignment,misc]
+    AIMessage = None  # type: ignore[assignment,misc]
+    _LANGCHAIN_AVAILABLE = False
 
 
-class StatsCallbackHandler(BaseCallbackHandler):
+class StatsCallbackHandler(BaseCallbackHandler if _LANGCHAIN_AVAILABLE else object):  # type: ignore[misc]
     """Callback handler that tracks LLM calls, tool calls, and token usage."""
 
     def __init__(self) -> None:
