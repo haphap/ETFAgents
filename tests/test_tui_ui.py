@@ -172,6 +172,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
                 self.assertIsInstance(app.screen, HomeScreen)
+                banner = app.screen.query_one("#home_banner", Static)
+                self.assertIsNotNone(banner)
+                self.assertTrue(str(banner.render()).isascii())
                 self.assertIsNotNone(app.screen.query_one("#btn_research"))
                 self.assertIsNotNone(app.screen.query_one("#btn_reports"))
                 self.assertIsNotNone(app.screen.query_one("#btn_backtest"))
@@ -257,15 +260,15 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(screen.records), 1)
                 self.assertEqual(screen.records[0].ticker, "510300.SH")
 
-    async def test_report_library_section_list_has_10_items(self):
+    async def test_report_library_section_list_has_12_items(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
                 await pilot.click("#btn_reports")
                 screen = app.screen
                 sections = screen.query_one("#lib_sections")
-                # 9 sections + 1 complete = 10
-                self.assertEqual(len(sections.children), 10)
+                # 11 sections + 1 complete = 12
+                self.assertEqual(len(sections.children), 12)
 
     # --- ResearchAnalysisScreen ---
 
@@ -301,6 +304,27 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#col_research"))
                 self.assertIsNotNone(screen.query_one("#col_risk"))
                 self.assertIsNotNone(screen.query_one("#col_decision"))
+
+    async def test_analysis_run_places_trader_under_risk_before_risk_debate(self):
+        """The TUI board groups trader in risk before risk debate."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                risk_col = screen.query_one("#col_risk")
+                risk_child_ids = [child.id for child in risk_col.children]
+                self.assertLess(
+                    risk_child_ids.index("rsec-trader"),
+                    risk_child_ids.index("rsec-risk_debate"),
+                )
+                self.assertEqual(screen.query_one("#rsec-trader").parent.id, "col_risk")
 
     async def test_analysis_run_board_analysts_dual_column(self):
         """Analyst column should have 6 items in 3x2 grid."""
@@ -524,7 +548,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 # Simulate debate progress
                 screen._handle_debate_progress(DebateProgress(
                     ticker="510300.SH",
-                    section_id="research",
+                    section_id="research_debate",
                     current_round=2,
                     max_rounds=3,
                 ))
@@ -563,6 +587,64 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 btn = screen.query_one("#rsec-risk_debate", Button)
                 self.assertIn("✔", str(btn.label))
 
+    async def test_analysis_run_debate_progress_is_ticker_scoped(self):
+        """Debate progress from another ticker must not overwrite the selected ticker."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH", "159915.SZ"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+
+                screen._handle_debate_progress(DebateProgress(
+                    ticker="510300.SH",
+                    section_id="risk_debate",
+                    current_round=1,
+                    max_rounds=3,
+                ))
+                screen._handle_debate_progress(DebateProgress(
+                    ticker="159915.SZ",
+                    section_id="risk_debate",
+                    current_round=3,
+                    max_rounds=3,
+                ))
+                await pilot.pause()
+
+                progress = screen.query_one("#risk_progress", Static)
+                self.assertIn("1/3", str(progress.render()))
+                self.assertNotIn("3/3", str(progress.render()))
+
+    async def test_analysis_run_failed_ticker_marks_running_sections_failed(self):
+        """TickerFailed should fail running board items, not only pending ones."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+                screen._board_state[("510300.SH", "market_flow")] = "running"
+
+                screen._handle_ticker_failed(TickerFailed(
+                    ticker="510300.SH",
+                    error="boom",
+                ))
+                await pilot.pause()
+
+                btn = screen.query_one("#rsec-market_flow", Button)
+                self.assertIn("✘", str(btn.label))
+
     # --- Stats bar ---
 
     async def test_analysis_run_shows_cli_runtime_stats_bar(self):
@@ -586,6 +668,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Tools 3", stats_bar)
                 self.assertIn("Tokens 1.2k", stats_bar)
                 self.assertIn("Reports", stats_bar)
+                self.assertIn("q Quit", stats_bar)
+                self.assertIn("s Settings", stats_bar)
                 stats_widget = screen.query_one("#ra_stats_bar", Static)
                 self.assertGreater(stats_widget.size.height, 0)
                 screenshot = app.export_screenshot()
@@ -953,8 +1037,50 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(modal.query_one("#acm_quick_model"))
                 self.assertIsNotNone(modal.query_one("#acm_deep_model"))
                 self.assertIsNotNone(modal.query_one("#acm_language"))
+                self.assertIsNotNone(modal.query_one("#acm_analysis_date"))
+                self.assertIsNotNone(modal.query_one("#acm_error"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_ok"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_cancel"))
+
+    async def test_analysis_config_rejects_invalid_date(self):
+        """Invalid analysis dates should keep the config modal open."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _FakeAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                modal.query_one("#acm_analysis_date").value = "2026-99-99"
+
+                await pilot.click("#btn_acm_ok")
+                await pilot.pause()
+
+                self.assertIsInstance(app.screen, AnalysisConfigModal)
+                self.assertIn("YYYY-MM-DD", str(modal.query_one("#acm_error", Static).render()))
+                self.assertEqual([], runner.calls)
+
+    async def test_analysis_config_date_passes_to_runner(self):
+        """The analysis date input should be forwarded to AnalysisRunner.run_queue."""
+        with tempfile.TemporaryDirectory() as tmp:
+            runner = _FakeAnalysisRunner()
+            app = self._app(tmp, analysis_runner=runner)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                modal.query_one("#acm_analysis_date").value = "2026-05-25"
+                await pilot.click("#btn_acm_ok")
+                await pilot.pause()
+                await pilot.pause()
+
+                self.assertEqual(runner.calls[0][1], "2026-05-25")
 
     async def test_analysis_config_modal_shows_analyst_labels(self):
         """Analyst checkboxes must render their visible labels in the modal."""
@@ -1149,12 +1275,12 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         """DebateProgress should carry expected fields."""
         dp = DebateProgress(
             ticker="510300.SH",
-            section_id="research",
+            section_id="research_debate",
             current_round=2,
             max_rounds=3,
         )
         self.assertEqual(dp.ticker, "510300.SH")
-        self.assertEqual(dp.section_id, "research")
+        self.assertEqual(dp.section_id, "research_debate")
         self.assertEqual(dp.current_round, 2)
         self.assertEqual(dp.max_rounds, 3)
 

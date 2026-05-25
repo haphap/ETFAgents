@@ -177,6 +177,7 @@ def create_etf_stock_research_analyst(llm):
             current_date=current_date,
             instrument_context=instrument_context,
             report_acceptance_check=_looks_like_complete_top_holdings_report,
+            rejected_report_fallback="last_attempt",
             unexecuted_tool_recovery={
                 "trigger_tool_names": [tool.name for tool in tools],
                 "tool_payloads": [
