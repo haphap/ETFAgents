@@ -256,24 +256,25 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
 
     DEFAULT_CSS = """
     AnalysisConfigModal { align: center middle; }
-    #acm_container { width: 92; height: auto; max-height: 42; border: solid $accent; background: $surface; padding: 1 2; }
+    #acm_container { width: 84; height: auto; max-height: 42; border: solid $accent; background: $surface; padding: 1 2; }
     #acm_container .acm-row { height: auto; margin: 0 0 1 0; }
-    #acm_container .acm-col { width: 1fr; height: auto; margin-right: 1; border: solid $panel; padding: 0 1; }
+    #acm_container .acm-col { width: 1fr; height: auto; margin-right: 2; }
     #acm_container .acm-col:last-of-type { margin-right: 0; }
     #acm_container Static { height: 1; margin: 0; }
     #acm_container Checkbox { height: 1; margin: 0; }
-    #acm_container Select { margin: 0; }
-    #acm_container Input { margin: 0; }
+    #acm_container Select { height: 3; margin: 0; }
+    #acm_container Input { height: 3; margin: 0; }
     #acm_container .acm-label { color: $text-muted; text-style: bold; }
     #acm_container .analyst-panel { height: auto; border: solid $panel; padding: 0 1; margin: 0 0 1 0; }
     #acm_container .analyst-groups { height: auto; }
-    #acm_container .analyst-group { width: 1fr; height: auto; margin-right: 1; padding: 0 1; background: $surface; }
+    #acm_container .analyst-group { width: 1fr; height: auto; margin-right: 2; }
     #acm_container .analyst-group:last-of-type { margin-right: 0; }
     #acm_container .analyst-group-title { color: $accent; }
     #acm_container .acm-summary { color: $text-muted; margin: 0 0 1 0; }
+    #acm_container .acm-error { margin: 0 0 1 0; }
     #acm_container .acm-actions { height: 3; margin: 0; }
     #acm_container .acm-action-spacer { width: 1fr; }
-    #acm_container .acm-confirm { width: 14; height: 3; margin: 0 0 0 1; background: $accent; color: $surface; content-align: center middle; text-style: bold; }
+    #acm_container .acm-confirm { width: 14; height: 3; margin: 0 0 0 1; border: solid $accent; background: $accent; color: $surface; content-align: center middle; text-style: bold; }
     #acm_container .acm-cancel { width: 10; height: 3; margin: 0 0 0 1; border: solid $panel; color: $text-muted; content-align: center middle; }
     """
 
@@ -315,17 +316,18 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
                         (_depth_option_label(name), name) for name in RESEARCH_DEPTH_REQUIREMENTS
                     ]
                     yield Select(depth_options, value="标准", id="acm_depth")
+            with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
                     yield Static("语言", classes="acm-label")
                     lang_options = [("中文", "Chinese"), ("English", "English")]
                     yield Select(lang_options, value="Chinese", id="acm_language")
-            with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
                     yield Static("提供商", classes="acm-label")
                     provider_options = [
                         (display, provider) for display, provider, _ in LLM_PROVIDER_OPTIONS
                     ]
                     yield Select(provider_options, value="openai", id="acm_provider")
+            with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
                     yield Static("快速模型", classes="acm-label")
                     quick_options = _model_select_options("openai", "quick")
@@ -335,7 +337,7 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
                     deep_options = _model_select_options("openai", "deep")
                     yield Select(deep_options, value=deep_options[0][1], id="acm_deep_model")
             yield Static("", id="acm_summary", classes="acm-summary")
-            yield Static("", id="acm_error", classes="error-text")
+            yield Static("", id="acm_error", classes="error-text acm-error")
             with Horizontal(classes="acm-actions"):
                 yield Static("", classes="acm-action-spacer")
                 yield Button("取消", id="btn_acm_cancel", classes="acm-cancel")

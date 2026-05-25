@@ -360,6 +360,7 @@ class ETFAgentsTuiApp(App):
         width: 1fr;
         height: 3;
         margin: 0 1 0 0;
+        border: solid $accent;
         background: $accent;
         color: $surface;
         text-style: bold;
@@ -368,12 +369,14 @@ class ETFAgentsTuiApp(App):
 
     .entry-primary:hover,
     .entry-primary:focus {
+        border: solid $accent;
         background: $accent;
         color: $surface;
         text-style: bold underline;
     }
 
     .entry-primary:disabled {
+        border: solid $surface;
         background: $surface;
         color: $text-disabled;
         text-style: none;
@@ -382,9 +385,10 @@ class ETFAgentsTuiApp(App):
     .entry-config {
         width: 1fr;
         height: 3;
-        border: solid $panel;
+        margin: 0;
+        border: solid $accent;
         background: transparent;
-        color: $text-muted;
+        color: $accent;
         content-align: center middle;
     }
 

@@ -1240,6 +1240,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(modal.query_one("#btn_acm_cancel"))
                 self.assertEqual(str(modal.query_one("#btn_acm_ok", Button).label), "确认分析")
                 self.assertEqual(str(modal.query_one("#btn_acm_cancel", Button).label), "取消")
+                config_rows = modal.query(".acm-row")
+                self.assertEqual(len(config_rows), 3)
+                self.assertTrue(all(len(row.children) == 2 for row in config_rows))
 
     async def test_analysis_config_rejects_invalid_date(self):
         """Invalid analysis dates should keep the config modal open."""
