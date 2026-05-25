@@ -77,6 +77,11 @@ _MARKET_FLOW_CONCLUSION_LABEL_RE = re.compile(r"^\s*综合结论\s*[:：]\s*(.+)
 _MARKET_FLOW_COMBINED_TAIL_LINE_RE = re.compile(
     r"^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+[、.．]\s*综合结论和指标总览(?:[。.]|\s|$)"
 )
+_MARKET_FLOW_COMBINED_TAIL_WITH_TEXT_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?"
+    r"[一二三四五六七八九十]+[、.．]\s*综合结论和指标总览"
+    r"(?:[。.]?\s*)?(?P<tail>.*)$"
+)
 
 
 def _etf_indicator_catalog() -> str:
@@ -124,16 +129,25 @@ def _strip_duplicate_market_flow_combined_tail(lines: list[str]) -> list[str]:
     index = 0
     while index < len(lines):
         stripped = lines[index].strip()
-        if stripped == _MARKET_FLOW_COMBINED_TAIL_HEADING:
+        is_combined_heading = (
+            stripped == _MARKET_FLOW_COMBINED_TAIL_HEADING
+            or bool(_MARKET_FLOW_COMBINED_TAIL_LINE_RE.match(stripped))
+        )
+        if is_combined_heading:
+            if first_heading_seen:
+                break
             first_heading_seen = True
-            kept.append(lines[index])
-            index += 1
-            continue
-        if first_heading_seen and _MARKET_FLOW_COMBINED_TAIL_LINE_RE.match(stripped):
-            break
         kept.append(lines[index])
         index += 1
     return kept
+
+
+def _market_flow_combined_tail_inline_text(line: str) -> str:
+    match = _MARKET_FLOW_COMBINED_TAIL_WITH_TEXT_RE.match(line.strip())
+    if not match:
+        return ""
+    tail = match.group("tail").strip()
+    return "" if not tail or tail in {"。", "."} else tail
 
 
 def _normalize_market_flow_tail_sections(report: str) -> str:
@@ -158,12 +172,13 @@ def _normalize_market_flow_tail_sections(report: str) -> str:
         before_idx = table_start - 1
         while before_idx >= 0 and not lines[before_idx].strip():
             before_idx -= 1
-        if before_idx >= 0 and lines[before_idx].strip() in {
-            "指标总览",
-            "四、指标总览",
-            _MARKET_FLOW_COMBINED_TAIL_HEADING,
-        }:
+        before_stripped = re.sub(r"^#{1,6}\s*", "", lines[before_idx].strip()) if before_idx >= 0 else ""
+        if before_idx >= 0 and (
+            before_stripped in {"指标总览", "四、指标总览", _MARKET_FLOW_COMBINED_TAIL_HEADING}
+            or bool(_MARKET_FLOW_COMBINED_TAIL_LINE_RE.match(lines[before_idx].strip()))
+        ):
             replacement_start = before_idx
+            conclusion_text = _market_flow_combined_tail_inline_text(lines[before_idx])
         elif before_idx >= 0:
             paragraph_start = before_idx
             while paragraph_start >= 0 and lines[paragraph_start].strip():
@@ -171,11 +186,13 @@ def _normalize_market_flow_tail_sections(report: str) -> str:
             heading_idx = paragraph_start
             while heading_idx >= 0 and not lines[heading_idx].strip():
                 heading_idx -= 1
-            if heading_idx >= 0 and lines[heading_idx].strip() == _MARKET_FLOW_COMBINED_TAIL_HEADING:
+            if heading_idx >= 0 and _MARKET_FLOW_COMBINED_TAIL_LINE_RE.match(lines[heading_idx].strip()):
                 replacement_start = heading_idx
-                conclusion_text = "\n".join(
+                inline_text = _market_flow_combined_tail_inline_text(lines[heading_idx])
+                paragraph_text = "\n".join(
                     line.strip() for line in lines[heading_idx + 1:table_start] if line.strip()
                 ).strip()
+                conclusion_text = "\n".join(part for part in (inline_text, paragraph_text) if part).strip()
 
         replacement_end = table_end
         conclusion_idx = table_end

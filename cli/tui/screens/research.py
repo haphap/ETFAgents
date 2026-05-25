@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+from rich.text import Text
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
@@ -42,6 +45,9 @@ from cli.tui.services import (
     TickerDone,
     TickerFailed,
     TickerStarted,
+    WatchlistBoardRow,
+    WatchlistBoardSnapshot,
+    load_watchlist_board,
     section_definitions_for,
 )
 
@@ -68,22 +74,42 @@ LLM_PROVIDER_ENDPOINTS = {
 
 # Sections that complete on first SectionDone (non-debate, single-shot)
 _INSTANT_DONE_SECTIONS = set(ANALYST_KEYS) | {"research", "trader", "portfolio_manager"}
+_RECENT_ETF_FALLBACKS = ("510300.SH", "159915.SZ", "513500.SH", "588000.SH", "518880.SH")
+_ETF_DISPLAY_NAMES = {
+    "510300.SH": "沪深300ETF",
+    "159915.SZ": "创业板ETF",
+    "513500.SH": "标普500ETF",
+    "588000.SH": "科创50ETF",
+    "518880.SH": "黄金ETF",
+}
 
 
 def _depth_option_label(depth_name: str) -> str:
     req = RESEARCH_DEPTH_REQUIREMENTS.get(depth_name, {})
     debate_rounds = req.get("debate_rounds", "?")
     risk_rounds = req.get("risk_rounds", "?")
-    return f"{depth_name} (debate×{debate_rounds}, risk×{risk_rounds})"
+    return f"{depth_name} (多空×{debate_rounds}, 风控×{risk_rounds})"
 
 
 def _model_select_options(provider: str, mode: str) -> list[tuple[str, str]]:
     from etfagents.llm_clients.model_catalog import get_model_options
 
+    if provider in ("vllm", "ollama"):
+        from etfagents.llm_clients.model_catalog import fetch_local_models
+
+        base_url = LLM_PROVIDER_ENDPOINTS.get(provider, "")
+        live = fetch_local_models(base_url, provider)
+        if live:
+            return [(name, value) for name, value in live]
+
     options = get_model_options(provider, mode)
     if options:
-        return options
+        return [(_short_model_label(label), value) for label, value in options]
     return [("Custom / provider default", "custom")]
+
+
+def _short_model_label(label: str) -> str:
+    return label.split(" - ", 1)[0].strip()
 
 
 def _safe_call_from_thread(screen: Any, callback: Any, *args: Any) -> None:
@@ -146,6 +172,125 @@ def _format_detail_text(detail: dict) -> str:
         lines.append(f"头部持仓：{'；'.join(holding_parts)}")
 
     return "\n".join(lines) if lines else "无数据"
+
+
+def _format_price_rich(close: float | None, pct_chg: float | None) -> Text:
+    """Rich Text with bold price and A-share colored change (red=up, green=down)."""
+    price_str = f"{close:.3f}" if close is not None else "--"
+    text = Text()
+    text.append(price_str, style="bold")
+    text.append("  ")
+    if pct_chg is not None:
+        sign = "+" if pct_chg >= 0 else ""
+        pct_str = f"{sign}{pct_chg:.2f}%"
+        if pct_chg > 0:
+            text.append(pct_str, style="bold red")
+        elif pct_chg < 0:
+            text.append(pct_str, style="bold green")
+        else:
+            text.append(pct_str, style="dim")
+    else:
+        text.append("--", style="dim")
+    return text
+
+
+def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 4) -> Text:
+    """Unicode bar chart for top holdings. E.g. '████ 宁德 5.2%'."""
+    if not holdings:
+        return Text("无持仓数据", style="dim")
+    top = holdings[:5]
+    weights = [h.get("weight_pct") or 0 for h in top]
+    max_w = max(weights) if weights else 1
+    text = Text()
+    for i, h in enumerate(top):
+        w = h.get("weight_pct") or 0
+        bar_len = round(w / max_w * max_bar) if max_w > 0 else 0
+        bar = "█" * max(bar_len, 1)
+        pad = " " * (max_bar - len(bar))
+        name = (h.get("name") or h.get("code") or "?")[:2]
+        w_str = f"{w:.1f}%" if w else "?"
+        if i > 0:
+            text.append("\n")
+        text.append(f"{bar}{pad} ", style="bold")
+        text.append(f"{name} {w_str}")
+    return text
+
+
+def _format_detail_rich(detail: dict) -> dict[str, Any]:
+    """Parse ETF detail dict into structured Rich renderables for card widgets."""
+    name = detail.get("name") or detail.get("ticker", "")
+    ticker = detail.get("ticker", "")
+    suffix = f" ({ticker})" if ticker and ticker != name else ""
+    name_text = Text(f"{name}{suffix}", style="bold")
+
+    close = detail.get("close")
+    pct_chg = detail.get("pct_chg")
+    price_text = _format_price_rich(close, pct_chg)
+
+    parts: list[str] = []
+    vol = detail.get("volume")
+    if vol is not None:
+        vc = detail.get("volume_change_pct")
+        vc_str = f"{vc:+.1f}%" if vc is not None else "--"
+        parts.append(f"量：{vol / 1e4:.0f}万手({vc_str})")
+    share = detail.get("fund_share")
+    if share is not None:
+        sc = detail.get("share_change_pct")
+        sc_str = f"{sc:+.1f}%" if sc is not None else "--"
+        parts.append(f"份额：{share / 1e8:.0f}亿份({sc_str})")
+    metrics_text = "  ".join(parts) if parts else ""
+
+    holdings_bars = _format_holdings_bars(detail.get("holdings"))
+
+    return {
+        "name_text": name_text,
+        "price_text": price_text,
+        "metrics_text": metrics_text,
+        "holdings_bars": holdings_bars,
+    }
+
+
+def _extract_ai_summary(pm_content: str) -> str:
+    """Extract a one-line conclusion from portfolio manager content."""
+    if not pm_content:
+        return ""
+    for marker in ("结论", "建议", "Decision Summary", "recommendation", "决策摘要"):
+        for line in pm_content.splitlines():
+            if marker.lower() in line.lower():
+                clean = re.sub(r"^[#*\-\s]+", "", line).strip()
+                clean = re.sub(r"^(结论|建议|Decision Summary|决策摘要)[：:]\s*", "", clean)
+                if clean:
+                    return clean[:60]
+    return ""
+
+
+def _fmt_price(value: float | None) -> str:
+    return "--" if value is None else f"{value:.3f}"
+
+
+def _fmt_pct(value: float | None) -> str:
+    if value is None:
+        return "--"
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.2f}%"
+
+
+def _a_share_value_class(value: float | None) -> str:
+    if value is None:
+        return "muted"
+    if value > 0:
+        return "a-share-up"
+    if value < 0:
+        return "a-share-down"
+    return "muted"
+
+
+def _action_class(action: str) -> str:
+    if action in {"减仓", "清仓"}:
+        return "action-risk"
+    if action in {"加仓", "增持"}:
+        return "action-opportunity"
+    return "action-neutral"
 
 
 def _build_analysis_runner(cfg: AnalysisConfig) -> AnalysisRunner:
@@ -218,68 +363,95 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
 
     DEFAULT_CSS = """
     AnalysisConfigModal { align: center middle; }
-    #acm_container { width: 80; height: auto; max-height: 40; border: solid $accent; background: $surface; padding: 1 2; }
+    #acm_container { width: 84; height: auto; max-height: 42; border: solid $accent; background: $surface; padding: 1 2; }
     #acm_container .acm-row { height: auto; margin: 0; }
-    #acm_container .acm-col { width: 1fr; height: auto; margin-right: 1; }
+    #acm_container .acm-col { width: 1fr; height: auto; margin-right: 2; }
     #acm_container .acm-col:last-of-type { margin-right: 0; }
     #acm_container Static { height: 1; margin: 0; }
     #acm_container Checkbox { height: 1; margin: 0; }
-    #acm_container Select { margin: 0; }
-    #acm_container Input { margin: 0; }
-    #acm_container .analyst-grid { layout: grid; grid-size: 3 2; grid-gutter: 0 1; height: auto; }
-    #acm_container .text-action { margin: 0 1 0 0; }
+    #acm_container Select { height: auto; margin: 0; }
+    #acm_container Input { height: auto; margin: 0; }
+    #acm_container .acm-label { color: $text-muted; text-style: bold; }
+    #acm_container .analyst-panel { height: auto; border: solid $panel; padding: 0 1; margin: 0 0 1 0; }
+    #acm_container .analyst-groups { height: auto; }
+    #acm_container .analyst-group { width: 1fr; height: auto; margin-right: 2; }
+    #acm_container .analyst-group:last-of-type { margin-right: 0; }
+    #acm_container .analyst-group-title { color: $accent; }
+    #acm_container .acm-summary { color: $text-muted; margin: 0 0 1 0; }
+    #acm_container .acm-error { margin: 0 0 1 0; }
+    #acm_container .acm-actions { height: 3; margin: 0; }
+    #acm_container .acm-action-spacer { width: 1fr; }
+    #acm_container .acm-confirm { width: 14; height: 3; margin: 0 0 0 1; border: solid $accent; background: $accent; color: $surface; content-align: center middle; text-style: bold; }
+    #acm_container .acm-cancel { width: 10; height: 3; margin: 0 0 0 1; border: solid $panel; color: $text-muted; content-align: center middle; }
     """
 
     def compose(self) -> ComposeResult:
         with Vertical(id="acm_container"):
             yield Static("分析配置", classes="pane-title")
-            yield Static("分析师:")
-            with Vertical(classes="analyst-grid"):
-                for defn in SECTION_DEFINITIONS:
-                    if defn.team == "分析师":
-                        yield Checkbox(
-                            defn.title,
-                            value=True,
-                            id=f"acm_cb_{defn.section_id}",
-                            compact=True,
-                        )
+            with Vertical(classes="analyst-panel"):
+                yield Static("分析维度", classes="acm-label")
+                with Horizontal(classes="analyst-groups"):
+                    with Vertical(classes="analyst-group"):
+                        yield Static("基本面 / 宏观", classes="analyst-group-title")
+                        for defn in self._analyst_defs(("macro_regime", "meso_commodity", "holdings_industry")):
+                            yield Checkbox(
+                                defn.title,
+                                value=True,
+                                id=f"acm_cb_{defn.section_id}",
+                                compact=True,
+                            )
+                    with Vertical(classes="analyst-group"):
+                        yield Static("市场 / 微观", classes="analyst-group-title")
+                        for defn in self._analyst_defs(("market_flow", "catalyst_sentiment", "top_holdings")):
+                            yield Checkbox(
+                                defn.title,
+                                value=True,
+                                id=f"acm_cb_{defn.section_id}",
+                                compact=True,
+                            )
             with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
-                    yield Static("日期:")
+                    yield Static("日期", classes="acm-label")
                     yield Input(
                         value=datetime.now().date().isoformat(),
                         placeholder="YYYY-MM-DD",
                         id="acm_analysis_date",
                     )
                 with Vertical(classes="acm-col"):
-                    yield Static("深度:")
+                    yield Static("深度", classes="acm-label")
                     depth_options = [
                         (_depth_option_label(name), name) for name in RESEARCH_DEPTH_REQUIREMENTS
                     ]
                     yield Select(depth_options, value="标准", id="acm_depth")
-                with Vertical(classes="acm-col"):
-                    yield Static("语言:")
-                    lang_options = [("中文", "Chinese"), ("English", "English")]
-                    yield Select(lang_options, value="Chinese", id="acm_language")
             with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
-                    yield Static("提供商:")
+                    yield Static("语言", classes="acm-label")
+                    lang_options = [("中文", "Chinese"), ("English", "English")]
+                    yield Select(lang_options, value="Chinese", id="acm_language")
+                with Vertical(classes="acm-col"):
+                    yield Static("提供商", classes="acm-label")
                     provider_options = [
                         (display, provider) for display, provider, _ in LLM_PROVIDER_OPTIONS
                     ]
                     yield Select(provider_options, value="openai", id="acm_provider")
+            with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
-                    yield Static("快速模型:")
+                    yield Static("快速模型", classes="acm-label")
                     quick_options = _model_select_options("openai", "quick")
                     yield Select(quick_options, value=quick_options[0][1], id="acm_quick_model")
                 with Vertical(classes="acm-col"):
-                    yield Static("深度模型:")
+                    yield Static("深度模型", classes="acm-label")
                     deep_options = _model_select_options("openai", "deep")
                     yield Select(deep_options, value=deep_options[0][1], id="acm_deep_model")
-            yield Static("", id="acm_error", classes="error-text")
-            with Horizontal(classes="acm-row"):
-                yield Button("› Confirm", id="btn_acm_ok", classes="text-action")
-                yield Button("Cancel", id="btn_acm_cancel", classes="text-action muted")
+            yield Static("", id="acm_summary", classes="acm-summary")
+            yield Static("", id="acm_error", classes="error-text acm-error")
+            with Horizontal(classes="acm-actions"):
+                yield Static("", classes="acm-action-spacer")
+                yield Button("取消", id="btn_acm_cancel", classes="acm-cancel")
+                yield Button("确认分析", id="btn_acm_ok", classes="acm-confirm")
+
+    def on_mount(self) -> None:
+        self._refresh_summary()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_acm_ok":
@@ -314,17 +486,41 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
             self.dismiss(None)
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id != "acm_provider":
-            return
-        provider = str(event.value) if event.value != Select.BLANK else "openai"
-        quick_options = _model_select_options(provider, "quick")
-        deep_options = _model_select_options(provider, "deep")
-        quick_select = self.query_one("#acm_quick_model", Select)
-        deep_select = self.query_one("#acm_deep_model", Select)
-        quick_select.set_options(quick_options)
-        quick_select.value = quick_options[0][1]
-        deep_select.set_options(deep_options)
-        deep_select.value = deep_options[0][1]
+        if event.select.id == "acm_provider":
+            provider = str(event.value) if event.value != Select.BLANK else "openai"
+            quick_options = _model_select_options(provider, "quick")
+            deep_options = _model_select_options(provider, "deep")
+            quick_select = self.query_one("#acm_quick_model", Select)
+            deep_select = self.query_one("#acm_deep_model", Select)
+            quick_select.set_options(quick_options)
+            quick_select.value = quick_options[0][1]
+            deep_select.set_options(deep_options)
+            deep_select.value = deep_options[0][1]
+        self._refresh_summary()
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        self._refresh_summary()
+
+    def _analyst_defs(self, section_ids: tuple[str, ...]) -> list[SectionDef]:
+        by_id = {defn.section_id: defn for defn in SECTION_DEFINITIONS if defn.team == "分析师"}
+        return [by_id[section_id] for section_id in section_ids if section_id in by_id]
+
+    def _refresh_summary(self) -> None:
+        selected_titles = [
+            SECTION_BY_ID[key].title for key in ANALYST_KEYS
+            if self._checkbox_checked(f"acm_cb_{key}") and key in SECTION_BY_ID
+        ]
+        depth = self.query_one("#acm_depth", Select).value
+        quick_model = self.query_one("#acm_quick_model", Select).value
+        deep_model = self.query_one("#acm_deep_model", Select).value
+        analyst_text = "、".join(selected_titles[:2])
+        if len(selected_titles) > 2:
+            analyst_text += f"等 {len(selected_titles)} 个维度"
+        elif not analyst_text:
+            analyst_text = "默认全选"
+        self.query_one("#acm_summary", Static).update(
+            f"已选择：{analyst_text}；深度：{depth or '标准'}；模型：{quick_model or '默认'} / {deep_model or '默认'}"
+        )
 
     def _checkbox_checked(self, widget_id: str) -> bool:
         try:
@@ -345,36 +541,218 @@ class ResearchAnalysisScreen(Screen):
         self.runner = runner
         self.repository = repository or ReportRepository()
         self._analysis_config: AnalysisConfig | None = None
+        self._selected_tickers: list[str] = []
+        self._selected_tag_generation = 0
 
     def compose(self) -> ComposeResult:
+        recent_cards = self._recent_etf_cards()
         with Horizontal(classes="screen-body"):
-            with Vertical(classes="left-pane"):
-                yield Static("Create Run", classes="pane-title")
-                yield Static("ETF tickers:")
-                yield Input(placeholder="510300.SH,159915.SZ", id="ra_ticker_input")
-                yield Button("› Start Analysis", id="btn_ra_start", classes="text-action")
-            with Vertical(classes="right-pane"):
-                with Vertical(classes="right-top"):
-                    yield Static("Run Brief", classes="pane-title")
-                    yield Markdown(
-                        "1. Enter ETF tickers\n"
-                        "2. Select analysts, provider, models\n"
-                        "3. Track each team output in board",
-                        id="ra_intro",
-                    )
+            with Vertical(classes="left-pane research-entry-pane"):
+                yield Static("创建研究任务", classes="pane-title")
+                yield Static("ETF 代码", classes="input-label")
+                yield Input(placeholder="输入代码后按 Enter 生成标签", id="ra_ticker_input")
+                yield Static("可输入多个代码，用逗号或空格分隔。", classes="entry-help")
+                with Horizontal(id="selected_ticker_tags", classes="selected-tags"):
+                    yield Static("尚未选择 ETF", id="selected_ticker_empty", classes="selected-empty")
+                yield Static("已选择 0 个 ETF", id="selected_ticker_count", classes="selected-count")
+                with Horizontal(classes="entry-actions"):
+                    yield Button("开始分析", id="btn_ra_start", classes="entry-primary", disabled=True)
+                    yield Button("⚙ 配置", id="btn_ra_config", classes="entry-config")
+                yield Static("近期研究", classes="entry-section-title")
+                with Vertical(classes="recent-card-list"):
+                    for card in recent_cards:
+                        yield Button(
+                            f"{card['ticker']}  {card['name']}\n{card['date']}  {card['rating']}",
+                            id=f"recent-{IdRegistry('recent').register(card['ticker'])}",
+                            classes="recent-card",
+                        )
+            with Vertical(classes="right-pane research-board-pane"):
+                yield Static("自选股看板 / Watchlist Monitor", classes="pane-title")
+                with ScrollableContainer(id="watchlist_cards"):
+                    yield Static("加载自选股看板...", id="watchlist_status", classes="watchlist-status")
+                yield Static("部分字段来自最新可用日线，非实时行情", classes="hint")
         yield Footer()
 
+    def on_mount(self) -> None:
+        self.query_one("#ra_ticker_input", Input).focus()
+        self._start_watchlist_loading()
+
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn_ra_start":
-            tickers = self._read_tickers()
-            if not tickers:
-                self.query_one("#ra_intro", Markdown).update("请输入至少一个 ETF 代码。")
-                return
-            self.app.push_screen(AnalysisConfigModal(), self._on_config_result)
+        if event.button.id in {"btn_ra_start", "btn_ra_config"}:
+            self._start_config_flow()
+        elif (event.button.id or "").startswith("recent-"):
+            self._add_tickers_to_selection([str(event.button.label).split()[0]])
+        elif (event.button.id or "").startswith("wl-"):
+            self._add_tickers_to_selection([str(event.button.label)])
+        elif (event.button.id or "").startswith("sel-"):
+            self._remove_ticker_from_selection(str(event.button.label))
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "ra_ticker_input":
+            self._commit_input_tickers()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "ra_ticker_input":
+            self._refresh_start_button_state()
+
+    def _start_config_flow(self) -> None:
+        tickers = self._read_tickers()
+        if not tickers:
+            self.query_one("#selected_ticker_count", Static).update("请输入至少一个 ETF 代码。")
+            return
+        self.app.push_screen(AnalysisConfigModal(), self._on_config_result)
+
+    def _commit_input_tickers(self) -> None:
+        input_widget = self.query_one("#ra_ticker_input", Input)
+        tickers = self._parse_tickers(input_widget.value)
+        self._add_tickers_to_selection(tickers)
+        input_widget.value = ""
+        input_widget.focus()
+
+    def _add_tickers_to_selection(self, tickers: list[str]) -> None:
+        changed = False
+        for ticker in tickers:
+            cleaned = ticker.strip().upper()
+            if cleaned and cleaned not in self._selected_tickers:
+                self._selected_tickers.append(cleaned)
+                changed = True
+        if changed:
+            self._refresh_selected_ticker_tags()
+        else:
+            self._refresh_start_button_state()
+        self.query_one("#ra_ticker_input", Input).focus()
+
+    def _refresh_selected_ticker_tags(self) -> None:
+        tags = self.query_one("#selected_ticker_tags", Horizontal)
+        self._selected_tag_generation += 1
+        for child in list(tags.children):
+            child.remove()
+        if not self._selected_tickers:
+            tags.mount(Static("尚未选择 ETF", id="selected_ticker_empty", classes="selected-empty"))
+        else:
+            registry = IdRegistry("sel")
+            for ticker in self._selected_tickers:
+                tags.mount(
+                    Button(
+                        f"{ticker} ×",
+                        id=f"sel-{self._selected_tag_generation}-{registry.register(ticker)}",
+                        classes="selected-chip",
+                    )
+                )
+        self.query_one("#selected_ticker_count", Static).update(f"已选择 {len(self._selected_tickers)} 个 ETF")
+        self._refresh_start_button_state()
+
+    def _refresh_start_button_state(self) -> None:
+        has_tickers = bool(self._selected_tickers or self._parse_tickers(self.query_one("#ra_ticker_input", Input).value))
+        self.query_one("#btn_ra_start", Button).disabled = not has_tickers
+
+    def _remove_ticker_from_selection(self, ticker: str) -> None:
+        cleaned = ticker.replace("×", "").strip().upper()
+        self._selected_tickers = [existing for existing in self._selected_tickers if existing != cleaned]
+        self._refresh_selected_ticker_tags()
+        self.query_one("#ra_ticker_input", Input).focus()
+
+    def _start_watchlist_loading(self) -> None:
+        threading.Thread(
+            target=self._load_watchlist_snapshot,
+            daemon=True,
+            name="etfagents-tui-watchlist",
+        ).start()
+
+    def _load_watchlist_snapshot(self) -> None:
+        try:
+            snapshot = load_watchlist_board(self.repository)
+            _safe_call_from_thread(self, self._apply_watchlist_snapshot, snapshot)
+        except Exception as exc:
+            _safe_call_from_thread(self, self._show_watchlist_error, str(exc))
+
+    def _apply_watchlist_snapshot(self, snapshot: WatchlistBoardSnapshot) -> None:
+        cards = self.query_one("#watchlist_cards", ScrollableContainer)
+        for child in list(cards.children):
+            child.remove()
+        if not snapshot.rows:
+            cards.mount(Static("暂无自选股。使用 watchlist 命令添加 ETF 后会显示在这里。", classes="watchlist-status"))
+            return
+        for row in snapshot.rows:
+            cards.mount(self._watchlist_card(row))
+        if snapshot.error_count:
+            cards.mount(
+                Static(
+                    f"{snapshot.error_count} 个 ETF 数据加载失败，其余卡片已正常显示。",
+                    classes="watchlist-status warning-text",
+                )
+            )
+
+    def _show_watchlist_error(self, error: str) -> None:
+        cards = self.query_one("#watchlist_cards", ScrollableContainer)
+        for child in list(cards.children):
+            child.remove()
+        cards.mount(Static(f"自选股看板加载失败：{error}", classes="watchlist-status error-text"))
+
+    def _recent_etf_cards(self) -> list[dict[str, str]]:
+        cards: list[dict[str, str]] = []
+        seen: set[str] = set()
+        try:
+            for record in self.repository.list_reports():
+                ticker = record.ticker.strip().upper()
+                if ticker and ticker not in seen:
+                    cards.append({
+                        "ticker": ticker,
+                        "name": _ETF_DISPLAY_NAMES.get(ticker, "ETF"),
+                        "date": record.date,
+                        "rating": record.rating or "未评级",
+                    })
+                    seen.add(ticker)
+                if len(cards) >= 5:
+                    break
+        except Exception:
+            pass
+        for ticker in _RECENT_ETF_FALLBACKS:
+            if ticker not in seen:
+                cards.append({
+                    "ticker": ticker,
+                    "name": _ETF_DISPLAY_NAMES.get(ticker, "ETF"),
+                    "date": "暂无分析",
+                    "rating": "未评级",
+                })
+                seen.add(ticker)
+            if len(cards) >= 5:
+                break
+        return cards[:5]
+
+    def _watchlist_card(self, row: WatchlistBoardRow) -> Vertical:
+        price_class = _a_share_value_class(row.pct_chg)
+        share_class = _a_share_value_class(row.share_change_pct)
+        rating = row.rating or "--"
+        rating_date = row.rating_date or "--"
+        return Vertical(
+            Button(row.ticker, id=f"wl-{IdRegistry('wl').register(row.ticker)}", classes="watchlist-card-title"),
+            Static(row.name, classes="watchlist-card-name"),
+            Static(
+                f"现价 {_fmt_price(row.close)}   涨跌 {_fmt_pct(row.pct_chg)}   份额 {_fmt_pct(row.share_change_pct)}",
+                classes=f"watchlist-card-price {price_class} {share_class}",
+            ),
+            Static(
+                f"{row.trend_label}    {row.cross_label}    支撑位 {_fmt_price(row.support)}    压力位 {_fmt_price(row.resistance)}",
+                classes="watchlist-card-tags",
+            ),
+            Static(
+                f"[{row.action}]  {row.signal_summary}    近期评级 {rating} / {rating_date}",
+                classes=f"watchlist-card-action {_action_class(row.action)}",
+            ),
+            Static(row.error or row.rationale, classes="watchlist-card-rationale"),
+            classes="watchlist-card",
+        )
 
     def _read_tickers(self) -> list[str]:
-        tickers_str = self.query_one("#ra_ticker_input", Input).value.strip()
-        return [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
+        tickers: list[str] = list(self._selected_tickers)
+        for ticker in self._parse_tickers(self.query_one("#ra_ticker_input", Input).value):
+            if ticker not in tickers:
+                tickers.append(ticker)
+        return tickers
+
+    def _parse_tickers(self, raw: str) -> list[str]:
+        return [t.strip().upper() for t in re.split(r"[\s,]+", raw.strip()) if t.strip()]
 
     def _on_config_result(self, config: AnalysisConfig | None) -> None:
         if config is None:
@@ -450,9 +828,17 @@ class AnalysisRunScreen(Screen):
             with Horizontal(classes="screen-body run-main"):
                 with Vertical(classes="left-pane"):
                     yield Static("ETF Queue", classes="pane-title")
-                    yield Static(self._config_summary(), id="ra_run_config")
-                    yield Static("", id="ra_etf_detail")
-                    yield Button("Cancel", id="btn_ra_cancel", classes="text-action warning-text", disabled=True)
+                    with Vertical(id="ra_etf_card", classes="sidebar-card etf-card"):
+                        yield Static("", id="ra_etf_name", classes="etf-name")
+                        yield Static("", id="ra_etf_price", classes="etf-price-line")
+                        yield Static("", id="ra_etf_metrics", classes="etf-metrics")
+                        yield Static("", id="ra_etf_holdings", classes="etf-holdings")
+                    yield Static("", id="ra_ai_summary", classes="ai-summary")
+                    yield Static("", id="ra_etf_detail", classes="hidden-widget")
+                    with Vertical(id="ra_config_card", classes="sidebar-card config-card"):
+                        yield Static(self._config_summary(), id="ra_run_config")
+                    yield Button("⏹ 取消分析", id="btn_ra_cancel", classes="cancel-btn warning-text", disabled=True)
+                    yield Static("⏳分析中  ✓完成  ✗失败  ⊘取消", classes="queue-legend")
                     yield ListView(id="ra_queue")
                 with Vertical(classes="right-pane"):
                     # Board (right-top)
@@ -605,7 +991,10 @@ class AnalysisRunScreen(Screen):
 
     def _load_etf_detail(self, ticker: str) -> None:
         try:
-            self.query_one("#ra_etf_detail", Static).update("加载中...")
+            self.query_one("#ra_etf_name", Static).update(ticker)
+            self.query_one("#ra_etf_price", Static).update("加载中...")
+            self.query_one("#ra_etf_metrics", Static).update("")
+            self.query_one("#ra_etf_holdings", Static).update("")
         except Exception:
             pass
 
@@ -615,12 +1004,34 @@ class AnalysisRunScreen(Screen):
             try:
                 from etfagents.detail import get_etf_detail
                 detail = get_etf_detail(ticker, curr_date=analysis_date)
-                text = _format_detail_text(detail)
             except Exception as exc:
-                text = f"详情不可用: {type(exc).__name__}: {exc}"
-            _safe_call_from_thread(self, self._update_etf_detail, text)
+                detail = {"ticker": ticker, "_error": f"{type(exc).__name__}: {exc}"}
+            _safe_call_from_thread(self, self._update_etf_card, detail)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _update_etf_card(self, detail: dict) -> None:
+        """Populate the structured ETF card widgets from a detail dict."""
+        error = detail.get("_error")
+        if error:
+            try:
+                self.query_one("#ra_etf_price", Static).update(f"详情不可用: {error}")
+            except Exception:
+                pass
+            return
+        try:
+            components = _format_detail_rich(detail)
+            self.query_one("#ra_etf_name", Static).update(components["name_text"])
+            self.query_one("#ra_etf_price", Static).update(components["price_text"])
+            self.query_one("#ra_etf_metrics", Static).update(components["metrics_text"])
+            self.query_one("#ra_etf_holdings", Static).update(components["holdings_bars"])
+        except Exception:
+            pass
+        # Also update hidden legacy widget
+        try:
+            self.query_one("#ra_etf_detail", Static).update(_format_detail_text(detail))
+        except Exception:
+            pass
 
     def _update_etf_detail(self, text: str) -> None:
         try:
@@ -738,6 +1149,15 @@ class AnalysisRunScreen(Screen):
         self.repository.invalidate()
         self._append_progress(f"{event.ticker}: 分析完成{rating_str}")
         self._refresh_board()
+
+        # Show AI summary from portfolio manager content
+        pm_content = self.section_contents.get((event.ticker, "portfolio_manager"), "")
+        summary = _extract_ai_summary(pm_content)
+        if summary and self.current_ticker == event.ticker:
+            try:
+                self.query_one("#ra_ai_summary", Static).update(f"💡 {summary}")
+            except Exception:
+                pass
 
     def _handle_ticker_failed(self, event: TickerFailed) -> None:
         ticker_id = self.ticker_ids.register(event.ticker)

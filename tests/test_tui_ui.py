@@ -2,6 +2,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from textual.widgets import Button, Static, ListView, Label
@@ -39,6 +40,8 @@ from cli.tui.services import (
     TickerFailed,
     TickerStarted,
     TickerDone,
+    WatchlistBoardRow,
+    WatchlistBoardSnapshot,
 )
 
 
@@ -283,6 +286,177 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(screen, ResearchAnalysisScreen)
                 self.assertIsNotNone(screen.query_one("#ra_ticker_input"))
                 self.assertIsNotNone(screen.query_one("#btn_ra_start"))
+                self.assertIsNotNone(screen.query_one("#watchlist_cards"))
+                self.assertEqual(len(screen.query(".recent-card")), 5)
+                self.assertTrue(screen.query_one("#btn_ra_start", Button).disabled)
+                with self.assertRaises(Exception):
+                    screen.query_one("#wl_total")
+
+    async def test_research_analysis_recent_cards_use_latest_report_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index, ticker in enumerate(["510300.SH", "159915.SZ", "588000.SH"]):
+                report_dir = root / ticker / f"2026-05-2{index}"
+                report_dir.mkdir(parents=True)
+                (report_dir / "complete_report.md").write_text("评级: 持有", encoding="utf-8")
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                labels = [str(button.label) for button in screen.query(".recent-card")]
+                self.assertEqual(len(labels), 5)
+                self.assertTrue(any("510300.SH" in label and "沪深300ETF" in label for label in labels))
+                self.assertTrue(any("159915.SZ" in label and "创业板ETF" in label for label in labels))
+                self.assertTrue(any("588000.SH" in label and "2026-05-22" in label for label in labels))
+
+    async def test_research_analysis_recent_card_click_adds_ticker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                await pilot.click("#recent-recent_510300_SH")
+                screen = app.screen
+                selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                self.assertEqual(selected_labels, ["510300.SH ×"])
+
+    async def test_research_analysis_adding_second_recent_card_keeps_unique_tag_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                await pilot.click("#recent-recent_510300_SH")
+                await pilot.click("#recent-recent_159915_SZ")
+                await pilot.pause()
+                screen = app.screen
+                selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                self.assertEqual(selected_labels, ["510300.SH ×", "159915.SZ ×"])
+
+    async def test_research_analysis_screen_focuses_ticker_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                await pilot.pause()
+                self.assertEqual(app.focused.id, "ra_ticker_input")
+
+    async def test_research_analysis_enter_converts_input_to_selected_tag(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.press("enter")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, ResearchAnalysisScreen)
+                self.assertEqual(screen.query_one("#ra_ticker_input").value, "")
+                selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                self.assertEqual(selected_labels, ["510300.SH ×"])
+                self.assertIn("已选择 1 个 ETF", str(screen.query_one("#selected_ticker_count", Static).render()))
+                self.assertFalse(screen.query_one("#btn_ra_start", Button).disabled)
+
+    async def test_research_analysis_selected_tag_click_removes_ticker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.press("enter")
+                await pilot.pause()
+                chip = screen.query_one(".selected-chip", Button)
+                await pilot.click(f"#{chip.id}")
+                self.assertEqual([str(button.label) for button in screen.query(".selected-chip")], [])
+                self.assertTrue(screen.query_one("#btn_ra_start", Button).disabled)
+                self.assertIn("已选择 0 个 ETF", str(screen.query_one("#selected_ticker_count", Static).render()))
+
+    async def test_research_watchlist_cards_render_snapshot(self):
+        snapshot = WatchlistBoardSnapshot(
+            rows=[
+                WatchlistBoardRow(
+                    ticker="510300.SH",
+                    name="沪深300ETF",
+                    close=3.942,
+                    pct_chg=-2.04,
+                    share_change_pct=-0.49,
+                    support=3.900,
+                    resistance=4.080,
+                    trend_label="空头排列",
+                    cross_label="7日死叉",
+                    signal_summary="MACD死叉，KDJ死叉，看跌吞没",
+                    action="减仓",
+                    rationale="空头排列叠加7日死叉，优先控制仓位。",
+                    rating="减持",
+                    rating_date="2026-05-24",
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            with patch("cli.tui.screens.research.load_watchlist_board", return_value=snapshot):
+                async with app.run_test(size=(140, 40)) as pilot:
+                    await pilot.click("#btn_research")
+                    await pilot.pause()
+                    await pilot.pause()
+                    screen = app.screen
+                    cards = screen.query_one("#watchlist_cards")
+                    rendered = "\n".join(
+                        [str(widget.render()) for widget in cards.query(Static)]
+                        + [str(widget.label) for widget in cards.query(Button)]
+                    )
+                    self.assertIn("510300.SH", rendered)
+                    self.assertIn("沪深300ETF", rendered)
+                    self.assertIn("减仓", rendered)
+                    self.assertIn("MACD死叉", rendered)
+
+    async def test_research_watchlist_card_click_adds_ticker_to_selection(self):
+        snapshot = WatchlistBoardSnapshot(
+            rows=[
+                WatchlistBoardRow(
+                    ticker="510300.SH",
+                    name="沪深300ETF",
+                    action="持有",
+                    rationale="区间震荡，观察为主。",
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            with patch("cli.tui.screens.research.load_watchlist_board", return_value=snapshot):
+                async with app.run_test(size=(140, 40)) as pilot:
+                    await pilot.click("#btn_research")
+                    await pilot.pause()
+                    await pilot.pause()
+                    await pilot.click("#wl-wl_510300_SH")
+                    screen = app.screen
+                    selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                    self.assertEqual(selected_labels, ["510300.SH ×"])
+                    self.assertEqual(app.focused.id, "ra_ticker_input")
+
+    async def test_research_watchlist_card_click_does_not_duplicate_selection(self):
+        snapshot = WatchlistBoardSnapshot(
+            rows=[
+                WatchlistBoardRow(
+                    ticker="510300.SH",
+                    name="沪深300ETF",
+                    action="持有",
+                    rationale="区间震荡，观察为主。",
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            with patch("cli.tui.screens.research.load_watchlist_board", return_value=snapshot):
+                async with app.run_test(size=(140, 40)) as pilot:
+                    await pilot.click("#btn_research")
+                    await pilot.pause()
+                    await pilot.pause()
+                    screen = app.screen
+                    screen.query_one("#ra_ticker_input").value = "159915.SZ,510300.SH"
+                    await pilot.press("enter")
+                    await pilot.click("#wl-wl_510300_SH")
+                    selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                    self.assertEqual(selected_labels, ["159915.SZ ×", "510300.SH ×"])
 
     # --- AnalysisRunScreen: board layout ---
 
@@ -1080,9 +1254,15 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(modal.query_one("#acm_deep_model"))
                 self.assertIsNotNone(modal.query_one("#acm_language"))
                 self.assertIsNotNone(modal.query_one("#acm_analysis_date"))
+                self.assertIsNotNone(modal.query_one("#acm_summary"))
                 self.assertIsNotNone(modal.query_one("#acm_error"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_ok"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_cancel"))
+                self.assertEqual(str(modal.query_one("#btn_acm_ok", Button).label), "确认分析")
+                self.assertEqual(str(modal.query_one("#btn_acm_cancel", Button).label), "取消")
+                config_rows = modal.query(".acm-row")
+                self.assertEqual(len(config_rows), 3)
+                self.assertTrue(all(len(row.children) == 2 for row in config_rows))
 
     async def test_analysis_config_rejects_invalid_date(self):
         """Invalid analysis dates should keep the config modal open."""
@@ -1139,6 +1319,27 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screenshot = app.export_screenshot()
                 self.assertIn("市场与资金流", screenshot)
                 self.assertIn("宏观框架", screenshot)
+                group_titles = [str(widget.render()) for widget in modal.query(".analyst-group-title")]
+                self.assertIn("基本面 / 宏观", group_titles)
+                self.assertIn("市场 / 微观", group_titles)
+
+    async def test_analysis_config_modal_uses_short_model_labels_and_summary(self):
+        """Collapsed model selectors should use short labels and show a config summary."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                quick_select = modal.query_one("#acm_quick_model")
+                quick_labels = {str(option[0]) for option in quick_select._options}
+                self.assertTrue(all(" - " not in label for label in quick_labels))
+                summary = str(modal.query_one("#acm_summary", Static).render())
+                self.assertIn("已选择：", summary)
+                self.assertIn("深度：标准", summary)
 
     async def test_analysis_config_modal_updates_models_for_provider(self):
         """Changing provider should refresh quick/deep model choices."""
@@ -1172,9 +1373,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 modal = app.screen
                 depth_select = modal.query_one("#acm_depth")
                 labels = {str(option[0]) for option in depth_select._options}
-                self.assertIn("标准 (debate×1, risk×1)", labels)
-                self.assertIn("快速 (debate×0, risk×0)", labels)
-                self.assertIn("全面 (debate×3, risk×3)", labels)
+                self.assertIn("标准 (多空×1, 风控×1)", labels)
+                self.assertIn("快速 (多空×0, 风控×0)", labels)
+                self.assertIn("全面 (多空×3, 风控×3)", labels)
 
     async def test_analysis_config_modal_lists_all_supported_llm_providers(self):
         """TUI provider choices should match the supported provider set."""

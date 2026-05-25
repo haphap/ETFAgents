@@ -289,13 +289,299 @@ class ETFAgentsTuiApp(App):
     .density-spacious .left-pane, .density-spacious .right-pane { padding: 1 2; }
 
     /* ── Home: nav + dashboard ────────────────────────────── */
-    /* ── Analysis run: board layout ───────────────────────── */
-    #ra_run_config {
+    /* ── Research entry: input + watchlist cards ──────────── */
+    .research-entry-pane {
+        width: 34%;
+        min-width: 48;
+        padding: 1 1;
+    }
+
+    .research-board-pane {
+        width: 66%;
+    }
+
+    .input-label {
+        height: 1;
+        color: $text;
+        text-style: bold;
+        margin: 1 0 0 0;
+    }
+
+    .entry-help {
+        height: 1;
         color: $text-muted;
+        margin: 0 0 1 0;
+    }
+
+    .selected-tags {
+        height: 3;
+        margin: 0 0 1 0;
+        border: solid $surface;
+        padding: 0 1;
+    }
+
+    .selected-empty {
+        height: 1;
+        color: $text-muted;
+        content-align: left middle;
+    }
+
+    .selected-chip {
+        width: auto;
+        height: 1;
+        min-width: 10;
+        margin: 0 1 0 0;
+        padding: 0 1;
+        border: none;
+        background: $surface;
+        color: $accent;
+        content-align: center middle;
+    }
+
+    .selected-chip:hover,
+    .selected-chip:focus {
+        color: $surface;
+        background: $accent;
+        text-style: bold;
+    }
+
+    .selected-count {
+        height: 1;
+        color: $success;
+        margin: 0 0 1 0;
+    }
+
+    .entry-actions {
+        height: 3;
+        margin: 1 0 1 0;
+    }
+
+    .entry-primary {
+        width: 1fr;
+        height: 3;
+        margin: 0;
+        border: solid $accent;
+        background: $accent;
+        color: $surface;
+        text-style: bold;
+        content-align: center middle;
+    }
+
+    .entry-primary:hover,
+    .entry-primary:focus {
+        border: solid $accent;
+        background: $accent;
+        color: $surface;
+        text-style: bold;
+    }
+
+    .entry-primary:disabled {
+        border: solid $panel;
+        background: $surface;
+        color: $text-disabled;
+        text-style: none;
+    }
+
+    .entry-config {
+        width: 1fr;
+        height: 3;
+        margin: 0;
+        border: solid $accent;
+        background: transparent;
+        color: $accent;
+        content-align: center middle;
+    }
+
+    .entry-config:hover,
+    .entry-config:focus {
+        border: solid $accent;
+        color: $accent;
+        background: transparent;
+        text-style: bold;
+    }
+
+    .entry-section-title {
+        height: 1;
+        color: $accent;
+        text-style: bold;
+        margin: 1 0 1 0;
+    }
+
+    .recent-card-list {
+        height: auto;
+    }
+
+    .recent-card {
+        width: 100%;
+        height: 2;
+        margin: 0;
+        padding: 0 1;
+        border: none;
+        background: transparent;
+        color: $text-muted;
+        content-align: left middle;
+    }
+
+    .recent-card:hover,
+    .recent-card:focus {
+        color: $accent;
+        background: transparent;
+        text-style: bold;
+    }
+
+    #watchlist_cards {
+        height: 1fr;
+        scrollbar-size: 1 1;
+        scrollbar-background: transparent;
+        scrollbar-color: $accent;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    .watchlist-status {
+        height: auto;
+        color: $text-muted;
+        padding: 1 2;
+    }
+
+    .watchlist-card {
+        width: 100%;
+        height: auto;
+        min-height: 10;
+        margin: 0 0 1 0;
+        padding: 1 2;
+        border: solid $panel;
+        background: transparent;
+    }
+
+    .watchlist-card-title {
+        width: 100%;
+        height: 1;
+        min-width: 0;
+        padding: 0;
+        margin: 0;
+        background: transparent;
+        color: $text;
+        text-style: bold;
+        content-align: left middle;
+    }
+
+    .watchlist-card-title:hover,
+    .watchlist-card-title:focus {
+        color: $accent;
+        background: transparent;
+        text-style: bold underline;
+    }
+
+    .watchlist-card-name {
+        height: 1;
+        color: $text-muted;
+        margin: 0 0 1 0;
+    }
+
+    .watchlist-card-price {
+        height: 1;
+        text-style: bold;
+        margin: 0 0 1 0;
+    }
+
+    .watchlist-card-tags {
+        height: auto;
+        color: $text-muted;
+        margin: 0 0 1 0;
+    }
+
+    .watchlist-card-action {
+        height: auto;
+        padding: 0 1;
+        text-style: bold;
+        margin: 0 0 1 0;
+    }
+
+    .watchlist-card-rationale {
+        height: auto;
+        color: $text-muted;
+    }
+
+    .a-share-up {
+        color: $error;
+    }
+
+    .a-share-down {
+        color: $success;
+    }
+
+    .action-risk {
+        background: $success;
+        color: $surface;
+    }
+
+    .action-opportunity {
+        background: $error;
+        color: $surface;
+    }
+
+    .action-neutral {
+        background: $surface;
+        color: $text;
+    }
+
+    /* ── Analysis run: board layout ───────────────────────── */
+
+    .hidden-widget {
+        display: none;
+    }
+
+    .sidebar-card {
+        height: auto;
+        border: solid $surface;
+        padding: 0 1;
+        margin-bottom: 1;
+        background: transparent;
+    }
+
+    .etf-card {
+        border: solid $accent;
+    }
+
+    .etf-name {
+        height: 1;
+        text-style: bold;
+        color: $text;
+    }
+
+    .etf-price-line {
+        height: 1;
+        text-style: bold;
+    }
+
+    .etf-metrics {
+        height: auto;
+        color: $text-muted;
+    }
+
+    .etf-holdings {
+        height: auto;
+        margin-top: 1;
+    }
+
+    .ai-summary {
+        height: auto;
+        color: $warning;
+        margin-bottom: 1;
+        padding: 0 1;
+    }
+
+    .config-card {
+        border: solid $surface;
+    }
+
+    #ra_run_config {
+        color: $text-disabled;
         height: auto;
         margin-bottom: 0;
-        padding: 0 1;
-        border: solid $surface;
+        padding: 0;
+        border: none;
     }
 
     #ra_etf_detail {
@@ -304,6 +590,36 @@ class ETFAgentsTuiApp(App):
         margin-bottom: 1;
         padding: 0 1;
         border: solid $surface;
+    }
+
+    .cancel-btn {
+        width: 100%;
+        height: 3;
+        min-width: 0;
+        margin: 0 0 1 0;
+        border: solid $warning;
+        background: transparent;
+        color: $warning;
+        text-style: bold;
+        content-align: center middle;
+    }
+
+    .cancel-btn:hover {
+        background: $warning;
+        color: $surface;
+        text-style: bold;
+    }
+
+    .cancel-btn:disabled {
+        border: solid $panel;
+        color: $text-disabled;
+        background: transparent;
+        text-style: none;
+    }
+
+    .queue-legend {
+        height: 1;
+        color: $text-disabled;
     }
 
     #ra_body_scroll {
@@ -434,8 +750,12 @@ class ETFAgentsTuiApp(App):
     }
 
     .debate-progress {
+        width: 1fr;
+        height: 1;
+        padding: 0;
+        margin: 0;
         color: $text-muted;
-        height: auto;
+        content-align: left middle;
     }
 
     /* ── Semantic text classes ─────────────────────────────── */
