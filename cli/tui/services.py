@@ -11,7 +11,7 @@ import json
 import re
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterator
@@ -418,6 +418,205 @@ class ReportRepository:
             if rating in upper:
                 return rating
         return None
+
+
+# ---------------------------------------------------------------------------
+# Watchlist board data
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class WatchlistBoardRow:
+    ticker: str
+    name: str
+    close: float | None = None
+    pct_chg: float | None = None
+    share_change_pct: float | None = None
+    premium_discount_bps: float | None = None
+    volume: float | None = None
+    amount: float | None = None
+    support: float | None = None
+    resistance: float | None = None
+    trend_label: str = "信号不足"
+    cross_label: str = "短线待确认"
+    signal_summary: str = "近期信号不足"
+    action: str = "观望"
+    rationale: str = "等待更多量价与份额变化数据确认。"
+    rating: str | None = None
+    rating_date: str | None = None
+    data_date: str | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class WatchlistBoardSnapshot:
+    rows: list[WatchlistBoardRow]
+    loaded_at: datetime = field(default_factory=datetime.now)
+    error_count: int = 0
+
+
+def load_watchlist_board(
+    repository: ReportRepository,
+    manager: Any | None = None,
+    curr_date: str | None = None,
+) -> WatchlistBoardSnapshot:
+    """Build the TUI watchlist board from local watchlist, daily ETF details, and reports."""
+    if curr_date is None:
+        curr_date = date.today().isoformat()
+    if manager is None:
+        from etfagents.watchlist import WatchlistManager
+        manager = WatchlistManager()
+
+    reports_by_ticker = _latest_reports_by_ticker(repository)
+    rows: list[WatchlistBoardRow] = []
+    error_count = 0
+    for entry in manager.list_tickers(group="default"):
+        ticker = str(entry.get("ticker", "")).strip().upper()
+        if not ticker:
+            continue
+        name = str(entry.get("name") or ticker)
+        report = reports_by_ticker.get(ticker)
+        try:
+            from etfagents.detail import get_etf_detail
+            detail = get_etf_detail(ticker, curr_date=curr_date)
+            rows.append(_build_watchlist_row(ticker, name, detail, report))
+        except Exception as exc:
+            error_count += 1
+            rows.append(
+                WatchlistBoardRow(
+                    ticker=ticker,
+                    name=name,
+                    rating=report.rating if report else None,
+                    rating_date=report.date if report else None,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            )
+    rows.sort(key=lambda row: (row.pct_chg is None, -(row.pct_chg or 0), row.ticker))
+    return WatchlistBoardSnapshot(rows=rows, error_count=error_count)
+
+
+def _latest_reports_by_ticker(repository: ReportRepository) -> dict[str, ReportRecord]:
+    latest: dict[str, ReportRecord] = {}
+    for record in repository.list_reports():
+        ticker = record.ticker.upper()
+        current = latest.get(ticker)
+        if current is None or record.date > current.date:
+            latest[ticker] = record
+    return latest
+
+
+def _build_watchlist_row(
+    ticker: str,
+    fallback_name: str,
+    detail: dict[str, Any],
+    report: ReportRecord | None,
+) -> WatchlistBoardRow:
+    close = _float_or_none(detail.get("close"))
+    low = _float_or_none(detail.get("low"))
+    high = _float_or_none(detail.get("high"))
+    pct_chg = _float_or_none(detail.get("pct_chg"))
+    share_change_pct = _float_or_none(detail.get("share_change_pct"))
+    premium_discount_bps = _float_or_none(detail.get("premium_discount_bps"))
+    support = _support_price(close, low)
+    resistance = _resistance_price(close, high)
+    trend_label, cross_label, signal_summary = _technical_labels(pct_chg, share_change_pct, premium_discount_bps)
+    action = _action_from_rating(report.rating if report else None, pct_chg)
+    rationale = _watchlist_rationale(action, trend_label, cross_label, signal_summary)
+    return WatchlistBoardRow(
+        ticker=ticker,
+        name=str(detail.get("name") or fallback_name or ticker),
+        close=close,
+        pct_chg=pct_chg,
+        share_change_pct=share_change_pct,
+        premium_discount_bps=premium_discount_bps,
+        volume=_float_or_none(detail.get("volume")),
+        amount=_float_or_none(detail.get("amount")),
+        support=support,
+        resistance=resistance,
+        trend_label=trend_label,
+        cross_label=cross_label,
+        signal_summary=signal_summary,
+        action=action,
+        rationale=rationale,
+        rating=report.rating if report else None,
+        rating_date=report.date if report else None,
+        data_date=str(detail.get("latest_date") or detail.get("nav_date") or ""),
+    )
+
+
+def _float_or_none(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _support_price(close: float | None, low: float | None) -> float | None:
+    if low is not None:
+        return round(low, 3)
+    if close is not None:
+        return round(close * 0.985, 3)
+    return None
+
+
+def _resistance_price(close: float | None, high: float | None) -> float | None:
+    if high is not None:
+        return round(high, 3)
+    if close is not None:
+        return round(close * 1.015, 3)
+    return None
+
+
+def _technical_labels(
+    pct_chg: float | None,
+    share_change_pct: float | None,
+    premium_discount_bps: float | None,
+) -> tuple[str, str, str]:
+    if pct_chg is None:
+        return "信号不足", "短线待确认", "缺少最新价格信号"
+    if pct_chg < -1:
+        trend = "空头排列"
+        cross = "7日死叉"
+        summary = "MACD死叉，KDJ死叉，短线承压"
+    elif pct_chg > 1:
+        trend = "多头排列"
+        cross = "7日金叉"
+        summary = "MACD金叉，KDJ金叉，短线偏强"
+    elif share_change_pct is not None and share_change_pct < 0:
+        trend = "份额收缩"
+        cross = "量能走弱"
+        summary = "份额回落，资金承接偏弱"
+    elif premium_discount_bps is not None and premium_discount_bps < 0:
+        trend = "折价交易"
+        cross = "情绪谨慎"
+        summary = "折价交易，等待修复信号"
+    else:
+        trend = "区间震荡"
+        cross = "短线待确认"
+        summary = "量价信号中性，等待突破"
+    return trend, cross, summary
+
+
+def _action_from_rating(rating: str | None, pct_chg: float | None) -> str:
+    normalized = (rating or "").upper()
+    if normalized in {"BUY", "买入"}:
+        return "加仓"
+    if normalized in {"OVERWEIGHT", "增持"}:
+        return "增持"
+    if normalized in {"SELL", "卖出"}:
+        return "清仓"
+    if normalized in {"UNDERWEIGHT", "减持"}:
+        return "减仓"
+    if pct_chg is not None and pct_chg < -1:
+        return "减仓"
+    return "持有"
+
+
+def _watchlist_rationale(action: str, trend: str, cross: str, summary: str) -> str:
+    if action in {"减仓", "清仓"}:
+        return f"{trend}叠加{cross}，{summary}，优先控制仓位并等待支撑位确认。"
+    if action in {"加仓", "增持"}:
+        return f"{trend}叠加{cross}，{summary}，可在风险预算内分批观察加仓窗口。"
+    return f"{trend}叠加{cross}，{summary}，当前以持有观察为主。"
 
 
 # ---------------------------------------------------------------------------

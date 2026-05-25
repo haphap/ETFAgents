@@ -2,6 +2,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 try:
     from textual.widgets import Button, Static, ListView, Label
@@ -39,6 +40,8 @@ from cli.tui.services import (
     TickerFailed,
     TickerStarted,
     TickerDone,
+    WatchlistBoardRow,
+    WatchlistBoardSnapshot,
 )
 
 
@@ -283,6 +286,62 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(screen, ResearchAnalysisScreen)
                 self.assertIsNotNone(screen.query_one("#ra_ticker_input"))
                 self.assertIsNotNone(screen.query_one("#btn_ra_start"))
+                self.assertIsNotNone(screen.query_one("#watchlist_cards"))
+
+    async def test_research_analysis_screen_focuses_ticker_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                await pilot.pause()
+                self.assertEqual(app.focused.id, "ra_ticker_input")
+
+    async def test_research_analysis_enter_opens_config_modal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.press("enter")
+                await pilot.pause()
+                self.assertIsInstance(app.screen, AnalysisConfigModal)
+
+    async def test_research_watchlist_cards_render_snapshot(self):
+        snapshot = WatchlistBoardSnapshot(
+            rows=[
+                WatchlistBoardRow(
+                    ticker="510300.SH",
+                    name="沪深300ETF",
+                    close=3.942,
+                    pct_chg=-2.04,
+                    share_change_pct=-0.49,
+                    support=3.900,
+                    resistance=4.080,
+                    trend_label="空头排列",
+                    cross_label="7日死叉",
+                    signal_summary="MACD死叉，KDJ死叉，看跌吞没",
+                    action="减仓",
+                    rationale="空头排列叠加7日死叉，优先控制仓位。",
+                    rating="减持",
+                    rating_date="2026-05-24",
+                )
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            with patch("cli.tui.screens.research.load_watchlist_board", return_value=snapshot):
+                async with app.run_test(size=(140, 40)) as pilot:
+                    await pilot.click("#btn_research")
+                    await pilot.pause()
+                    await pilot.pause()
+                    screen = app.screen
+                    cards = screen.query_one("#watchlist_cards")
+                    rendered = "\n".join(str(widget.render()) for widget in cards.query(Static))
+                    self.assertIn("510300.SH", rendered)
+                    self.assertIn("沪深300ETF", rendered)
+                    self.assertIn("减仓", rendered)
+                    self.assertIn("MACD死叉", rendered)
 
     # --- AnalysisRunScreen: board layout ---
 

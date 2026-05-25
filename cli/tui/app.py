@@ -289,6 +289,185 @@ class ETFAgentsTuiApp(App):
     .density-spacious .left-pane, .density-spacious .right-pane { padding: 1 2; }
 
     /* ── Home: nav + dashboard ────────────────────────────── */
+    /* ── Research entry: input + watchlist cards ──────────── */
+    .research-entry-pane {
+        padding: 1 1;
+    }
+
+    .input-label {
+        height: 1;
+        color: $text;
+        text-style: bold;
+        margin: 1 0 0 0;
+    }
+
+    .entry-help {
+        height: 1;
+        color: $text-muted;
+        margin: 0 0 1 0;
+    }
+
+    .entry-primary {
+        width: 100%;
+        height: 3;
+        margin: 1 0 0 0;
+        background: $accent;
+        color: $surface;
+        text-style: bold;
+        content-align: center middle;
+    }
+
+    .entry-primary:hover,
+    .entry-primary:focus {
+        background: $accent;
+        color: $surface;
+        text-style: bold underline;
+    }
+
+    .entry-hint {
+        height: 1;
+        color: $text-muted;
+        text-align: center;
+        margin: 1 0 1 0;
+    }
+
+    .entry-section-title {
+        height: 1;
+        color: $accent;
+        text-style: bold;
+        margin: 1 0 1 0;
+    }
+
+    .example-row {
+        height: auto;
+        margin: 0 0 1 0;
+    }
+
+    .ticker-chip {
+        width: 1fr;
+        height: 3;
+        min-width: 0;
+        margin: 0 1 0 0;
+        border: solid $panel;
+        background: transparent;
+        color: $text-muted;
+        content-align: center middle;
+    }
+
+    .ticker-chip:hover,
+    .ticker-chip:focus {
+        border: solid $accent;
+        color: $accent;
+        background: transparent;
+        text-style: bold;
+    }
+
+    .watchlist-summary {
+        height: 6;
+        margin: 1 0 1 0;
+    }
+
+    .summary-card {
+        width: 1fr;
+        height: 5;
+        margin: 0 1 0 0;
+        padding: 1 2;
+        border: solid $panel;
+        color: $text;
+        text-style: bold;
+        content-align: center middle;
+    }
+
+    .summary-card:last-of-type {
+        margin-right: 0;
+    }
+
+    .positive-card {
+        color: $error;
+    }
+
+    .negative-card {
+        color: $success;
+    }
+
+    #watchlist_cards {
+        height: 1fr;
+        scrollbar-size: 1 1;
+        scrollbar-background: transparent;
+        scrollbar-color: $accent;
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    .watchlist-status {
+        height: auto;
+        color: $text-muted;
+        padding: 1 2;
+    }
+
+    .watchlist-card {
+        width: 100%;
+        height: auto;
+        min-height: 10;
+        margin: 0 0 1 0;
+        padding: 1 2;
+        border: solid $panel;
+        background: transparent;
+    }
+
+    .watchlist-card-title {
+        height: 2;
+        color: $text;
+        text-style: bold;
+    }
+
+    .watchlist-card-price {
+        height: 1;
+        text-style: bold;
+        margin: 0 0 1 0;
+    }
+
+    .watchlist-card-tags {
+        height: auto;
+        color: $text-muted;
+        margin: 0 0 1 0;
+    }
+
+    .watchlist-card-action {
+        height: auto;
+        padding: 0 1;
+        text-style: bold;
+        margin: 0 0 1 0;
+    }
+
+    .watchlist-card-rationale {
+        height: auto;
+        color: $text-muted;
+    }
+
+    .a-share-up {
+        color: $error;
+    }
+
+    .a-share-down {
+        color: $success;
+    }
+
+    .action-risk {
+        background: $success;
+        color: $surface;
+    }
+
+    .action-opportunity {
+        background: $error;
+        color: $surface;
+    }
+
+    .action-neutral {
+        background: $surface;
+        color: $text;
+    }
+
     /* ── Analysis run: board layout ───────────────────────── */
     #ra_run_config {
         color: $text-muted;

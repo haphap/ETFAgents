@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from datetime import datetime
@@ -42,6 +43,9 @@ from cli.tui.services import (
     TickerDone,
     TickerFailed,
     TickerStarted,
+    WatchlistBoardRow,
+    WatchlistBoardSnapshot,
+    load_watchlist_board,
     section_definitions_for,
 )
 
@@ -146,6 +150,35 @@ def _format_detail_text(detail: dict) -> str:
         lines.append(f"头部持仓：{'；'.join(holding_parts)}")
 
     return "\n".join(lines) if lines else "无数据"
+
+
+def _fmt_price(value: float | None) -> str:
+    return "--" if value is None else f"{value:.3f}"
+
+
+def _fmt_pct(value: float | None) -> str:
+    if value is None:
+        return "--"
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.2f}%"
+
+
+def _a_share_value_class(value: float | None) -> str:
+    if value is None:
+        return "muted"
+    if value > 0:
+        return "a-share-up"
+    if value < 0:
+        return "a-share-down"
+    return "muted"
+
+
+def _action_class(action: str) -> str:
+    if action in {"减仓", "清仓"}:
+        return "action-risk"
+    if action in {"加仓", "增持"}:
+        return "action-opportunity"
+    return "action-neutral"
 
 
 def _build_analysis_runner(cfg: AnalysisConfig) -> AnalysisRunner:
@@ -348,33 +381,128 @@ class ResearchAnalysisScreen(Screen):
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="screen-body"):
-            with Vertical(classes="left-pane"):
-                yield Static("Create Run", classes="pane-title")
-                yield Static("ETF tickers:")
+            with Vertical(classes="left-pane research-entry-pane"):
+                yield Static("Create Research Run", classes="pane-title")
+                yield Static("ETF tickers", classes="input-label")
                 yield Input(placeholder="510300.SH,159915.SZ", id="ra_ticker_input")
-                yield Button("› Start Analysis", id="btn_ra_start", classes="text-action")
+                yield Static("Use comma or space to separate tickers", classes="entry-help")
+                yield Static("", id="ra_entry_status", classes="status-strip")
+                yield Button("▶ Start Analysis", id="btn_ra_start", classes="entry-primary")
+                yield Static("Enter to configure", classes="entry-hint")
+                yield Static("Examples", classes="entry-section-title")
+                with Horizontal(classes="example-row"):
+                    yield Button("510300.SH", id="ex-510300", classes="ticker-chip")
+                    yield Button("159915.SZ", id="ex-159915", classes="ticker-chip")
+                with Horizontal(classes="example-row"):
+                    yield Button("513500.SH", id="ex-513500", classes="ticker-chip")
             with Vertical(classes="right-pane"):
-                with Vertical(classes="right-top"):
-                    yield Static("Run Brief", classes="pane-title")
-                    yield Markdown(
-                        "1. Enter ETF tickers\n"
-                        "2. Select analysts, provider, models\n"
-                        "3. Track each team output in board",
-                        id="ra_intro",
-                    )
+                with Horizontal(classes="watchlist-summary"):
+                    yield Static("自选\n--", id="wl_total", classes="summary-card")
+                    yield Static("上涨\n--", id="wl_up", classes="summary-card positive-card")
+                    yield Static("下跌\n--", id="wl_down", classes="summary-card negative-card")
+                    yield Static("评级\n--", id="wl_rated", classes="summary-card")
+                yield Static("自选股看板 / Watchlist Monitor", classes="pane-title")
+                with ScrollableContainer(id="watchlist_cards"):
+                    yield Static("加载自选股看板...", id="watchlist_status", classes="watchlist-status")
+                yield Static("部分字段来自最新可用日线，非实时行情", classes="hint")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self.query_one("#ra_ticker_input", Input).focus()
+        self._start_watchlist_loading()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_ra_start":
-            tickers = self._read_tickers()
-            if not tickers:
-                self.query_one("#ra_intro", Markdown).update("请输入至少一个 ETF 代码。")
-                return
-            self.app.push_screen(AnalysisConfigModal(), self._on_config_result)
+            self._start_config_flow()
+        elif (event.button.id or "").startswith("ex-"):
+            self.query_one("#ra_ticker_input", Input).value = str(event.button.label)
+            self.query_one("#ra_ticker_input", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "ra_ticker_input":
+            self._start_config_flow()
+
+    def _start_config_flow(self) -> None:
+        tickers = self._read_tickers()
+        if not tickers:
+            self.query_one("#ra_entry_status", Static).update("请输入至少一个 ETF 代码。")
+            return
+        self.query_one("#ra_entry_status", Static).update(f"准备分析 {', '.join(tickers)}")
+        self.app.push_screen(AnalysisConfigModal(), self._on_config_result)
+
+    def _start_watchlist_loading(self) -> None:
+        threading.Thread(
+            target=self._load_watchlist_snapshot,
+            daemon=True,
+            name="etfagents-tui-watchlist",
+        ).start()
+
+    def _load_watchlist_snapshot(self) -> None:
+        try:
+            snapshot = load_watchlist_board(self.repository)
+            _safe_call_from_thread(self, self._apply_watchlist_snapshot, snapshot)
+        except Exception as exc:
+            _safe_call_from_thread(self, self._show_watchlist_error, str(exc))
+
+    def _apply_watchlist_snapshot(self, snapshot: WatchlistBoardSnapshot) -> None:
+        self._refresh_watchlist_summary(snapshot)
+        cards = self.query_one("#watchlist_cards", ScrollableContainer)
+        for child in list(cards.children):
+            child.remove()
+        if not snapshot.rows:
+            cards.mount(Static("暂无自选股。使用 watchlist 命令添加 ETF 后会显示在这里。", classes="watchlist-status"))
+            return
+        for row in snapshot.rows:
+            cards.mount(self._watchlist_card(row))
+        if snapshot.error_count:
+            cards.mount(
+                Static(
+                    f"{snapshot.error_count} 个 ETF 数据加载失败，其余卡片已正常显示。",
+                    classes="watchlist-status warning-text",
+                )
+            )
+
+    def _refresh_watchlist_summary(self, snapshot: WatchlistBoardSnapshot) -> None:
+        up = sum(1 for row in snapshot.rows if row.pct_chg is not None and row.pct_chg > 0)
+        down = sum(1 for row in snapshot.rows if row.pct_chg is not None and row.pct_chg < 0)
+        rated = sum(1 for row in snapshot.rows if row.rating)
+        self.query_one("#wl_total", Static).update(f"自选\n{len(snapshot.rows)}")
+        self.query_one("#wl_up", Static).update(f"上涨\n{up}")
+        self.query_one("#wl_down", Static).update(f"下跌\n{down}")
+        self.query_one("#wl_rated", Static).update(f"评级\n{rated}")
+
+    def _show_watchlist_error(self, error: str) -> None:
+        cards = self.query_one("#watchlist_cards", ScrollableContainer)
+        for child in list(cards.children):
+            child.remove()
+        cards.mount(Static(f"自选股看板加载失败：{error}", classes="watchlist-status error-text"))
+
+    def _watchlist_card(self, row: WatchlistBoardRow) -> Vertical:
+        price_class = _a_share_value_class(row.pct_chg)
+        share_class = _a_share_value_class(row.share_change_pct)
+        rating = row.rating or "--"
+        rating_date = row.rating_date or "--"
+        return Vertical(
+            Static(f"{row.ticker}\n{row.name}", classes="watchlist-card-title"),
+            Static(
+                f"现价 {_fmt_price(row.close)}   涨跌 {_fmt_pct(row.pct_chg)}   份额 {_fmt_pct(row.share_change_pct)}",
+                classes=f"watchlist-card-price {price_class} {share_class}",
+            ),
+            Static(
+                f"{row.trend_label}    {row.cross_label}    支撑位 {_fmt_price(row.support)}    压力位 {_fmt_price(row.resistance)}",
+                classes="watchlist-card-tags",
+            ),
+            Static(
+                f"[{row.action}]  {row.signal_summary}    近期评级 {rating} / {rating_date}",
+                classes=f"watchlist-card-action {_action_class(row.action)}",
+            ),
+            Static(row.error or row.rationale, classes="watchlist-card-rationale"),
+            classes="watchlist-card",
+        )
 
     def _read_tickers(self) -> list[str]:
         tickers_str = self.query_one("#ra_ticker_input", Input).value.strip()
-        return [t.strip().upper() for t in tickers_str.split(",") if t.strip()]
+        return [t.strip().upper() for t in re.split(r"[\s,]+", tickers_str) if t.strip()]
 
     def _on_config_result(self, config: AnalysisConfig | None) -> None:
         if config is None:
