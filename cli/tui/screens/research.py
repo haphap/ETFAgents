@@ -107,36 +107,66 @@ def _format_detail_text(detail: dict) -> str:
     name = detail.get("name") or detail.get("ticker", "")
     close = detail.get("close")
     pct = detail.get("pct_chg")
+
+    # Title line: name + price + change
     if close is not None:
-        price_str = f"{close:.3f}"
+        pct_str = ""
         if pct is not None:
             sign = "+" if pct >= 0 else ""
-            price_str += f" {sign}{pct:.2f}%"
-        lines.append(f"{name} {price_str}" if name else price_str)
+            pct_str = f" {sign}{pct:.2f}%"
+        lines.append(f"📌 {name} {close:.3f}{pct_str}" if name else f"📌 {close:.3f}{pct_str}")
     elif name:
-        lines.append(name)
+        lines.append(f"📌 {name}")
 
-    nav = detail.get("unit_nav")
-    if nav is not None:
-        pd_bps = detail.get("premium_discount_bps")
-        nav_line = f"NAV {nav:.4f}"
-        if pd_bps is not None:
-            nav_line += f" {pd_bps:+.0f}bp"
-        lines.append(nav_line)
+    # Price range: open / high / low
+    _open = detail.get("open")
+    high = detail.get("high")
+    low = detail.get("low")
+    range_parts: list[str] = []
+    if _open is not None:
+        range_parts.append(f"开{_open:.3f}")
+    if high is not None:
+        range_parts.append(f"高{high:.3f}")
+    if low is not None:
+        range_parts.append(f"低{low:.3f}")
+    if range_parts:
+        lines.append(f"📊 {' / '.join(range_parts)}")
 
+    # Volume + amount
+    vol = detail.get("volume")
+    amt = detail.get("amount")
+    if vol is not None or amt is not None:
+        vol_parts: list[str] = []
+        if vol is not None:
+            vol_parts.append(f"量{vol / 1e4:.0f}万手")
+        if amt is not None:
+            vol_parts.append(f"额{amt / 1e4:.0f}万")
+        lines.append(f"💹 {' / '.join(vol_parts)}")
+
+    # Fund size + change
     share = detail.get("fund_share")
     if share is not None:
-        share_line = f"规模 {share / 1e8:.0f}亿"
+        share_line = f"💰 规模 {share / 1e8:.0f}亿"
         sc = detail.get("share_change_pct")
         if sc is not None:
-            share_line += f" {sc:+.1f}%"
+            share_line += f" ({sc:+.1f}%)"
         lines.append(share_line)
 
+    # Fund info: type + manager
+    fund_type = detail.get("fund_type")
+    manager = detail.get("manager")
+    if fund_type or manager:
+        info_parts = [p for p in [fund_type, manager] if p]
+        lines.append(f"🏷️ {' · '.join(info_parts)}")
+
+    # Top holdings
     holdings = detail.get("holdings") or []
-    for h in holdings[:3]:
-        w = h.get("weight_pct")
-        w_str = f"{w:.1f}%" if w is not None else "?"
-        lines.append(f"  {h.get('name', '?')} {w_str}")
+    if holdings:
+        lines.append("📋 持仓:")
+        for h in holdings[:5]:
+            w = h.get("weight_pct")
+            w_str = f"{w:.1f}%" if w is not None else "?"
+            lines.append(f"   {h.get('name', '?')} {w_str}")
 
     return "\n".join(lines) if lines else "无数据"
 
@@ -211,12 +241,14 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
 
     DEFAULT_CSS = """
     AnalysisConfigModal { align: center middle; }
-    #acm_container { width: 88; height: auto; max-height: 50; border: solid $accent; background: $surface; padding: 1 2; }
+    #acm_container { width: 80; height: auto; max-height: 40; border: solid $accent; background: $surface; padding: 1 2; }
     #acm_container .acm-row { height: auto; margin: 0; }
     #acm_container .acm-col { width: 1fr; height: auto; margin-right: 1; }
+    #acm_container .acm-col:last-of-type { margin-right: 0; }
     #acm_container Static { height: 1; margin: 0; }
     #acm_container Checkbox { height: 1; margin: 0; }
-    #acm_container Select { margin: 0 0 1 0; }
+    #acm_container Select { margin: 0; }
+    #acm_container Input { margin: 0; }
     #acm_container .analyst-grid { layout: grid; grid-size: 3 2; grid-gutter: 0 1; height: auto; }
     #acm_container .text-action { margin: 0 1 0 0; }
     """
@@ -224,7 +256,7 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
     def compose(self) -> ComposeResult:
         with Vertical(id="acm_container"):
             yield Static("分析配置", classes="pane-title")
-            yield Static("选择分析师:")
+            yield Static("分析师:")
             with Vertical(classes="analyst-grid"):
                 for defn in SECTION_DEFINITIONS:
                     if defn.team == "分析师":
@@ -236,24 +268,25 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
                         )
             with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
-                    yield Static("研究深度:")
+                    yield Static("日期:")
+                    yield Input(
+                        value=datetime.now().date().isoformat(),
+                        placeholder="YYYY-MM-DD",
+                        id="acm_analysis_date",
+                    )
+                with Vertical(classes="acm-col"):
+                    yield Static("深度:")
                     depth_options = [
                         (_depth_option_label(name), name) for name in RESEARCH_DEPTH_REQUIREMENTS
                     ]
                     yield Select(depth_options, value="标准", id="acm_depth")
                 with Vertical(classes="acm-col"):
-                    yield Static("输出语言:")
+                    yield Static("语言:")
                     lang_options = [("中文", "Chinese"), ("English", "English")]
                     yield Select(lang_options, value="Chinese", id="acm_language")
-            yield Static("分析日期:")
-            yield Input(
-                value=datetime.now().date().isoformat(),
-                placeholder="YYYY-MM-DD",
-                id="acm_analysis_date",
-            )
             with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
-                    yield Static("LLM提供商:")
+                    yield Static("提供商:")
                     provider_options = [
                         (display, provider) for display, provider, _ in LLM_PROVIDER_OPTIONS
                     ]
@@ -262,9 +295,10 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
                     yield Static("快速模型:")
                     quick_options = _model_select_options("openai", "quick")
                     yield Select(quick_options, value=quick_options[0][1], id="acm_quick_model")
-            yield Static("深度模型:")
-            deep_options = _model_select_options("openai", "deep")
-            yield Select(deep_options, value=deep_options[0][1], id="acm_deep_model")
+                with Vertical(classes="acm-col"):
+                    yield Static("深度模型:")
+                    deep_options = _model_select_options("openai", "deep")
+                    yield Select(deep_options, value=deep_options[0][1], id="acm_deep_model")
             yield Static("", id="acm_error", classes="error-text")
             with Horizontal(classes="acm-row"):
                 yield Button("› Confirm", id="btn_acm_ok", classes="text-action")
@@ -579,8 +613,9 @@ class AnalysisRunScreen(Screen):
         cfg = self._analysis_config
         depth = _depth_option_label(cfg.depth_name)
         return (
-            f"{cfg.analysis_date or 'today'} · {depth} · {cfg.llm_provider}\n"
-            f"quick:{cfg.quick_model or 'default'} · deep:{cfg.deep_model or 'default'}"
+            f"📅 {cfg.analysis_date or 'today'}  📊 {depth}\n"
+            f"🤖 {cfg.llm_provider}  ⚡ {cfg.quick_model or 'default'}\n"
+            f"🧠 {cfg.deep_model or 'default'}"
         )
 
     def _cancel_analysis(self) -> None:
@@ -594,13 +629,15 @@ class AnalysisRunScreen(Screen):
         except Exception:
             pass
 
+        analysis_date = self._analysis_config.analysis_date if self._analysis_config else None
+
         def _worker() -> None:
             try:
                 from etfagents.detail import get_etf_detail
-                detail = get_etf_detail(ticker)
+                detail = get_etf_detail(ticker, curr_date=analysis_date)
                 text = _format_detail_text(detail)
-            except Exception:
-                text = "详情加载失败"
+            except Exception as exc:
+                text = f"详情不可用: {type(exc).__name__}: {exc}"
             _safe_call_from_thread(self, self._update_etf_detail, text)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -868,10 +905,10 @@ class AnalysisRunScreen(Screen):
             self.query_one("#ra_body", Markdown).update(self._progress_markdown())
             return
 
-        # risk_debate is synthetic — show PM content or status
+        # risk_debate — show actual risk debate content
         if self.current_section == "risk_debate":
             self.query_one("#ra_body_title", Static).update("风险辩论")
-            content = self.section_contents.get((self.current_ticker, "portfolio_manager"))
+            content = self.section_contents.get((self.current_ticker, "risk_debate"))
             if content:
                 self.query_one("#ra_body", Markdown).update(content)
             else:
@@ -886,6 +923,15 @@ class AnalysisRunScreen(Screen):
 
         content = self.section_contents.get((self.current_ticker, self.current_section))
         title = SECTION_BY_ID.get(self.current_section).title if self.current_section in SECTION_BY_ID else self.current_section
+
+        # Strip feedback snapshot from portfolio manager display
+        if self.current_section == "portfolio_manager" and content:
+            try:
+                from etfagents.agents.utils.agent_utils import strip_feedback_snapshot
+                content = strip_feedback_snapshot(content)
+            except ImportError:
+                pass
+
         self.query_one("#ra_body_title", Static).update(str(title))
         if content:
             self.query_one("#ra_body", Markdown).update(content)

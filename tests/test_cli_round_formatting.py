@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("typer"):
+    raise unittest.SkipTest("typer not installed")
+
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -20,7 +26,6 @@ from cli.main import (
 )
 from etfagents.dataflows.config import get_config, set_config
 from etfagents.default_config import DEFAULT_CONFIG
-
 
 class CliRoundFormattingTests(unittest.TestCase):
     def setUp(self):
@@ -1293,7 +1298,6 @@ class CliRoundFormattingTests(unittest.TestCase):
         trader_markup = "\n".join(markup for markup in rendered_markdown if "配置逻辑" in markup)
         self.assertIn("## 一、配置逻辑", trader_markup)
         self.assertNotRegex(trader_markup, r"(?m)^#(?!#)\s+")
-
 
 if __name__ == "__main__":
     unittest.main()

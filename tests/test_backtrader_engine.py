@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("pandas"):
+    raise unittest.SkipTest("pandas not installed")
+
 import unittest
 from tempfile import TemporaryDirectory
 
@@ -9,7 +15,6 @@ from etfagents.backtest.backtrader_engine import (
     save_backtest_result,
 )
 from etfagents.graph.etf_graph import EtfAgentsGraph
-
 
 class BacktraderEngineTests(unittest.TestCase):
     def _make_graph(self):
@@ -440,7 +445,6 @@ class BacktraderEngineTests(unittest.TestCase):
         self.assertEqual(result.health.execution_timing_mismatch_count, 1)
         self.assertEqual(result.health.unsupported_trigger_count, 1)
         self.assertEqual(result.rebalance_summary_rows()[1]["reason"], "trigger")
-
 
 if __name__ == "__main__":
     unittest.main()

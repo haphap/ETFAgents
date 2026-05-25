@@ -1,5 +1,10 @@
 """Tests for paper trading engine."""
 
+import importlib.util
+import unittest
+if not importlib.util.find_spec("bcrypt"):
+    raise unittest.SkipTest("bcrypt not installed")
+
 import json
 import os
 import sqlite3
@@ -19,13 +24,11 @@ from etfagents.paper_trading.rules import (
     validate_quantity,
 )
 
-
 def _make_price_csv(close: float = 4.12, trade_date: str = "20260521") -> str:
     return (
         "trade_date,open,high,low,close,pct_chg,vol,amount\n"
         f"{trade_date},4.00,4.15,3.95,{close},1.50,1000000,4120000\n"
     )
-
 
 def _mock_backtest_signals_module():
     module = types.ModuleType("etfagents.backtest.signals")
@@ -39,7 +42,6 @@ def _mock_backtest_signals_module():
     package = types.ModuleType("etfagents.backtest")
     package.signals = module
     return package, module
-
 
 class RulesTests(unittest.TestCase):
     def test_calc_commission_normal(self):
@@ -85,7 +87,6 @@ class RulesTests(unittest.TestCase):
         self.assertAlmostEqual(result["commission"], 5.0)
         self.assertEqual(result["stamp_duty"], 0.0)
         self.assertEqual(result["total_cost"], 2055.0)
-
 
 class PaperTradingTests(unittest.TestCase):
     def setUp(self):
@@ -652,7 +653,6 @@ class PaperTradingTests(unittest.TestCase):
         }):
             with self.assertRaises(ValueError):
                 self.engine.suggest_order_from_signal("510300.SH", state)
-
 
 if __name__ == "__main__":
     unittest.main()

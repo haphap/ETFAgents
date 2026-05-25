@@ -4,9 +4,41 @@ These tests verify that the runner correctly handles streaming,
 cancellation, error recovery, and resource cleanup.
 """
 
+import sys
+import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+
+def _ensure_stubs():
+    """Insert lightweight stubs for heavy modules that AnalysisRunner
+    lazy-imports (cli.report_utils, cli.stats_handler) so tests run
+    without langchain_core / langgraph installed."""
+    stubs: dict[str, types.ModuleType] = {}
+
+    if "cli.report_utils" not in sys.modules:
+        mod = types.ModuleType("cli.report_utils")
+        # merge_stream_state: shallow-merge chunk into accumulated
+        mod.merge_stream_state = lambda acc, upd, **kw: acc.update(
+            {k: v for k, v in (upd if isinstance(upd, dict) else {}).items() if v}
+        )
+        stubs["cli.report_utils"] = mod
+
+    if "cli.stats_handler" not in sys.modules:
+        mod = types.ModuleType("cli.stats_handler")
+        mod.StatsCallbackHandler = type(
+            "StatsCallbackHandler", (), {"get_stats": lambda self: {}}
+        )
+        stubs["cli.stats_handler"] = mod
+
+    return stubs
+
+
+_STUBS = _ensure_stubs()
+_cm = patch.dict(sys.modules, _STUBS) if _STUBS else None
+if _cm:
+    _cm.__enter__()
 
 from cli.tui.services import (
     AnalysisRunner,

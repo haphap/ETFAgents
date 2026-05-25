@@ -1,15 +1,18 @@
 """Tests for synthesize_side_report error handling."""
 
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_core"):
+    raise unittest.SkipTest("langchain_core not installed")
+
 import unittest
 from unittest.mock import MagicMock, patch
 
 from etfagents.agents.utils.agent_utils import synthesize_side_report
 
-
 class _FakeResponse:
     def __init__(self, content):
         self.content = content
-
 
 class TestSynthesizeSideReport(unittest.TestCase):
     @patch("etfagents.agents.utils.agent_utils._is_chinese_output", return_value=False)
@@ -43,7 +46,6 @@ class TestSynthesizeSideReport(unittest.TestCase):
         result = synthesize_side_report(llm, "Bull Researcher", "", "fallback snapshot")
         self.assertEqual(result, "fallback snapshot")
         llm.invoke.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()

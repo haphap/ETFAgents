@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_core"):
+    raise unittest.SkipTest("langchain_core not installed")
+
 import unittest
 
 from langchain_core.messages import HumanMessage
@@ -10,12 +16,10 @@ from etfagents.tool_report_utils import (
     _is_tool_call_text,
 )
 
-
 class _FakeResponse:
     def __init__(self, content="", tool_calls=None):
         self.content = content
         self.tool_calls = tool_calls or []
-
 
 class _FakeBoundLLM:
     def __init__(self, responses):
@@ -23,7 +27,6 @@ class _FakeBoundLLM:
 
     def invoke(self, _messages):
         return self._responses.pop(0)
-
 
 class _FakeLLM:
     def __init__(self, tool_responses, fallback_responses=None):
@@ -36,7 +39,6 @@ class _FakeLLM:
     def invoke(self, _messages):
         return self._fallback.invoke(_messages)
 
-
 class _FakePrompt:
     def __init__(self):
         self.partial_calls = []
@@ -47,7 +49,6 @@ class _FakePrompt:
 
     def __or__(self, runnable):
         return runnable
-
 
 class _FakeTool:
     def __init__(self, name, return_value=None, *, raises=None):
@@ -62,7 +63,6 @@ class _FakeTool:
             raise self.raises
         return self.return_value
 
-
 class _RecordingLLM(_FakeLLM):
     def __init__(self, tool_responses, fallback_responses=None):
         super().__init__(tool_responses, fallback_responses)
@@ -71,7 +71,6 @@ class _RecordingLLM(_FakeLLM):
     def invoke(self, messages):
         self.fallback_invocations.append(messages)
         return super().invoke(messages)
-
 
 class ToolReportUtilsTests(unittest.TestCase):
     def test_returns_tool_response_when_more_tools_needed(self):
@@ -701,7 +700,6 @@ class ToolReportUtilsTests(unittest.TestCase):
     def test_date_days_before_handles_valid_and_invalid_dates(self):
         self.assertEqual("2026-03-31", date_days_before("2026-04-30", 30))
         self.assertEqual("not-a-date", date_days_before("not-a-date", 30))
-
 
 if __name__ == "__main__":
     unittest.main()

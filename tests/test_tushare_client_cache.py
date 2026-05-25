@@ -1,11 +1,15 @@
 """Tests for tushare _get_pro_client caching behavior."""
 
+import importlib.util
+import unittest
+if not importlib.util.find_spec("pandas"):
+    raise unittest.SkipTest("pandas not installed")
+
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
-
 
 class TestTushareClientCache(unittest.TestCase):
     def setUp(self):
@@ -131,7 +135,6 @@ class TestTushareClientCache(unittest.TestCase):
 
         client.query.assert_called_once_with("fund_basic", ts_code="560860.SH")
         sleep.assert_not_called()
-
 
 if __name__ == "__main__":
     unittest.main()

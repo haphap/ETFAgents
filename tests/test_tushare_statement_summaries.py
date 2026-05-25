@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("pandas"):
+    raise unittest.SkipTest("pandas not installed")
+
 import unittest
 from unittest.mock import patch
 
@@ -11,7 +17,6 @@ from etfagents.dataflows.tushare import (
     get_balance_sheet,
     get_fundamentals,
 )
-
 
 class _FakePro:
     def stock_basic(self, **kwargs):
@@ -193,7 +198,6 @@ class _FakePro:
     def express(self, **kwargs):
         return pd.DataFrame()
 
-
 class TushareStatementSummaryTests(unittest.TestCase):
     def test_filter_statement_keeps_latest_updated_row_per_end_date(self):
         df = pd.DataFrame(
@@ -310,7 +314,6 @@ class TushareStatementSummaryTests(unittest.TestCase):
         self.assertIn("# Key snapshot", balance_sheet)
         self.assertIn("Total Assets: 9748.28亿 CNY", balance_sheet)
         self.assertIn("Asset-Liability Ratio: 61.94%", balance_sheet)
-
 
 if __name__ == "__main__":
     unittest.main()

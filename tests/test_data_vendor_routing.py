@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("yfinance"):
+    raise unittest.SkipTest("yfinance not installed")
+
 import copy
 import unittest
 from contextvars import copy_context
@@ -7,7 +13,6 @@ from etfagents.default_config import DEFAULT_CONFIG
 from etfagents.dataflows.config import backtest_context, get_config, set_config
 from etfagents.dataflows.exceptions import DataVendorUnavailable
 from etfagents.dataflows.interface import VENDOR_LIST, VENDOR_METHODS, route_to_vendor
-
 
 class DataVendorRoutingTests(unittest.TestCase):
     def setUp(self):
@@ -378,7 +383,6 @@ class DataVendorRoutingTests(unittest.TestCase):
 
         self.assertEqual(touched, ["tushare", "yfinance"])
         self.assertEqual(result, [{"insider": "fallback"}])
-
 
 if __name__ == "__main__":
     unittest.main()

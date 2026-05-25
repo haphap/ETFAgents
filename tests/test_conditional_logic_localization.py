@@ -1,7 +1,12 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_openai"):
+    raise unittest.SkipTest("langchain_openai not installed")
+
 import unittest
 
 from etfagents.graph.conditional_logic import ConditionalLogic
-
 
 class ConditionalLogicLocalizationTests(unittest.TestCase):
     def test_should_continue_debate_uses_latest_speaker_not_localized_response_prefix(self):
@@ -27,7 +32,6 @@ class ConditionalLogicLocalizationTests(unittest.TestCase):
         }
 
         self.assertEqual(logic.should_continue_debate(state), "Research Manager")
-
 
 if __name__ == "__main__":
     unittest.main()

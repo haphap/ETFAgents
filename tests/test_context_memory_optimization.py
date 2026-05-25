@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_core"):
+    raise unittest.SkipTest("langchain_core not installed")
+
 import copy
 import unittest
 
@@ -16,7 +22,6 @@ from etfagents.agents.utils.agent_utils import (
     strip_feedback_snapshot,
     truncate_for_prompt,
 )
-
 
 class ContextMemoryOptimizationTests(unittest.TestCase):
     def setUp(self):
@@ -550,7 +555,6 @@ class ContextMemoryOptimizationTests(unittest.TestCase):
 
         self.assertIn("- 立场: 维持现仓，等待确认信号", snapshot)
         self.assertNotIn("- 立场: 增持", snapshot)
-
 
 if __name__ == "__main__":
     unittest.main()

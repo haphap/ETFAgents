@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("yfinance"):
+    raise unittest.SkipTest("yfinance not installed")
+
 from io import StringIO
 import tempfile
 import unittest
@@ -15,7 +21,6 @@ from etfagents.detail import (
     get_etf_detail,
     get_etf_history_reports,
 )
-
 
 class CsvParsingTests(unittest.TestCase):
     def test_parse_csv_last_row_with_preamble(self):
@@ -114,7 +119,6 @@ class CsvParsingTests(unittest.TestCase):
         self.assertIsNotNone(row)
         self.assertEqual(row["unit_nav"], "4.128")
         self.assertEqual(row["end_date"], "20260520")
-
 
 class GetEtfDetailTests(unittest.TestCase):
     PRICE_CSV = (
@@ -268,7 +272,6 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertEqual(result["fund_share"], 0.0)
         self.assertEqual(result["share_change_pct"], -100.0)
 
-
 class GetEtfHistoryReportsTests(unittest.TestCase):
     def test_no_results_dir(self):
         reports = get_etf_history_reports("510300.SH", "/nonexistent/path")
@@ -303,7 +306,6 @@ class GetEtfHistoryReportsTests(unittest.TestCase):
             self.assertEqual(len(reports), 3)
             self.assertEqual(reports[0]["date"], "2026-05-20")
             self.assertEqual(reports[2]["date"], "2026-05-18")
-
 
 class DetailCliTests(unittest.TestCase):
     def test_detail_command_registered(self):
@@ -363,7 +365,6 @@ class DetailCliTests(unittest.TestCase):
         self.assertIsInstance(captured_rating_cells[0], Text)
         self.assertEqual(captured_rating_cells[0].plain, "[bold]BUY[/bold]")
         self.assertIn("[bold]BUY[/bold]", output.getvalue())
-
 
 if __name__ == "__main__":
     unittest.main()

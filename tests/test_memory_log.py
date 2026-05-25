@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("pandas"):
+    raise unittest.SkipTest("pandas not installed")
+
 import tempfile
 import unittest
 import os
@@ -9,7 +15,6 @@ import pandas as pd
 from etfagents.agents.utils.memory import TradingMemoryLog
 from etfagents.graph.propagation import Propagator
 from etfagents.graph.trading_graph import TradingAgentsGraph
-
 
 class TradingMemoryLogTests(unittest.TestCase):
     def make_log(self, path: Path, **extra):
@@ -89,7 +94,6 @@ class TradingMemoryLogTests(unittest.TestCase):
                 log = TradingMemoryLog({"memory_log_path": "~/memory/trading_memory.md"})
             self.assertEqual(home / "memory" / "trading_memory.md", log.log_path)
 
-
 class DeferredReflectionTests(unittest.TestCase):
     def test_propagator_initial_state_includes_past_context(self):
         state = Propagator().create_initial_state("NVDA", "2026-01-10", past_context="resolved lesson")
@@ -131,7 +135,6 @@ class DeferredReflectionTests(unittest.TestCase):
         self.assertAlmostEqual(0.05, raw)
         self.assertAlmostEqual(0.04, alpha)
         self.assertEqual(1, days)
-
 
 if __name__ == "__main__":
     unittest.main()

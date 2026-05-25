@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("typer"):
+    raise unittest.SkipTest("typer not installed")
+
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -6,7 +12,6 @@ from cli.main import (
     _is_local_backend_url,
     _preflight_local_backend,
 )
-
 
 class CliRuntimeHandlingTests(unittest.TestCase):
     def test_is_local_backend_url_detects_loopback_hosts(self):
@@ -46,7 +51,6 @@ class CliRuntimeHandlingTests(unittest.TestCase):
             message,
             "Cannot reach vLLM backend at http://127.0.0.1:8020/v1. Start the server first, or choose a different provider.",
         )
-
 
 if __name__ == "__main__":
     unittest.main()

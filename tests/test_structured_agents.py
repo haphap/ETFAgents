@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_core"):
+    raise unittest.SkipTest("langchain_core not installed")
+
 import copy
 import unittest
 from unittest.mock import MagicMock
@@ -14,11 +20,9 @@ from etfagents.agents.trader.trader import create_trader
 from etfagents.dataflows.config import set_config
 from etfagents.default_config import DEFAULT_CONFIG
 
-
 class _FakeResponse:
     def __init__(self, content):
         self.content = content
-
 
 def _base_state():
     return {
@@ -73,7 +77,6 @@ def _base_state():
             "count": 1,
         },
     }
-
 
 class StructuredAgentTests(unittest.TestCase):
     def test_structured_agent_schemas_stay_prompt_sized(self):
@@ -369,7 +372,6 @@ class StructuredAgentTests(unittest.TestCase):
         self.assertIn("write only the visible report", fallback_prompt)
         self.assertIn("（一）评级", fallback_prompt)
         self.assertIn("（二）建议", fallback_prompt)
-
 
 if __name__ == "__main__":
     unittest.main()

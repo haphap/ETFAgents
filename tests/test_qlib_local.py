@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("pandas"):
+    raise unittest.SkipTest("pandas not installed")
+
 import unittest
 from datetime import datetime
 from unittest.mock import patch
@@ -6,7 +12,6 @@ import pandas as pd
 
 from etfagents.dataflows.exceptions import DataVendorUnavailable
 from etfagents.dataflows import qlib_local
-
 
 class QlibLocalTests(unittest.TestCase):
     def test_load_ohlcv_restores_original_prices_and_drops_incomplete_rows(self):
@@ -158,7 +163,6 @@ class QlibLocalTests(unittest.TestCase):
             result = qlib_local.get_stock("300750.SZ", "2026-04-01", "2026-04-12")
 
         self.assertIn("2026-04-10,400.0,405.0,398.0,402.0", result)
-
 
 if __name__ == "__main__":
     unittest.main()

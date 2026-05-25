@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langgraph"):
+    raise unittest.SkipTest("langgraph not installed")
+
 import tempfile
 import unittest
 from typing import TypedDict
@@ -14,20 +20,16 @@ from etfagents.graph.checkpointer import (
 
 _should_crash = False
 
-
 class _SimpleState(TypedDict):
     count: int
 
-
 def _node_a(state: _SimpleState) -> dict:
     return {"count": state["count"] + 1}
-
 
 def _node_b(state: _SimpleState) -> dict:
     if _should_crash:
         raise RuntimeError("simulated mid-analysis crash")
     return {"count": state["count"] + 10}
-
 
 def _build_graph() -> StateGraph:
     builder = StateGraph(_SimpleState)
@@ -37,7 +39,6 @@ def _build_graph() -> StateGraph:
     builder.add_edge("analyst", "trader")
     builder.add_edge("trader", END)
     return builder
-
 
 class TestCheckpointResume(unittest.TestCase):
     def setUp(self):
@@ -111,7 +112,6 @@ class TestCheckpointResume(unittest.TestCase):
 
         self.assertEqual(result["count"], 11)
         self.assertTrue(has_checkpoint(self.tmpdir, self.ticker, self.trade_date))
-
 
 if __name__ == "__main__":
     unittest.main()

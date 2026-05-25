@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_core"):
+    raise unittest.SkipTest("langchain_core not installed")
+
 import unittest
 from unittest.mock import MagicMock
 
@@ -32,14 +37,12 @@ from etfagents.agents.utils.validate_refine import (
     validate_and_refine,
 )
 
-
 _MARKET_SPEC = AnalystReportSpec(
     analyst_name="market_flow",
     required_top_sections=("一", "二", "三"),
     required_indicator_tokens=("MACD", "RSI"),
     custom_rules_markdown="### 内容覆盖\n- 必须覆盖资金流。\n",
 )
-
 
 _GOOD_MARKET_REPORT = (
     "整体偏多，资金流支撑回升。\n\n"
@@ -50,7 +53,6 @@ _GOOD_MARKET_REPORT = (
     "三、关键价位与条件情景推演\n"
     "失守 2.05 元则下调评级。\n"
 )
-
 
 class StaticValidateTests(unittest.TestCase):
     def test_clean_market_report_passes_static(self):
@@ -189,7 +191,6 @@ class StaticValidateTests(unittest.TestCase):
 
         self.assertFalse(any("四" in item and "结论段" in item for item in verdict.missing_elements))
 
-
 class ParseJudgeJsonTests(unittest.TestCase):
     def test_strict_passed_payload_parsed(self):
         text = '{"score": 9, "passed": true, "critical_issues": [], "missing_elements": []}'
@@ -215,7 +216,6 @@ class ParseJudgeJsonTests(unittest.TestCase):
     def test_non_string_input_returns_none(self):
         self.assertIsNone(_parse_judge_json(None))
         self.assertIsNone(_parse_judge_json(MagicMock()))
-
 
 class ValidationModeTests(unittest.TestCase):
     def test_disabled_mode_skips_llm_entirely(self):
@@ -346,7 +346,6 @@ class ValidationModeTests(unittest.TestCase):
         llm.with_structured_output.assert_not_called()
         self.assertEqual(1, llm.invoke.call_count)
 
-
 class MergeVerdictsTests(unittest.TestCase):
     def test_static_only_pass(self):
         merged = _merge_verdicts(
@@ -395,7 +394,6 @@ class MergeVerdictsTests(unittest.TestCase):
             score_threshold=7,
         )
         self.assertIs(merged, llm_verdict)
-
 
 class CleaningOrderingTests(unittest.TestCase):
     def test_pre_judge_clean_strips_artifacts_judge_would_flag(self):
@@ -643,7 +641,6 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertIn("配置含义融入正文推理", prompt)
         self.assertNotIn("所有中文技术术语首次出现时是否用通俗语言解释并说明交易含义", prompt)
         self.assertNotIn("是否在每个主要信号后回答了「这意味着什么」和「对交易应该怎么做」", prompt)
-
 
 if __name__ == "__main__":
     unittest.main()

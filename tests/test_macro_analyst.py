@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_core"):
+    raise unittest.SkipTest("langchain_core not installed")
+
 import unittest
 from unittest.mock import patch
 
@@ -8,9 +14,7 @@ from etfagents.agents.analysts.macro_analyst import (
     _looks_like_complete_macro_report,
 )
 
-
 _VALIDATION_PASSED_JSON = '{"score": 9, "pass": true, "critical_issues": [], "minor_issues": [], "missing_elements": [], "general_comment": "OK"}'
-
 
 class _CapturingLLM:
     def bind_tools(self, tools):
@@ -21,7 +25,6 @@ class _CapturingLLM:
         if "报告质量审核员" in str(prompt):
             return AIMessage(content=_VALIDATION_PASSED_JSON)
         return AIMessage(content="Macro report content")
-
 
 class MacroAnalystTests(unittest.TestCase):
     def test_macro_analyst_returns_macro_regime_report(self):
@@ -142,8 +145,6 @@ class MacroAnalystTests(unittest.TestCase):
                 "四、配置结论与跟踪表\n| 指标 | 配置含义 |\n| --- | --- |"
             )
         )
-
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_core"):
+    raise unittest.SkipTest("langchain_core not installed")
+
 import types
 import unittest
 from unittest.mock import patch
@@ -5,7 +11,6 @@ from unittest.mock import patch
 from langchain_core.messages import AIMessage, HumanMessage
 
 from etfagents.llm_clients.openai_client import DeepSeekChatOpenAI
-
 
 class DeepSeekCreateChatResultTests(unittest.TestCase):
     """Test _create_chat_result with both dict and pydantic responses."""
@@ -100,7 +105,6 @@ class DeepSeekCreateChatResultTests(unittest.TestCase):
         self.assertEqual(msg.content, "Plain")
         self.assertNotIn("reasoning_content", msg.additional_kwargs)
 
-
 class DeepSeekRequestPayloadTests(unittest.TestCase):
     """Test that _get_request_payload echoes reasoning_content back."""
 
@@ -176,7 +180,6 @@ class DeepSeekRequestPayloadTests(unittest.TestCase):
         self.assertEqual(assistant_dicts[0]["reasoning_content"], "Thought 1")
         self.assertEqual(assistant_dicts[1]["reasoning_content"], "Thought 2")
 
-
 class DeepSeekStructuredOutputGuardTests(unittest.TestCase):
     """Test structured output guard for reasoner model."""
 
@@ -197,7 +200,6 @@ class DeepSeekStructuredOutputGuardTests(unittest.TestCase):
             )
         except NotImplementedError:
             self.fail("with_structured_output should work for deepseek-chat")
-
 
 class DeepSeekFactoryRoutingTests(unittest.TestCase):
     """Test that create_llm_client routes deepseek to OpenAIClient."""
@@ -222,7 +224,6 @@ class DeepSeekFactoryRoutingTests(unittest.TestCase):
         from etfagents.llm_clients.factory import _OPENAI_COMPATIBLE_PROVIDERS
 
         self.assertIn("deepseek", _OPENAI_COMPATIBLE_PROVIDERS)
-
 
 if __name__ == "__main__":
     unittest.main()

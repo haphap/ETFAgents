@@ -16,9 +16,9 @@ AVAILABLE_THEMES = (
 )
 
 PANEL_WIDTH_PRESETS = {
-    "narrow": 20,
-    "normal": 25,
-    "wide": 30,
+    "narrow": 15,
+    "normal": 20,
+    "wide": 25,
 }
 
 DENSITY_OPTIONS = ("compact", "normal", "spacious")

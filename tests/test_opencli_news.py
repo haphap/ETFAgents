@@ -1,12 +1,16 @@
+import importlib.util
 import subprocess
 import unittest
 from unittest.mock import patch
+
+_has_pandas = importlib.util.find_spec("pandas") is not None
 
 from etfagents.dataflows.exceptions import DataVendorUnavailable
 from etfagents.dataflows.opencli_news import _resolve_company_aliases, get_global_news, get_news
 
 
 class OpenCliNewsTests(unittest.TestCase):
+    @unittest.skipUnless(_has_pandas, "pandas not installed (tushare dependency)")
     @patch("etfagents.dataflows.tushare._get_pro_client")
     @patch("etfagents.dataflows.tushare._classify_market", return_value="a_share")
     @patch("etfagents.dataflows.tushare._normalize_ts_code", return_value="002155.SZ")

@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_core"):
+    raise unittest.SkipTest("langchain_core not installed")
+
 import unittest
 
 from etfagents.agents.schemas import (
@@ -13,7 +19,6 @@ from etfagents.backtest.signals import (
     build_state_backtest_signal,
     build_trader_backtest_signal,
 )
-
 
 class BacktestSignalTests(unittest.TestCase):
     def test_trader_signal_uses_execution_advice_before_rating_map(self):
@@ -192,7 +197,6 @@ class BacktestSignalTests(unittest.TestCase):
         self.assertEqual(signal["target_weight_max_pct"], 50.0)
         self.assertEqual(signal["add_triggers"][0]["action"], "add")
         self.assertIn("若放量突破则继续加仓。", signal["add_conditions"])
-
 
 if __name__ == "__main__":
     unittest.main()

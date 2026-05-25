@@ -1,4 +1,5 @@
 import copy
+import importlib.util
 import json
 import os
 import tempfile
@@ -6,6 +7,8 @@ import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+_has_langchain_core = importlib.util.find_spec("langchain_core") is not None
 
 from etfagents.cache_manager import CacheManager
 from etfagents.dataflows.config import get_config, set_config
@@ -96,6 +99,7 @@ class CacheManagerTests(unittest.TestCase):
         self.assertFalse(f.parent.parent.exists())
         self.assertEqual(result["deleted_files"], 1)
 
+    @unittest.skipUnless(_has_langchain_core, "langchain_core not installed")
     def test_clear_checkpoints(self):
         db_path = self._create_file(
             Path(self.config["data_cache_dir"]) / "checkpoints" / "510300.SH.db", "sqlite data"
@@ -104,6 +108,7 @@ class CacheManagerTests(unittest.TestCase):
         self.assertFalse(db_path.exists())
         self.assertEqual(result["deleted_files"], 1)
 
+    @unittest.skipUnless(_has_langchain_core, "langchain_core not installed")
     def test_clear_all(self):
         self._create_file(Path(self.config["data_cache_dir"]) / "api_data.json", '{}')
         self._create_file(Path(self.config["results_dir"]) / "backtest_cache" / "h" / "t" / "d.json", '{}')

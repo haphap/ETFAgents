@@ -117,7 +117,7 @@ class TuiSettingsTests(unittest.TestCase):
         self.assertEqual(s.theme, "catppuccin-mocha")
         self.assertEqual(s.density, "normal")
         self.assertEqual(s.panel_width, "normal")
-        self.assertEqual(s.left_pane_pct, 25)
+        self.assertEqual(s.left_pane_pct, 20)
 
     def test_save_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -128,7 +128,7 @@ class TuiSettingsTests(unittest.TestCase):
             self.assertEqual(loaded.theme, "nord")
             self.assertEqual(loaded.density, "compact")
             self.assertEqual(loaded.panel_width, "wide")
-            self.assertEqual(loaded.left_pane_pct, 30)
+            self.assertEqual(loaded.left_pane_pct, 25)
 
     def test_corrupt_file_returns_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -236,11 +236,37 @@ class PaperTradingViewModelTests(unittest.TestCase):
         self.assertIn("Insufficient", result.message)
 
 
+def _stub_graph_modules(*, graph_cls=None, save_fn=None):
+    """Return a dict for ``patch.dict(sys.modules, ...)`` that stubs heavy
+    etfagents subpackages so lazy imports inside BacktestRunner succeed
+    without langgraph / langchain_core installed."""
+    import types
+    from unittest.mock import MagicMock
+
+    graph_mod = types.ModuleType("etfagents.graph.etf_graph")
+    graph_mod.EtfAgentsGraph = graph_cls or MagicMock()
+
+    graph_pkg = types.ModuleType("etfagents.graph")
+    graph_pkg.etf_graph = graph_mod
+
+    bt_mod = types.ModuleType("etfagents.backtest")
+    bt_mod.save_backtest_result = save_fn or MagicMock()
+
+    return {
+        "etfagents.graph": graph_pkg,
+        "etfagents.graph.etf_graph": graph_mod,
+        "etfagents.backtest": bt_mod,
+    }
+
+
 class BacktestRunnerTests(unittest.TestCase):
     def test_yields_started_then_failed_on_graph_error(self):
-        from unittest.mock import patch
+        from unittest.mock import MagicMock, patch
         runner = BacktestRunner()
-        with patch("etfagents.graph.etf_graph.EtfAgentsGraph", side_effect=RuntimeError("no graph")):
+        stubs = _stub_graph_modules(
+            graph_cls=MagicMock(side_effect=RuntimeError("no graph")),
+        )
+        with patch.dict(sys.modules, stubs):
             events = list(runner.run(["510300.SH"], "2026-01-01", "2026-03-31"))
         self.assertIsInstance(events[0], BacktestStarted)
         self.assertEqual(events[0].tickers, ["510300.SH"])
@@ -254,16 +280,20 @@ class BacktestRunnerTests(unittest.TestCase):
             fake_result = MagicMock()
             mock_graph = MagicMock()
             mock_graph.backtest_candidate_pool.return_value = fake_result
-            with patch("etfagents.graph.etf_graph.EtfAgentsGraph", return_value=mock_graph):
-                with patch("etfagents.backtest.save_backtest_result") as mock_save:
-                    import copy
-                    from etfagents.default_config import DEFAULT_CONFIG
-                    cfg = copy.deepcopy(DEFAULT_CONFIG)
-                    cfg["results_dir"] = tmp
-                    events = list(BacktestRunner().run(
-                        ["510300.SH"], "2026-01-01", "2026-03-31",
-                        config=cfg,
-                    ))
+            mock_save = MagicMock()
+            stubs = _stub_graph_modules(
+                graph_cls=MagicMock(return_value=mock_graph),
+                save_fn=mock_save,
+            )
+            with patch.dict(sys.modules, stubs):
+                import copy
+                from etfagents.default_config import DEFAULT_CONFIG
+                cfg = copy.deepcopy(DEFAULT_CONFIG)
+                cfg["results_dir"] = tmp
+                events = list(BacktestRunner().run(
+                    ["510300.SH"], "2026-01-01", "2026-03-31",
+                    config=cfg,
+                ))
             self.assertIsInstance(events[0], BacktestStarted)
             finished = [e for e in events if isinstance(e, BacktestFinished)]
             self.assertEqual(len(finished), 1)
@@ -277,17 +307,19 @@ class BacktestRunnerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             mock_graph = MagicMock()
             mock_graph.backtest_candidate_pool.return_value = MagicMock()
-            with patch("etfagents.graph.etf_graph.EtfAgentsGraph", return_value=mock_graph):
-                with patch("etfagents.backtest.save_backtest_result"):
-                    import copy
-                    from etfagents.default_config import DEFAULT_CONFIG
-                    cfg = copy.deepcopy(DEFAULT_CONFIG)
-                    cfg["results_dir"] = tmp
-                    events = list(BacktestRunner().run(
-                        ["510300.SH", "159915.SZ", "510050.SH", "510500.SH"],
-                        "2026-01-01", "2026-03-31",
-                        config=cfg,
-                    ))
+            stubs = _stub_graph_modules(
+                graph_cls=MagicMock(return_value=mock_graph),
+            )
+            with patch.dict(sys.modules, stubs):
+                import copy
+                from etfagents.default_config import DEFAULT_CONFIG
+                cfg = copy.deepcopy(DEFAULT_CONFIG)
+                cfg["results_dir"] = tmp
+                events = list(BacktestRunner().run(
+                    ["510300.SH", "159915.SZ", "510050.SH", "510500.SH"],
+                    "2026-01-01", "2026-03-31",
+                    config=cfg,
+                ))
             finished = [e for e in events if isinstance(e, BacktestFinished)][0]
             parts = finished.output_dir.relative_to(Path(tmp) / "backtest").parts
             # slug: first 3 tickers + "plus_1", dots replaced by _

@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("pandas"):
+    raise unittest.SkipTest("pandas not installed")
+
 import unittest
 from unittest.mock import patch
 
@@ -5,7 +11,6 @@ import pandas as pd
 
 import etfagents.dataflows.tushare as _tushare_mod
 from etfagents.dataflows.tushare import get_etf_holdings
-
 
 class TushareHoldingsNameTests(unittest.TestCase):
     def setUp(self):
@@ -68,7 +73,6 @@ class TushareHoldingsNameTests(unittest.TestCase):
 
         self.assertIn("贵州茅台", csv_text)
         self.assertEqual(1, mock_query.call_count)
-
 
 if __name__ == "__main__":
     unittest.main()

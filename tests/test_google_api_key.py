@@ -1,8 +1,13 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_google_genai"):
+    raise unittest.SkipTest("langchain_google_genai not installed")
+
 import unittest
 from unittest.mock import patch
 
 from etfagents.llm_clients.google_client import GoogleClient
-
 
 class TestGoogleApiKeyStandardization(unittest.TestCase):
     """Verify GoogleClient accepts unified api_key parameter."""
@@ -22,7 +27,6 @@ class TestGoogleApiKeyStandardization(unittest.TestCase):
                 client.get_llm()
                 call_kwargs = mock_chat.call_args[1]
                 self.assertEqual(call_kwargs.get("google_api_key"), expected_key)
-
 
 if __name__ == "__main__":
     unittest.main()

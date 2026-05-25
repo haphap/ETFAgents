@@ -1,3 +1,9 @@
+
+import importlib.util
+import unittest
+if not importlib.util.find_spec("langchain_core"):
+    raise unittest.SkipTest("langchain_core not installed")
+
 import copy
 import unittest
 from unittest.mock import patch, MagicMock
@@ -14,9 +20,7 @@ from etfagents.dataflows.exceptions import DataVendorUnavailable
 from etfagents.default_config import DEFAULT_CONFIG
 from etfagents.graph.trading_graph import TradingAgentsGraph
 
-
 _VALIDATION_PASSED_JSON = '{"score": 9, "pass": true, "critical_issues": [], "minor_issues": [], "missing_elements": [], "general_comment": "OK"}'
-
 
 class _CapturingLLM:
     """Mock LLM that records prompts and returns a fixed response."""
@@ -34,7 +38,6 @@ class _CapturingLLM:
         if "报告质量审核员" in str(prompt):
             return AIMessage(content=_VALIDATION_PASSED_JSON)
         return AIMessage(content=self.final_content)
-
 
 class BrokerResearchRoutingTests(unittest.TestCase):
     """Tests for broker research vendor routing registration."""
@@ -71,7 +74,6 @@ class BrokerResearchRoutingTests(unittest.TestCase):
         self.assertFalse(is_a_share_ticker("0700.HK"))
         self.assertFalse(is_a_share_ticker("AAPL"))
 
-
 class AnalystSelectionCompatibilityTests(unittest.TestCase):
     def test_resolve_selected_analysts_returns_all_analysts(self):
         selected, skipped = TradingAgentsGraph.resolve_selected_analysts(
@@ -81,7 +83,6 @@ class AnalystSelectionCompatibilityTests(unittest.TestCase):
 
         self.assertEqual(["social", "news"], selected)
         self.assertEqual([], skipped)
-
 
 class IndustryResearchNamingTests(unittest.TestCase):
     def test_localize_role_name_supports_industry_research_analyst(self):
@@ -102,7 +103,6 @@ class IndustryResearchNamingTests(unittest.TestCase):
         finally:
             set_config(original_config)
 
-
 class BrokerResearchToolTests(unittest.TestCase):
     """Tests for the get_broker_research LangChain tool."""
 
@@ -119,7 +119,6 @@ class BrokerResearchToolTests(unittest.TestCase):
         )
         self.assertIn("Broker Research Reports", result)
 
-
 class StockResearchToolTests(unittest.TestCase):
     """Tests for the get_stock_research LangChain tool."""
 
@@ -135,7 +134,6 @@ class StockResearchToolTests(unittest.TestCase):
             "get_stock_research", "601899.SH", "2026-03-01", "2026-04-01"
         )
         self.assertIn("Stock Research Reports", result)
-
 
 class ETFIndustryResearchAnalystTests(unittest.TestCase):
     def test_prompt_requires_title_lead_and_forbids_meta_section_leads(self):
@@ -411,7 +409,6 @@ class BrokerResearchTushareTests(unittest.TestCase):
                 _skip_market_check=True,
             )
 
-
 class StockReportsTushareTests(unittest.TestCase):
     """Tests for the tushare stock reports data function."""
 
@@ -469,7 +466,6 @@ class StockReportsTushareTests(unittest.TestCase):
         self.assertIn("业绩超预期", result)
         # Most recent first
         self.assertTrue(result.index("2026-04-01") < result.index("2026-03-28"))
-
 
 if __name__ == "__main__":
     unittest.main()
