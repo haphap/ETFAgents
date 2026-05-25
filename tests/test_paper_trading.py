@@ -1,10 +1,5 @@
 """Tests for paper trading engine."""
 
-import importlib.util
-import unittest
-if not importlib.util.find_spec("bcrypt"):
-    raise unittest.SkipTest("bcrypt not installed")
-
 import json
 import os
 import sqlite3

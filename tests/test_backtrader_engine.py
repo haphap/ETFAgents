@@ -1,9 +1,4 @@
 
-import importlib.util
-import unittest
-if not importlib.util.find_spec("pandas"):
-    raise unittest.SkipTest("pandas not installed")
-
 import unittest
 from tempfile import TemporaryDirectory
 

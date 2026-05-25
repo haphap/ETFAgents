@@ -1,9 +1,4 @@
 
-import importlib.util
-import unittest
-if not importlib.util.find_spec("langchain_core"):
-    raise unittest.SkipTest("langchain_core not installed")
-
 import unittest
 from unittest.mock import patch
 

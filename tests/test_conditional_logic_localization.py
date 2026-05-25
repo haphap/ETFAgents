@@ -1,9 +1,4 @@
 
-import importlib.util
-import unittest
-if not importlib.util.find_spec("langchain_openai"):
-    raise unittest.SkipTest("langchain_openai not installed")
-
 import unittest
 
 from etfagents.graph.conditional_logic import ConditionalLogic

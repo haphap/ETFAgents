@@ -1,9 +1,4 @@
 
-import importlib.util
-import unittest
-if not importlib.util.find_spec("langchain_google_genai"):
-    raise unittest.SkipTest("langchain_google_genai not installed")
-
 import unittest
 from unittest.mock import patch
 

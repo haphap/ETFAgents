@@ -1,10 +1,5 @@
 """Tests for tushare _get_pro_client caching behavior."""
 
-import importlib.util
-import unittest
-if not importlib.util.find_spec("pandas"):
-    raise unittest.SkipTest("pandas not installed")
-
 import sys
 import unittest
 from unittest.mock import MagicMock, patch

@@ -1,9 +1,4 @@
 
-import importlib.util
-import unittest
-if not importlib.util.find_spec("yfinance"):
-    raise unittest.SkipTest("yfinance not installed")
-
 from io import StringIO
 import tempfile
 import unittest

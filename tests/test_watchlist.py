@@ -1,9 +1,4 @@
 
-import importlib.util
-import unittest
-if not importlib.util.find_spec("typer"):
-    raise unittest.SkipTest("typer not installed")
-
 import tempfile
 import unittest
 from pathlib import Path

@@ -11,43 +11,38 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 
-def _ensure_stubs():
-    """Insert lightweight stubs for heavy modules that AnalysisRunner
+def _build_stubs():
+    """Build lightweight stubs for heavy modules that AnalysisRunner
     lazy-imports (cli.report_utils, cli.stats_handler) so tests run
     without langchain_core / langgraph installed."""
     stubs: dict[str, types.ModuleType] = {}
 
-    if "cli.report_utils" not in sys.modules:
-        mod = types.ModuleType("cli.report_utils")
-        # merge_stream_state: shallow-merge chunk into accumulated
-        mod.merge_stream_state = lambda acc, upd, **kw: acc.update(
-            {k: v for k, v in (upd if isinstance(upd, dict) else {}).items() if v}
-        )
-        stubs["cli.report_utils"] = mod
+    report_mod = types.ModuleType("cli.report_utils")
+    report_mod.merge_stream_state = lambda acc, upd, **kw: acc.update(
+        {k: v for k, v in (upd if isinstance(upd, dict) else {}).items() if v}
+    )
+    stubs["cli.report_utils"] = report_mod
 
-    if "cli.stats_handler" not in sys.modules:
-        mod = types.ModuleType("cli.stats_handler")
-        mod.StatsCallbackHandler = type(
-            "StatsCallbackHandler", (), {"get_stats": lambda self: {}}
-        )
-        stubs["cli.stats_handler"] = mod
+    stats_mod = types.ModuleType("cli.stats_handler")
+    stats_mod.StatsCallbackHandler = type(
+        "StatsCallbackHandler", (), {"get_stats": lambda self: {}}
+    )
+    stubs["cli.stats_handler"] = stats_mod
 
     return stubs
 
 
-_STUBS = _ensure_stubs()
-_cm = patch.dict(sys.modules, _STUBS) if _STUBS else None
-if _cm:
-    _cm.__enter__()
-
-from cli.tui.services import (
-    AnalysisRunner,
-    SectionDone,
-    TickerCancelled,
-    TickerDone,
-    TickerFailed,
-    TickerStarted,
-)
+# Import under stub context, then exit immediately so sys.modules is clean.
+_stubs = _build_stubs()
+with patch.dict(sys.modules, _stubs):
+    from cli.tui.services import (
+        AnalysisRunner,
+        SectionDone,
+        TickerCancelled,
+        TickerDone,
+        TickerFailed,
+        TickerStarted,
+    )
 
 
 class _FakeGraph:
@@ -76,6 +71,13 @@ class _FakeGraph:
 
 
 class AnalysisRunnerContractTests(unittest.TestCase):
+    def setUp(self):
+        self._stub_patcher = patch.dict(sys.modules, _build_stubs())
+        self._stub_patcher.start()
+
+    def tearDown(self):
+        self._stub_patcher.stop()
+
     def test_stream_emits_ticker_started_then_section_done_then_ticker_done(self):
         """Runner must yield TickerStarted → SectionDone × N → TickerDone."""
         runner = AnalysisRunner()

@@ -1,9 +1,4 @@
 
-import importlib.util
-import unittest
-if not importlib.util.find_spec("questionary"):
-    raise unittest.SkipTest("questionary not installed")
-
 import unittest
 
 from cli.utils import normalize_ticker_symbol
