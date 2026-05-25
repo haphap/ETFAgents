@@ -287,13 +287,12 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#ra_ticker_input"))
                 self.assertIsNotNone(screen.query_one("#btn_ra_start"))
                 self.assertIsNotNone(screen.query_one("#watchlist_cards"))
-                self.assertEqual(len(screen.query(".ticker-chip")), 5)
-                self.assertTrue(all(len(row.children) <= 2 for row in screen.query(".recent-etf-row")))
+                self.assertEqual(len(screen.query(".recent-card")), 5)
                 self.assertTrue(screen.query_one("#btn_ra_start", Button).disabled)
                 with self.assertRaises(Exception):
                     screen.query_one("#wl_total")
 
-    async def test_research_analysis_recent_etf_uses_latest_report_tickers(self):
+    async def test_research_analysis_recent_cards_use_latest_report_metadata(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             for index, ticker in enumerate(["510300.SH", "159915.SZ", "588000.SH"]):
@@ -304,13 +303,21 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
             async with app.run_test(size=(140, 40)) as pilot:
                 await pilot.click("#btn_research")
                 screen = app.screen
-                labels = [str(button.label) for button in screen.query(".ticker-chip")]
+                labels = [str(button.label) for button in screen.query(".recent-card")]
                 self.assertEqual(len(labels), 5)
-                self.assertIn("510300.SH", labels)
-                self.assertIn("159915.SZ", labels)
-                self.assertIn("588000.SH", labels)
-                rendered_tasks = "\n".join(str(widget.render()) for widget in screen.query(".recent-task-item"))
-                self.assertIn("510300.SH", rendered_tasks)
+                self.assertTrue(any("510300.SH" in label and "沪深300ETF" in label for label in labels))
+                self.assertTrue(any("159915.SZ" in label and "创业板ETF" in label for label in labels))
+                self.assertTrue(any("588000.SH" in label and "2026-05-22" in label for label in labels))
+
+    async def test_research_analysis_recent_card_click_adds_ticker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                await pilot.click("#recent-recent_510300_SH")
+                screen = app.screen
+                selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                self.assertEqual(selected_labels, ["510300.SH ×"])
 
     async def test_research_analysis_screen_focuses_ticker_input(self):
         with tempfile.TemporaryDirectory() as tmp:

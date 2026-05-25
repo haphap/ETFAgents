@@ -73,6 +73,13 @@ LLM_PROVIDER_ENDPOINTS = {
 # Sections that complete on first SectionDone (non-debate, single-shot)
 _INSTANT_DONE_SECTIONS = set(ANALYST_KEYS) | {"research", "trader", "portfolio_manager"}
 _RECENT_ETF_FALLBACKS = ("510300.SH", "159915.SZ", "513500.SH", "588000.SH", "518880.SH")
+_ETF_DISPLAY_NAMES = {
+    "510300.SH": "沪深300ETF",
+    "159915.SZ": "创业板ETF",
+    "513500.SH": "标普500ETF",
+    "588000.SH": "科创50ETF",
+    "518880.SH": "黄金ETF",
+}
 
 
 def _depth_option_label(depth_name: str) -> str:
@@ -437,8 +444,7 @@ class ResearchAnalysisScreen(Screen):
         self._selected_tickers: list[str] = []
 
     def compose(self) -> ComposeResult:
-        recent_tickers = self._recent_etf_tickers()
-        recent_tasks = self._recent_task_lines()
+        recent_cards = self._recent_etf_cards()
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane research-entry-pane"):
                 yield Static("创建研究任务", classes="pane-title")
@@ -451,23 +457,14 @@ class ResearchAnalysisScreen(Screen):
                 with Horizontal(classes="entry-actions"):
                     yield Button("开始分析", id="btn_ra_start", classes="entry-primary", disabled=True)
                     yield Button("⚙ 配置", id="btn_ra_config", classes="entry-config")
-                yield Static("近期 ETF", classes="entry-section-title")
-                with Vertical(classes="recent-etf-grid"):
-                    for index in range(0, len(recent_tickers), 2):
-                        with Horizontal(classes="recent-etf-row"):
-                            for ticker in recent_tickers[index:index + 2]:
-                                yield Button(
-                                    ticker,
-                                    id=f"recent-{IdRegistry('recent').register(ticker)}",
-                                    classes="ticker-chip",
-                                )
-                yield Static("最近任务", classes="entry-section-title")
-                with Vertical(classes="recent-task-list"):
-                    if recent_tasks:
-                        for line in recent_tasks:
-                            yield Static(line, classes="recent-task-item")
-                    else:
-                        yield Static("暂无历史任务", classes="recent-task-empty")
+                yield Static("近期研究", classes="entry-section-title")
+                with Vertical(classes="recent-card-list"):
+                    for card in recent_cards:
+                        yield Button(
+                            f"{card['ticker']}  {card['name']}\n{card['date']}  {card['rating']}",
+                            id=f"recent-{IdRegistry('recent').register(card['ticker'])}",
+                            classes="recent-card",
+                        )
             with Vertical(classes="right-pane research-board-pane"):
                 yield Static("自选股看板 / Watchlist Monitor", classes="pane-title")
                 with ScrollableContainer(id="watchlist_cards"):
@@ -483,7 +480,7 @@ class ResearchAnalysisScreen(Screen):
         if event.button.id in {"btn_ra_start", "btn_ra_config"}:
             self._start_config_flow()
         elif (event.button.id or "").startswith("recent-"):
-            self._add_tickers_to_selection([str(event.button.label)])
+            self._add_tickers_to_selection([str(event.button.label).split()[0]])
         elif (event.button.id or "").startswith("wl-"):
             self._add_tickers_to_selection([str(event.button.label)])
         elif (event.button.id or "").startswith("sel-"):
@@ -584,33 +581,36 @@ class ResearchAnalysisScreen(Screen):
             child.remove()
         cards.mount(Static(f"自选股看板加载失败：{error}", classes="watchlist-status error-text"))
 
-    def _recent_etf_tickers(self) -> list[str]:
-        tickers: list[str] = []
+    def _recent_etf_cards(self) -> list[dict[str, str]]:
+        cards: list[dict[str, str]] = []
+        seen: set[str] = set()
         try:
             for record in self.repository.list_reports():
                 ticker = record.ticker.strip().upper()
-                if ticker and ticker not in tickers:
-                    tickers.append(ticker)
-                if len(tickers) >= 5:
+                if ticker and ticker not in seen:
+                    cards.append({
+                        "ticker": ticker,
+                        "name": _ETF_DISPLAY_NAMES.get(ticker, "ETF"),
+                        "date": record.date,
+                        "rating": record.rating or "未评级",
+                    })
+                    seen.add(ticker)
+                if len(cards) >= 5:
                     break
         except Exception:
             pass
         for ticker in _RECENT_ETF_FALLBACKS:
-            if ticker not in tickers:
-                tickers.append(ticker)
-            if len(tickers) >= 5:
+            if ticker not in seen:
+                cards.append({
+                    "ticker": ticker,
+                    "name": _ETF_DISPLAY_NAMES.get(ticker, "ETF"),
+                    "date": "暂无分析",
+                    "rating": "未评级",
+                })
+                seen.add(ticker)
+            if len(cards) >= 5:
                 break
-        return tickers[:5]
-
-    def _recent_task_lines(self) -> list[str]:
-        lines: list[str] = []
-        try:
-            for record in self.repository.list_reports()[:4]:
-                rating = f" · {record.rating}" if record.rating else ""
-                lines.append(f"{record.date}  {record.ticker}{rating}")
-        except Exception:
-            return []
-        return lines
+        return cards[:5]
 
     def _watchlist_card(self, row: WatchlistBoardRow) -> Vertical:
         price_class = _a_share_value_class(row.pct_chg)

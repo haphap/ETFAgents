@@ -352,13 +352,13 @@ class ETFAgentsTuiApp(App):
     }
 
     .entry-actions {
-        height: 3;
+        height: 4;
         margin: 1 0 1 0;
     }
 
     .entry-primary {
         width: 1fr;
-        height: 3;
+        height: 4;
         margin: 0 1 0 0;
         border: solid $accent;
         background: $accent;
@@ -384,7 +384,7 @@ class ETFAgentsTuiApp(App):
 
     .entry-config {
         width: 1fr;
-        height: 3;
+        height: 4;
         margin: 0;
         border: solid $accent;
         background: transparent;
@@ -407,50 +407,27 @@ class ETFAgentsTuiApp(App):
         margin: 1 0 1 0;
     }
 
-    .recent-etf-grid {
+    .recent-card-list {
         height: auto;
     }
 
-    .recent-etf-row {
-        height: 3;
+    .recent-card {
+        width: 100%;
+        height: 4;
         margin: 0 0 1 0;
-    }
-
-    .ticker-chip {
-        width: 1fr;
-        height: 3;
-        min-width: 10;
-        margin: 0 1 0 0;
-        padding: 0;
+        padding: 0 1;
         border: solid $panel;
         background: transparent;
         color: $text-muted;
-        content-align: center middle;
+        content-align: left middle;
     }
 
-    .ticker-chip:hover,
-    .ticker-chip:focus {
+    .recent-card:hover,
+    .recent-card:focus {
         border: solid $accent;
         color: $accent;
         background: transparent;
         text-style: bold;
-    }
-
-    .recent-task-list {
-        height: auto;
-        margin: 0 0 1 0;
-        border: solid $surface;
-        padding: 0 1;
-    }
-
-    .recent-task-item {
-        height: 1;
-        color: $text-muted;
-    }
-
-    .recent-task-empty {
-        height: 1;
-        color: $text-muted;
     }
 
     #watchlist_cards {
