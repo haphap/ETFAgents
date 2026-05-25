@@ -95,7 +95,7 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
         "latest_date": None,
         "open": None, "high": None, "low": None,
         "close": None, "pct_chg": None,
-        "volume": None, "amount": None,
+        "volume": None, "volume_change_pct": None, "amount": None,
         "unit_nav": None,
         "nav_date": None,
         "premium_discount_bps": None,
@@ -115,7 +115,8 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
         start_date = start_dt.strftime("%Y-%m-%d")
         end_date = curr_date
         csv_text = route_to_vendor("get_etf_price_data", ticker, start_date, end_date)
-        row = _parse_csv_last_row(csv_text)
+        rows = _parse_csv_rows(csv_text)
+        row = rows[-1] if rows else None
         if row:
             result["latest_date"] = row.get("trade_date")
             result["open"] = _safe_float(row.get("open"))
@@ -125,6 +126,13 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
             result["pct_chg"] = _safe_float(row.get("pct_chg"))
             result["volume"] = _safe_float(row.get("vol"))
             result["amount"] = _safe_float(row.get("amount"))
+            if len(rows) >= 2:
+                prev_volume = _safe_float(rows[-2].get("vol"))
+                if result["volume"] is not None and prev_volume is not None and prev_volume != 0:
+                    result["volume_change_pct"] = round(
+                        (result["volume"] - prev_volume) / prev_volume * 100,
+                        2,
+                    )
     except Exception as exc:
         logger.warning("get_etf_price_data failed for %s: %s", ticker, exc)
 

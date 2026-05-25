@@ -134,7 +134,7 @@ Use this exact output order with Markdown headings:
 - Open with a direct verdict sentence that states your chosen side and the current research view for this ETF before expanding into evidence.
 - If a report shows an anomaly (spread break, real-rate divergence, inventory surprise, abnormal flows, earnings miss / beat concentration), explain why it is abnormal relative to the recent baseline and why it changes or fails to change the allocation case.
 {_research_detail_instruction("conclusion")}
-- When writing in Chinese, use neutral investment wording such as "综合结论" and refer to the entire debate as "整场辩论"; avoid judicial wording like "判决" and avoid phrasing that sounds limited to "本轮".
+- When writing in Chinese, use neutral investment wording, refer to the entire debate as "整场辩论", avoid judicial wording like "判决", and avoid phrasing that sounds limited to "本轮".
 
 ## {localize_label("Action Logic", "行为逻辑")}
 - Write your own ETF allocation logic from evidence to action, not just a repetition of either side.

@@ -118,9 +118,10 @@ class CsvParsingTests(unittest.TestCase):
 class GetEtfDetailTests(unittest.TestCase):
     PRICE_CSV = (
         "# ETF price data\n"
-        "# Total records: 1\n"
+        "# Total records: 2\n"
         "\n"
         "trade_date,open,high,low,close,vol,amount,pct_chg\n"
+        "20260519,4.08,4.12,4.06,4.07,10000,41000,-0.25\n"
         "20260520,4.10,4.15,4.09,4.12,12345,50700,1.25\n"
     )
     NAV_CSV = (
@@ -173,6 +174,7 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertEqual(result["market"], "a_share")
         self.assertEqual(result["close"], 4.12)
         self.assertEqual(result["pct_chg"], 1.25)
+        self.assertEqual(result["volume_change_pct"], 23.45)
         self.assertEqual(result["unit_nav"], 4.128)
         self.assertIsNotNone(result["premium_discount_bps"])
         self.assertEqual(len(result["holdings"]), 2)
