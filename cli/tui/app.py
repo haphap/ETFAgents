@@ -357,7 +357,7 @@ class ETFAgentsTuiApp(App):
     }
 
     .entry-primary {
-        width: 2fr;
+        width: 1fr;
         height: 3;
         margin: 0 1 0 0;
         background: $accent;
@@ -382,7 +382,6 @@ class ETFAgentsTuiApp(App):
     .entry-config {
         width: 1fr;
         height: 3;
-        min-width: 10;
         border: solid $panel;
         background: transparent;
         color: $text-muted;

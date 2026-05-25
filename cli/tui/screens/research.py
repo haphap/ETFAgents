@@ -79,7 +79,7 @@ def _depth_option_label(depth_name: str) -> str:
     req = RESEARCH_DEPTH_REQUIREMENTS.get(depth_name, {})
     debate_rounds = req.get("debate_rounds", "?")
     risk_rounds = req.get("risk_rounds", "?")
-    return f"{depth_name} (debate×{debate_rounds}, risk×{risk_rounds})"
+    return f"{depth_name} (多空×{debate_rounds}, 风控×{risk_rounds})"
 
 
 def _model_select_options(provider: str, mode: str) -> list[tuple[str, str]]:
@@ -87,8 +87,12 @@ def _model_select_options(provider: str, mode: str) -> list[tuple[str, str]]:
 
     options = get_model_options(provider, mode)
     if options:
-        return options
+        return [(_short_model_label(label), value) for label, value in options]
     return [("Custom / provider default", "custom")]
+
+
+def _short_model_label(label: str) -> str:
+    return label.split(" - ", 1)[0].strip()
 
 
 def _safe_call_from_thread(screen: Any, callback: Any, *args: Any) -> None:
@@ -252,68 +256,93 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
 
     DEFAULT_CSS = """
     AnalysisConfigModal { align: center middle; }
-    #acm_container { width: 80; height: auto; max-height: 40; border: solid $accent; background: $surface; padding: 1 2; }
-    #acm_container .acm-row { height: auto; margin: 0; }
-    #acm_container .acm-col { width: 1fr; height: auto; margin-right: 1; }
+    #acm_container { width: 92; height: auto; max-height: 42; border: solid $accent; background: $surface; padding: 1 2; }
+    #acm_container .acm-row { height: auto; margin: 0 0 1 0; }
+    #acm_container .acm-col { width: 1fr; height: auto; margin-right: 1; border: solid $panel; padding: 0 1; }
     #acm_container .acm-col:last-of-type { margin-right: 0; }
     #acm_container Static { height: 1; margin: 0; }
     #acm_container Checkbox { height: 1; margin: 0; }
     #acm_container Select { margin: 0; }
     #acm_container Input { margin: 0; }
-    #acm_container .analyst-grid { layout: grid; grid-size: 3 2; grid-gutter: 0 1; height: auto; }
-    #acm_container .text-action { margin: 0 1 0 0; }
+    #acm_container .acm-label { color: $text-muted; text-style: bold; }
+    #acm_container .analyst-panel { height: auto; border: solid $panel; padding: 0 1; margin: 0 0 1 0; }
+    #acm_container .analyst-groups { height: auto; }
+    #acm_container .analyst-group { width: 1fr; height: auto; margin-right: 1; padding: 0 1; background: $surface; }
+    #acm_container .analyst-group:last-of-type { margin-right: 0; }
+    #acm_container .analyst-group-title { color: $accent; }
+    #acm_container .acm-summary { color: $text-muted; margin: 0 0 1 0; }
+    #acm_container .acm-actions { height: 3; margin: 0; }
+    #acm_container .acm-action-spacer { width: 1fr; }
+    #acm_container .acm-confirm { width: 14; height: 3; margin: 0 0 0 1; background: $accent; color: $surface; content-align: center middle; text-style: bold; }
+    #acm_container .acm-cancel { width: 10; height: 3; margin: 0 0 0 1; border: solid $panel; color: $text-muted; content-align: center middle; }
     """
 
     def compose(self) -> ComposeResult:
         with Vertical(id="acm_container"):
             yield Static("分析配置", classes="pane-title")
-            yield Static("分析师:")
-            with Vertical(classes="analyst-grid"):
-                for defn in SECTION_DEFINITIONS:
-                    if defn.team == "分析师":
-                        yield Checkbox(
-                            defn.title,
-                            value=True,
-                            id=f"acm_cb_{defn.section_id}",
-                            compact=True,
-                        )
+            with Vertical(classes="analyst-panel"):
+                yield Static("分析维度", classes="acm-label")
+                with Horizontal(classes="analyst-groups"):
+                    with Vertical(classes="analyst-group"):
+                        yield Static("基本面 / 宏观", classes="analyst-group-title")
+                        for defn in self._analyst_defs(("macro_regime", "meso_commodity", "holdings_industry")):
+                            yield Checkbox(
+                                defn.title,
+                                value=True,
+                                id=f"acm_cb_{defn.section_id}",
+                                compact=True,
+                            )
+                    with Vertical(classes="analyst-group"):
+                        yield Static("市场 / 微观", classes="analyst-group-title")
+                        for defn in self._analyst_defs(("market_flow", "catalyst_sentiment", "top_holdings")):
+                            yield Checkbox(
+                                defn.title,
+                                value=True,
+                                id=f"acm_cb_{defn.section_id}",
+                                compact=True,
+                            )
             with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
-                    yield Static("日期:")
+                    yield Static("日期", classes="acm-label")
                     yield Input(
                         value=datetime.now().date().isoformat(),
                         placeholder="YYYY-MM-DD",
                         id="acm_analysis_date",
                     )
                 with Vertical(classes="acm-col"):
-                    yield Static("深度:")
+                    yield Static("深度", classes="acm-label")
                     depth_options = [
                         (_depth_option_label(name), name) for name in RESEARCH_DEPTH_REQUIREMENTS
                     ]
                     yield Select(depth_options, value="标准", id="acm_depth")
                 with Vertical(classes="acm-col"):
-                    yield Static("语言:")
+                    yield Static("语言", classes="acm-label")
                     lang_options = [("中文", "Chinese"), ("English", "English")]
                     yield Select(lang_options, value="Chinese", id="acm_language")
             with Horizontal(classes="acm-row"):
                 with Vertical(classes="acm-col"):
-                    yield Static("提供商:")
+                    yield Static("提供商", classes="acm-label")
                     provider_options = [
                         (display, provider) for display, provider, _ in LLM_PROVIDER_OPTIONS
                     ]
                     yield Select(provider_options, value="openai", id="acm_provider")
                 with Vertical(classes="acm-col"):
-                    yield Static("快速模型:")
+                    yield Static("快速模型", classes="acm-label")
                     quick_options = _model_select_options("openai", "quick")
                     yield Select(quick_options, value=quick_options[0][1], id="acm_quick_model")
                 with Vertical(classes="acm-col"):
-                    yield Static("深度模型:")
+                    yield Static("深度模型", classes="acm-label")
                     deep_options = _model_select_options("openai", "deep")
                     yield Select(deep_options, value=deep_options[0][1], id="acm_deep_model")
+            yield Static("", id="acm_summary", classes="acm-summary")
             yield Static("", id="acm_error", classes="error-text")
-            with Horizontal(classes="acm-row"):
-                yield Button("› Confirm", id="btn_acm_ok", classes="text-action")
-                yield Button("Cancel", id="btn_acm_cancel", classes="text-action muted")
+            with Horizontal(classes="acm-actions"):
+                yield Static("", classes="acm-action-spacer")
+                yield Button("取消", id="btn_acm_cancel", classes="acm-cancel")
+                yield Button("确认分析", id="btn_acm_ok", classes="acm-confirm")
+
+    def on_mount(self) -> None:
+        self._refresh_summary()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_acm_ok":
@@ -348,17 +377,41 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
             self.dismiss(None)
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        if event.select.id != "acm_provider":
-            return
-        provider = str(event.value) if event.value != Select.BLANK else "openai"
-        quick_options = _model_select_options(provider, "quick")
-        deep_options = _model_select_options(provider, "deep")
-        quick_select = self.query_one("#acm_quick_model", Select)
-        deep_select = self.query_one("#acm_deep_model", Select)
-        quick_select.set_options(quick_options)
-        quick_select.value = quick_options[0][1]
-        deep_select.set_options(deep_options)
-        deep_select.value = deep_options[0][1]
+        if event.select.id == "acm_provider":
+            provider = str(event.value) if event.value != Select.BLANK else "openai"
+            quick_options = _model_select_options(provider, "quick")
+            deep_options = _model_select_options(provider, "deep")
+            quick_select = self.query_one("#acm_quick_model", Select)
+            deep_select = self.query_one("#acm_deep_model", Select)
+            quick_select.set_options(quick_options)
+            quick_select.value = quick_options[0][1]
+            deep_select.set_options(deep_options)
+            deep_select.value = deep_options[0][1]
+        self._refresh_summary()
+
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        self._refresh_summary()
+
+    def _analyst_defs(self, section_ids: tuple[str, ...]) -> list[SectionDef]:
+        by_id = {defn.section_id: defn for defn in SECTION_DEFINITIONS if defn.team == "分析师"}
+        return [by_id[section_id] for section_id in section_ids if section_id in by_id]
+
+    def _refresh_summary(self) -> None:
+        selected_titles = [
+            SECTION_BY_ID[key].title for key in ANALYST_KEYS
+            if self._checkbox_checked(f"acm_cb_{key}") and key in SECTION_BY_ID
+        ]
+        depth = self.query_one("#acm_depth", Select).value
+        quick_model = self.query_one("#acm_quick_model", Select).value
+        deep_model = self.query_one("#acm_deep_model", Select).value
+        analyst_text = "、".join(selected_titles[:2])
+        if len(selected_titles) > 2:
+            analyst_text += f"等 {len(selected_titles)} 个维度"
+        elif not analyst_text:
+            analyst_text = "默认全选"
+        self.query_one("#acm_summary", Static).update(
+            f"已选择：{analyst_text}；深度：{depth or '标准'}；模型：{quick_model or '默认'} / {deep_model or '默认'}"
+        )
 
     def _checkbox_checked(self, widget_id: str) -> bool:
         try:

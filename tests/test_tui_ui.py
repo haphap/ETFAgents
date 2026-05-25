@@ -1234,9 +1234,12 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(modal.query_one("#acm_deep_model"))
                 self.assertIsNotNone(modal.query_one("#acm_language"))
                 self.assertIsNotNone(modal.query_one("#acm_analysis_date"))
+                self.assertIsNotNone(modal.query_one("#acm_summary"))
                 self.assertIsNotNone(modal.query_one("#acm_error"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_ok"))
                 self.assertIsNotNone(modal.query_one("#btn_acm_cancel"))
+                self.assertEqual(str(modal.query_one("#btn_acm_ok", Button).label), "确认分析")
+                self.assertEqual(str(modal.query_one("#btn_acm_cancel", Button).label), "取消")
 
     async def test_analysis_config_rejects_invalid_date(self):
         """Invalid analysis dates should keep the config modal open."""
@@ -1293,6 +1296,27 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screenshot = app.export_screenshot()
                 self.assertIn("市场与资金流", screenshot)
                 self.assertIn("宏观框架", screenshot)
+                group_titles = [str(widget.render()) for widget in modal.query(".analyst-group-title")]
+                self.assertIn("基本面 / 宏观", group_titles)
+                self.assertIn("市场 / 微观", group_titles)
+
+    async def test_analysis_config_modal_uses_short_model_labels_and_summary(self):
+        """Collapsed model selectors should use short labels and show a config summary."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.click("#btn_ra_start")
+                await pilot.pause()
+                modal = app.screen
+                quick_select = modal.query_one("#acm_quick_model")
+                quick_labels = {str(option[0]) for option in quick_select._options}
+                self.assertTrue(all(" - " not in label for label in quick_labels))
+                summary = str(modal.query_one("#acm_summary", Static).render())
+                self.assertIn("已选择：", summary)
+                self.assertIn("深度：标准", summary)
 
     async def test_analysis_config_modal_updates_models_for_provider(self):
         """Changing provider should refresh quick/deep model choices."""
@@ -1326,9 +1350,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 modal = app.screen
                 depth_select = modal.query_one("#acm_depth")
                 labels = {str(option[0]) for option in depth_select._options}
-                self.assertIn("标准 (debate×1, risk×1)", labels)
-                self.assertIn("快速 (debate×0, risk×0)", labels)
-                self.assertIn("全面 (debate×3, risk×3)", labels)
+                self.assertIn("标准 (多空×1, 风控×1)", labels)
+                self.assertIn("快速 (多空×0, 风控×0)", labels)
+                self.assertIn("全面 (多空×3, 风控×3)", labels)
 
     async def test_analysis_config_modal_lists_all_supported_llm_providers(self):
         """TUI provider choices should match the supported provider set."""
