@@ -1,3 +1,4 @@
+
 import copy
 from datetime import UTC, datetime, timedelta
 import tempfile
@@ -19,7 +20,6 @@ from etfagents.agents.utils.analysis_memory import (
 from etfagents.dataflows.config import backtest_context, clear_backtest_context, set_config
 from etfagents.default_config import DEFAULT_CONFIG
 from etfagents.graph.trading_graph import TradingAgentsGraph
-
 
 def _base_state():
     return {
@@ -100,7 +100,6 @@ def _base_state():
             "count": 1,
         },
     }
-
 
 class AnalysisMemoryFlowTests(unittest.TestCase):
     def setUp(self):
@@ -384,7 +383,6 @@ class AnalysisMemoryFlowTests(unittest.TestCase):
             self.assertIn("记忆不能替代本轮数据获取", system_message)
             self.assertIn("必须发出结构化工具调用", system_message)
             self.assertIn("不得在可见答案中写", system_message)
-
 
 if __name__ == "__main__":
     unittest.main()

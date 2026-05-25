@@ -1,9 +1,9 @@
+
 import time
 import unittest
 from unittest.mock import MagicMock, patch
 
 from etfagents.graph.etf_graph import EtfAgentsGraph
-
 
 def _make_graph():
     graph = object.__new__(EtfAgentsGraph)
@@ -11,7 +11,6 @@ def _make_graph():
     graph.selected_analysts = EtfAgentsGraph.DEFAULT_SELECTED_ANALYSTS
     graph._RATING_SCORE = EtfAgentsGraph._RATING_SCORE
     return graph
-
 
 class AnalyzeCandidatePoolCallbackTests(unittest.TestCase):
     @patch("etfagents.graph.etf_graph.BacktestSignalStore")
@@ -186,7 +185,6 @@ class AnalyzeCandidatePoolCallbackTests(unittest.TestCase):
         delta_2 = completed_times[1] - completed_times[0]
         self.assertAlmostEqual(delta_1, 30.0)
         self.assertAlmostEqual(delta_2, 150.0)
-
 
 class BatchCliRegressionTests(unittest.TestCase):
     def test_climain_imports_any_without_nameerror(self):
@@ -381,7 +379,6 @@ class BatchCliRegressionTests(unittest.TestCase):
         self.assertIn("[1/2] [green]510300.SH[/green] ─ [yellow]BUY[/yellow] · Score 4 · 30s", printed_lines)
         self.assertIn("[2/2] [green]159915.SZ[/green] ─ [yellow]BUY[/yellow] · Score 4 · 2m30s", printed_lines)
         self.assertFalse(any("50.0%" in line for line in progress_lines))
-
 
 if __name__ == "__main__":
     unittest.main()

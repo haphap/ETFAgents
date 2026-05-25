@@ -1,3 +1,4 @@
+
 import copy
 import unittest
 from unittest.mock import MagicMock
@@ -32,11 +33,9 @@ from etfagents.agents.utils.agent_utils import (
 from etfagents.dataflows.config import get_config, set_config
 from etfagents.default_config import DEFAULT_CONFIG
 
-
 class _FakeResponse:
     def __init__(self, content="ok"):
         self.content = content
-
 
 class _CapturingLLM:
     def __init__(self):
@@ -100,16 +99,13 @@ class _CapturingLLM:
 
         return _StructuredInvoker()
 
-
 class _EmptyMemory:
     def get_memories(self, *_args, **_kwargs):
         return []
 
-
 class _MemoryWithLessons:
     def get_memories(self, *_args, **_kwargs):
         return [{"recommendation": "Keep sizing small until demand confirms."}]
-
 
 class OutputLanguagePropagationTests(unittest.TestCase):
     def setUp(self):
@@ -1471,7 +1467,6 @@ class OutputLanguagePropagationTests(unittest.TestCase):
     def test_collaboration_stop_instruction_prefers_chinese_display(self):
         instruction = get_localized_final_proposal_instruction()
         self.assertIn("研究结论: **买入/增持/持有/减持/卖出**", instruction)
-
 
 if __name__ == "__main__":
     unittest.main()

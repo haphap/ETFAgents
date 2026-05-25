@@ -1,3 +1,4 @@
+
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,7 +8,6 @@ from typer.testing import CliRunner
 
 from etfagents.watchlist import WatchlistManager
 from cli.commands.watchlist import watchlist_app
-
 
 class WatchlistManagerTests(unittest.TestCase):
     def setUp(self):
@@ -211,7 +211,6 @@ class WatchlistManagerTests(unittest.TestCase):
         entries = self.wl.list_tickers(tags=["大盘", "成长"])
         self.assertEqual(len(entries), 2)
 
-
 class WatchlistCliTests(unittest.TestCase):
     def setUp(self):
         self.tempdir = tempfile.TemporaryDirectory()
@@ -245,7 +244,6 @@ class WatchlistCliTests(unittest.TestCase):
         self.assertEqual(1, result.exit_code, result.output)
         self.assertIn("Cannot rename the reserved", result.output)
         self.assertIn("'default'", result.output)
-
 
 if __name__ == "__main__":
     unittest.main()

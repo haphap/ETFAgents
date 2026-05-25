@@ -1,3 +1,4 @@
+
 import unittest
 from unittest.mock import patch
 
@@ -6,7 +7,6 @@ from cli.utils import (
     select_research_depth_name,
     select_shallow_thinking_agent,
 )
-
 
 class CliProviderSelectionTests(unittest.TestCase):
     @patch("cli.utils.questionary.select")
@@ -59,7 +59,6 @@ class CliProviderSelectionTests(unittest.TestCase):
         model = select_shallow_thinking_agent("minimax")
 
         self.assertEqual(model, "MiniMax-Text-01")
-
 
 if __name__ == "__main__":
     unittest.main()

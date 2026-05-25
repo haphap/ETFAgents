@@ -1,3 +1,4 @@
+
 import os
 import unittest
 from unittest.mock import MagicMock, patch
@@ -13,12 +14,10 @@ from etfagents.agents.utils.etf_data_tools import (
     _load_fred_series,
 )
 
-
 def _series(points):
     index = pd.to_datetime([date for date, _ in points])
     values = [value for _, value in points]
     return pd.Series(values, index=index, dtype=float)
-
 
 class MacroDataToolsTests(unittest.TestCase):
     def setUp(self):
@@ -305,7 +304,6 @@ class MacroDataToolsTests(unittest.TestCase):
         self.assertEqual(mock_query_pro.call_count, 2)
         self.assertEqual(mock_query_pro.call_args_list[-1].kwargs["symbol"], "AU")
 
-
     @patch("etfagents.agents.utils.etf_data_tools._load_tushare_warehouse_series")
     @patch("etfagents.agents.utils.etf_data_tools._load_tushare_futures_main_frame")
     def test_commodity_snapshot_uses_tushare_contracts_and_anomaly_language(
@@ -399,7 +397,6 @@ class MacroDataToolsTests(unittest.TestCase):
         self.assertIn("## Key anomalies", snapshot)
         self.assertIn("fresh long participation", snapshot)
         self.assertIn("warehouse receipts", snapshot)
-
 
 if __name__ == "__main__":
     unittest.main()

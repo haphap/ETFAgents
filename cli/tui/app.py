@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from textual.app import App
-from textual.theme import Theme
 
 from cli.tui.services import (
     BacktestViewer,
@@ -60,6 +59,8 @@ class ETFAgentsTuiApp(App):
     Footer {
         height: 1;
         text-style: bold;
+        background: transparent;
+        color: $text-muted;
     }
 
     .screen-body {
@@ -212,7 +213,7 @@ class ETFAgentsTuiApp(App):
 
     ListView > ListItem.--highlight {
         background: $accent;
-        color: $background;
+        color: $surface;
         text-style: bold;
     }
 
@@ -233,8 +234,8 @@ class ETFAgentsTuiApp(App):
     /* ── Panel layout ─────────────────────────────────────── */
     .left-pane {
         height: 100%;
-        width: 25%;
-        min-width: 28;
+        width: 20%;
+        min-width: 22;
         border: solid $panel;
         padding: 1 1;
         background: transparent;
@@ -242,14 +243,15 @@ class ETFAgentsTuiApp(App):
 
     .right-pane {
         height: 100%;
-        width: 75%;
+        width: 80%;
         padding: 0 1;
         border: solid $panel;
         background: transparent;
     }
 
     .right-top {
-        height: 25%;
+        height: auto;
+        max-height: 40%;
         border: none;
         padding: 0 1;
         margin-bottom: 1;
@@ -264,12 +266,12 @@ class ETFAgentsTuiApp(App):
     }
 
     /* Panel width presets */
-    .panel-narrow .left-pane  { width: 20%; }
-    .panel-narrow .right-pane { width: 80%; }
-    .panel-normal .left-pane  { width: 25%; }
-    .panel-normal .right-pane { width: 75%; }
-    .panel-wide .left-pane    { width: 30%; }
-    .panel-wide .right-pane   { width: 70%; }
+    .panel-narrow .left-pane  { width: 15%; }
+    .panel-narrow .right-pane { width: 85%; }
+    .panel-normal .left-pane  { width: 20%; }
+    .panel-normal .right-pane { width: 80%; }
+    .panel-wide .left-pane    { width: 25%; }
+    .panel-wide .right-pane   { width: 75%; }
 
     /* Density options */
     .density-compact .left-pane,  .density-compact .right-pane  { padding: 0 0; }
@@ -330,7 +332,7 @@ class ETFAgentsTuiApp(App):
 
     .stats-seg-accent {
         background: $accent;
-        color: $background;
+        color: $surface;
         text-style: bold;
         content-align: left middle;
     }
@@ -343,7 +345,7 @@ class ETFAgentsTuiApp(App):
 
     .stats-seg-success {
         background: $success;
-        color: $background;
+        color: $surface;
         content-align: center middle;
     }
 
@@ -354,7 +356,7 @@ class ETFAgentsTuiApp(App):
     }
 
     .board-column {
-        height: 100%;
+        height: auto;
         width: 1fr;
         padding: 0 1;
         border: solid $panel;
@@ -422,7 +424,7 @@ class ETFAgentsTuiApp(App):
 
     .debate-progress {
         color: $text-muted;
-        height: 1;
+        height: auto;
     }
 
     /* ── Semantic text classes ─────────────────────────────── */
@@ -465,13 +467,7 @@ class ETFAgentsTuiApp(App):
         content-align: center middle;
     }
 
-    /* ── Config modal ─────────────────────────────────────── */
-    .analyst-grid {
-        layout: grid;
-        grid-size: 3 2;
-        grid-gutter: 0 1;
-        height: auto;
-    }
+    /* ── Config modal (layout in AnalysisConfigModal.DEFAULT_CSS) ── */
     """
 
     BINDINGS = [
@@ -505,28 +501,7 @@ class ETFAgentsTuiApp(App):
             self._backtest_viewer = BacktestViewer()
         return self._backtest_viewer
 
-    def _register_transparent_theme(self, theme_name: str) -> None:
-        base = self.get_theme(theme_name)
-        transparent = Theme(
-            name=theme_name,
-            primary=base.primary,
-            secondary=base.secondary,
-            warning=base.warning,
-            error=base.error,
-            success=base.success,
-            accent=base.accent,
-            foreground=base.foreground,
-            background="transparent",
-            surface=base.surface,
-            panel=base.panel,
-            boost=base.boost,
-            dark=base.dark,
-            variables=base.variables,
-        )
-        self.register_theme(transparent)
-
     def on_mount(self) -> None:
-        self._register_transparent_theme(self._settings.theme)
         self.theme = self._settings.theme
         self._tui_settings = self._settings
         self.install_screen(HomeScreen(), name="home")

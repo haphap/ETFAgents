@@ -411,7 +411,7 @@ class ReportRepository:
             rating = parse_rating(text, default="")
             if rating:
                 return rating
-        except (ImportError, ValueError, AttributeError):
+        except Exception:
             pass
         upper = text.upper()
         for rating in ("OVERWEIGHT", "UNDERWEIGHT", "BUY", "SELL", "HOLD"):

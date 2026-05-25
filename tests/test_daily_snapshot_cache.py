@@ -1,3 +1,4 @@
+
 import copy
 import tempfile
 import unittest
@@ -13,7 +14,6 @@ from etfagents.agents.utils.daily_snapshot_cache import (
 )
 from etfagents.dataflows.config import get_config, set_config
 from etfagents.default_config import DEFAULT_CONFIG
-
 
 class SharedSnapshotCacheTests(unittest.TestCase):
     def setUp(self):
@@ -121,7 +121,6 @@ class SharedSnapshotCacheTests(unittest.TestCase):
             )
 
         self.assertIn("invalid JSON", str(ctx.exception))
-
 
 class SharedSnapshotToolIntegrationTests(unittest.TestCase):
     def setUp(self):
@@ -267,7 +266,6 @@ class SharedSnapshotToolIntegrationTests(unittest.TestCase):
             )
 
         self.assertEqual(second, first)
-
 
 if __name__ == "__main__":
     unittest.main()

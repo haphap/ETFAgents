@@ -1,3 +1,4 @@
+
 import unittest
 from unittest.mock import patch
 
@@ -5,7 +6,6 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableLambda
 
 from etfagents.agents.analysts.social_media_analyst import create_social_media_analyst
-
 
 _VALIDATION_PASSED_JSON = '{"score": 9, "pass": true, "critical_issues": [], "minor_issues": [], "missing_elements": [], "general_comment": "OK"}'
 _VALID_CATALYST_REPORT = (
@@ -27,7 +27,6 @@ _VALID_CATALYST_REPORT = (
     "| 宏观新闻 | 中性 | 继续观察 |"
 )
 
-
 class _CapturingLLM(RunnableLambda):
     """Mock LLM compatible with prompt | llm chain composition."""
 
@@ -38,7 +37,6 @@ class _CapturingLLM(RunnableLambda):
         if "报告质量审核员" in str(prompt):
             return AIMessage(content=_VALIDATION_PASSED_JSON)
         return AIMessage(content=_VALID_CATALYST_REPORT)
-
 
 class SocialMediaAnalystTests(unittest.TestCase):
     @patch("etfagents.agents.analysts.social_media_analyst.get_news_for_queries")
@@ -213,7 +211,6 @@ class SocialMediaAnalystTests(unittest.TestCase):
         call_args = mock_queries.call_args[0]
         queries = call_args[0]
         self.assertEqual(queries, ["紫金矿业", "贵州茅台", "宁德时代"])
-
 
 if __name__ == "__main__":
     unittest.main()

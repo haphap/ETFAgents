@@ -1,3 +1,4 @@
+
 import copy
 import json
 import re
@@ -36,7 +37,6 @@ from etfagents.graph.etf_graph import (
     _selected_analyst_report_keys,
 )
 from etfagents.graph.etf_setup import ETFGraphSetup
-
 
 class ETFExtensionTests(unittest.TestCase):
     def setUp(self):
@@ -1696,7 +1696,6 @@ class ETFExtensionTests(unittest.TestCase):
 
         self.assertEqual(first_calls["propagate"], 1)
         self.assertEqual(second_calls["propagate"], 1)
-
 
 if __name__ == "__main__":
     unittest.main()

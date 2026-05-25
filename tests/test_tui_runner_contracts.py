@@ -4,18 +4,45 @@ These tests verify that the runner correctly handles streaming,
 cancellation, error recovery, and resource cleanup.
 """
 
+import sys
+import types
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from cli.tui.services import (
-    AnalysisRunner,
-    SectionDone,
-    TickerCancelled,
-    TickerDone,
-    TickerFailed,
-    TickerStarted,
-)
+
+def _build_stubs():
+    """Build lightweight stubs for heavy modules that AnalysisRunner
+    lazy-imports (cli.report_utils, cli.stats_handler) so tests run
+    without langchain_core / langgraph installed."""
+    stubs: dict[str, types.ModuleType] = {}
+
+    report_mod = types.ModuleType("cli.report_utils")
+    report_mod.merge_stream_state = lambda acc, upd, **kw: acc.update(
+        {k: v for k, v in (upd if isinstance(upd, dict) else {}).items() if v}
+    )
+    stubs["cli.report_utils"] = report_mod
+
+    stats_mod = types.ModuleType("cli.stats_handler")
+    stats_mod.StatsCallbackHandler = type(
+        "StatsCallbackHandler", (), {"get_stats": lambda self: {}}
+    )
+    stubs["cli.stats_handler"] = stats_mod
+
+    return stubs
+
+
+# Import under stub context, then exit immediately so sys.modules is clean.
+_stubs = _build_stubs()
+with patch.dict(sys.modules, _stubs):
+    from cli.tui.services import (
+        AnalysisRunner,
+        SectionDone,
+        TickerCancelled,
+        TickerDone,
+        TickerFailed,
+        TickerStarted,
+    )
 
 
 class _FakeGraph:
@@ -44,6 +71,13 @@ class _FakeGraph:
 
 
 class AnalysisRunnerContractTests(unittest.TestCase):
+    def setUp(self):
+        self._stub_patcher = patch.dict(sys.modules, _build_stubs())
+        self._stub_patcher.start()
+
+    def tearDown(self):
+        self._stub_patcher.stop()
+
     def test_stream_emits_ticker_started_then_section_done_then_ticker_done(self):
         """Runner must yield TickerStarted → SectionDone × N → TickerDone."""
         runner = AnalysisRunner()

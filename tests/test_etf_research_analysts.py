@@ -1,3 +1,4 @@
+
 import unittest
 from unittest.mock import patch
 
@@ -42,7 +43,6 @@ from etfagents.agents.utils.report_leads import (
 )
 from etfagents.agents.utils.validate_refine import static_validate
 
-
 class _CapturingLLM(RunnableLambda):
     """Mock LLM that works with both tool-calling chains and direct prompt | llm."""
 
@@ -56,7 +56,6 @@ class _CapturingLLM(RunnableLambda):
 
     def bind_tools(self, tools):
         return self
-
 
 class _IntentThenFinalLLM(RunnableLambda):
     """First emits a fake future tool-call note, then writes a report from recovered data."""
@@ -103,7 +102,6 @@ class _IntentThenFinalLLM(RunnableLambda):
     def bind_tools(self, tools):
         return self
 
-
 class _FakeTool:
     def __init__(self, name, return_value):
         self.name = name
@@ -113,7 +111,6 @@ class _FakeTool:
     def invoke(self, payload):
         self.calls.append(payload)
         return self.return_value
-
 
 class _HoldingsStrictRepairLLM(RunnableLambda):
     def __init__(self, draft_report, repaired_report):
@@ -132,7 +129,6 @@ class _HoldingsStrictRepairLLM(RunnableLambda):
 
     def bind_tools(self, tools):
         return self
-
 
 class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
     def test_prompt_uses_tradingagents_style_cross_analysis_framework(self):
@@ -427,7 +423,6 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
         )
 
         self.assertTrue(_looks_like_complete_holdings_industry_report(repaired))
-
 
 class EtfStockResearchAnalystPromptTests(unittest.TestCase):
     def test_prompt_uses_tradingagents_style_stock_framework(self):
@@ -778,7 +773,6 @@ class EtfStructureAnalystPromptTests(unittest.TestCase):
         self.assertTrue(restored.startswith("铜与热卷需求强势尚未传导到焦煤仓单去化"))
         self.assertIn("\n\n一、核心矛盾与主线判断", restored)
 
-
 class EtfMarketAnalystPromptTests(unittest.TestCase):
     def test_prompt_requires_title_lead_and_plain_language_trading_explanation(self):
         llm = _CapturingLLM()
@@ -1075,7 +1069,6 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertTrue(any("四、" in line for line in logs.output))
         self.assertTrue(any("综合结论和指标总览" in line for line in logs.output))
 
-
 class ReportTitleNormalizationTests(unittest.TestCase):
     def test_build_report_title_drops_suffix_only_ticker(self):
         with patch(
@@ -1284,8 +1277,6 @@ class ReportTitleNormalizationTests(unittest.TestCase):
         self.assertIn("核心路标。若去化不能兑现", cleaned)
         self.assertIn("一、核心矛盾与主线判断", cleaned)
 
-
-
 class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
     def test_news_prompt_requires_title_lead_before_first_section(self):
         llm = _CapturingLLM()
@@ -1431,9 +1422,6 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
                 "报告已就绪。以下为ETF催化剂与情绪分析：\n\n" + valid_report
             )
         )
-
-
-
 
 if __name__ == "__main__":
     unittest.main()

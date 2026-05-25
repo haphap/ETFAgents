@@ -1,3 +1,4 @@
+
 import copy
 from datetime import UTC, datetime, timedelta
 import tempfile
@@ -11,7 +12,6 @@ from cli.main import app
 from etfagents.agents.utils.analysis_memory import AnalysisMemoryStore, MethodPlaybookEntry
 from etfagents.default_config import DEFAULT_CONFIG
 
-
 class _FakeMetrics:
     cumulative_return = 0.0
     annualized_return = 0.0
@@ -19,7 +19,6 @@ class _FakeMetrics:
     sharpe_ratio = 0.0
     average_turnover = 0.0
     total_trades = 0
-
 
 class _FakeHealth:
     weight_source_counts = {}
@@ -31,7 +30,6 @@ class _FakeHealth:
     missing_price_rows = 0
     unsupported_trigger_count = 0
 
-
 class _FakeBacktestResult:
     execution_timing = "same_close"
     metrics = _FakeMetrics()
@@ -42,7 +40,6 @@ class _FakeBacktestResult:
     def rebalance_summary_rows(self):
         return []
 
-
 class _FakeGraph:
     last_config = None
 
@@ -51,7 +48,6 @@ class _FakeGraph:
 
     def backtest_candidate_pool(self, *args, **kwargs):
         return _FakeBacktestResult()
-
 
 class MemoryCliTests(unittest.TestCase):
     def setUp(self):
@@ -125,7 +121,6 @@ class MemoryCliTests(unittest.TestCase):
             self.assertEqual(1, len(active))
             self.assertEqual("active", active[0].status)
             self.assertIsNotNone(active[0].expires_at)
-
 
 if __name__ == "__main__":
     unittest.main()

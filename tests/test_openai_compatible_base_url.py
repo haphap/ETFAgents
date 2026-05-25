@@ -1,3 +1,4 @@
+
 import os
 import unittest
 from unittest.mock import patch
@@ -6,7 +7,6 @@ from etfagents.default_config import DEFAULT_CONFIG
 from etfagents.llm_clients.factory import create_llm_client
 from etfagents.llm_clients.google_client import GoogleClient
 from etfagents.llm_clients.openai_client import OpenAIClient
-
 
 class OpenAICompatibleBaseUrlTests(unittest.TestCase):
     @patch("etfagents.llm_clients.openai_client.NormalizedChatOpenAI")
@@ -56,7 +56,6 @@ class OpenAICompatibleBaseUrlTests(unittest.TestCase):
         self.assertEqual(kwargs["base_url"], "https://api.minimax.chat/v1")
         self.assertEqual(kwargs["api_key"], "minimax-key")
         self.assertEqual(kwargs["model"], "MiniMax-M2.7")
-
 
 if __name__ == "__main__":
     unittest.main()
