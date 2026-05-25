@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
@@ -512,7 +512,7 @@ class AnalysisRunScreen(Screen):
                     # Report body (right-bottom)
                     with Vertical(classes="right-bottom"):
                         yield Static("整体进度", id="ra_body_title", classes="pane-title")
-                        with VerticalScroll(id="ra_body_scroll"):
+                        with ScrollableContainer(id="ra_body_scroll"):
                             yield Markdown("准备开始分析。", id="ra_body")
             with Horizontal(classes="stats-bar"):
                 yield Static(self._stats_progress_text(), id="stats_progress", classes="stats-seg-accent")

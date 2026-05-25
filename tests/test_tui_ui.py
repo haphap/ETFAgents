@@ -5,7 +5,7 @@ from pathlib import Path
 
 try:
     from textual.widgets import Button, Static, ListView, Label
-    from textual.containers import VerticalScroll
+    from textual.containers import ScrollableContainer
 except ModuleNotFoundError:
     Static = None
 
@@ -705,7 +705,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 screen = app.screen
                 self.assertIsInstance(screen, AnalysisRunScreen)
-                self.assertIsInstance(screen.query_one("#ra_body_scroll"), VerticalScroll)
+                self.assertIsInstance(screen.query_one("#ra_body_scroll"), ScrollableContainer)
 
     # --- Active column highlighting ---
 

@@ -299,6 +299,17 @@ class ETFAgentsTuiApp(App):
         scrollbar-size: 1 1;
         scrollbar-background: $background;
         scrollbar-color: $accent;
+        overflow-x: auto;
+        overflow-y: auto;
+    }
+
+    #lib_body_scroll {
+        height: 1fr;
+        scrollbar-size: 1 1;
+        scrollbar-background: $background;
+        scrollbar-color: $accent;
+        overflow-x: auto;
+        overflow-y: auto;
     }
 
     #ra_body {
