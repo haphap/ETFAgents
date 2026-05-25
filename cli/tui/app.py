@@ -44,12 +44,12 @@ class ETFAgentsTuiApp(App):
     CSS = """
     /* ── Base ─────────────────────────────────────────────── */
     Screen {
-        background: $surface;
+        background: $background;
         color: $text;
     }
 
     Header {
-        background: $surface;
+        background: $background;
         color: $text;
         border-bottom: solid $panel;
         height: 3;
@@ -59,18 +59,6 @@ class ETFAgentsTuiApp(App):
     Footer {
         height: 1;
         text-style: bold;
-    }
-
-    #title {
-        color: $accent;
-        text-style: bold;
-        height: 1;
-        margin: 0 0 1 0;
-    }
-
-    .subtitle {
-        color: $text-muted;
-        margin-bottom: 1;
     }
 
     .screen-body {
@@ -210,15 +198,10 @@ class ETFAgentsTuiApp(App):
         background: $panel;
     }
 
-    .nav-action.-primary {
-        color: $text;
-        background: transparent;
-    }
-
     /* ── Lists ────────────────────────────────────────────── */
     ListView {
         width: 100%;
-        background: $surface;
+        background: transparent;
     }
 
     ListItem {
@@ -228,21 +211,21 @@ class ETFAgentsTuiApp(App):
 
     ListView > ListItem.--highlight {
         background: $accent;
-        color: $surface;
+        color: $background;
         text-style: bold;
     }
 
     /* ── Markdown ─────────────────────────────────────────── */
     Markdown {
         height: auto;
-        background: $surface;
+        background: transparent;
         color: $text;
     }
 
     /* ── DataTable ────────────────────────────────────────── */
     DataTable {
         height: 1fr;
-        background: $surface;
+        background: transparent;
         color: $text;
     }
 
@@ -253,7 +236,7 @@ class ETFAgentsTuiApp(App):
         min-width: 34;
         border: solid $panel;
         padding: 1 2;
-        background: $surface;
+        background: transparent;
     }
 
     .right-pane {
@@ -261,7 +244,7 @@ class ETFAgentsTuiApp(App):
         width: 70%;
         padding: 0 1;
         border: solid $panel;
-        background: $surface;
+        background: transparent;
     }
 
     .right-top {
@@ -269,14 +252,14 @@ class ETFAgentsTuiApp(App):
         border: solid $panel;
         padding: 1 2;
         margin-bottom: 1;
-        background: $surface;
+        background: transparent;
     }
 
     .right-bottom {
         height: 1fr;
         border: solid $panel;
         padding: 1 2;
-        background: $surface;
+        background: transparent;
     }
 
     /* Panel width presets */
@@ -293,36 +276,6 @@ class ETFAgentsTuiApp(App):
     .density-spacious .left-pane, .density-spacious .right-pane { padding: 1 2; }
 
     /* ── Home: nav + dashboard ────────────────────────────── */
-    .nav-pane {
-        width: 22%;
-        min-width: 28;
-    }
-
-    .dashboard-pane {
-        width: 78%;
-        padding: 1 3;
-    }
-
-    .dashboard-grid {
-        height: auto;
-        margin: 0;
-    }
-
-    .workspace-card {
-        height: auto;
-        width: 1fr;
-        border: solid $panel;
-        padding: 1 2;
-        margin: 0 1 1 0;
-        background: $surface;
-    }
-
-    .workspace-card-title {
-        text-style: bold;
-        color: $accent;
-        height: 1;
-    }
-
     /* ── Analysis run: board layout ───────────────────────── */
     #ra_body_scroll {
         height: 1fr;
@@ -444,7 +397,7 @@ class ETFAgentsTuiApp(App):
         border: solid $panel;
         padding: 1 2;
         margin: 0 0 1 0;
-        background: $surface;
+        background: transparent;
     }
 
     /* ── Placeholder panel ────────────────────────────────── */

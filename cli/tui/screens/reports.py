@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Label, ListItem, ListView, Markdown, Static
 
@@ -42,7 +42,8 @@ class ReportLibraryScreen(Screen):
                     yield ListView(id="lib_sections")
                 with Vertical(classes="right-bottom"):
                     yield Static("Body", classes="pane-title")
-                    yield Markdown("", id="lib_body")
+                    with VerticalScroll(id="lib_body_scroll"):
+                        yield Markdown("", id="lib_body")
         yield Footer()
 
     def on_mount(self) -> None:

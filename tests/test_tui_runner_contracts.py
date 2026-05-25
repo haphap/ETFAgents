@@ -94,10 +94,10 @@ class AnalysisRunnerContractTests(unittest.TestCase):
 
                     events = list(runner.run_queue(["510300.SH"], selected_analysts=["market_flow"]))
 
-                    self.assertEqual(events[0].total_sections, 4)
+                    self.assertEqual(events[0].total_sections, 6)
                     section_done = [e for e in events if isinstance(e, SectionDone)]
                     self.assertEqual([e.section_id for e in section_done], ["market_flow", "trader"])
-                    self.assertEqual([e.total for e in section_done], [4, 4])
+                    self.assertEqual([e.total for e in section_done], [6, 6])
 
     def test_cancel_emits_cancelled_and_stops_processing(self):
         """request_cancel() must cause remaining tickers to yield TickerCancelled
@@ -233,7 +233,7 @@ class AnalysisRunnerContractTests(unittest.TestCase):
         ))
 
         self.assertEqual(len(events), 1)
-        self.assertEqual(events[0].section_id, "research")
+        self.assertEqual(events[0].section_id, "research_debate")
         self.assertIn("Bull view", events[0].content)
 
     def test_research_section_can_update_after_first_debate_event(self):

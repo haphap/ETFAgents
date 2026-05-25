@@ -94,9 +94,15 @@ SECTION_DEFINITIONS: tuple[SectionDef, ...] = (
         ("reports/top_holdings_report.md", "1_analysts/top_holdings.md"),
     ),
     SectionDef(
+        "research_debate", "_research_debate_formatted",
+        ("investment_debate_state",),
+        "研究", "多空辩论",
+        ("2_research/bull.md", "2_research/bear.md"),
+    ),
+    SectionDef(
         "research", "research_allocation_plan",
-        ("research_allocation_plan", "investment_debate_state"),
-        "研究", "研究团队",
+        ("research_allocation_plan",),
+        "研究", "研究经理",
         ("reports/research_allocation_plan.md", "2_research/manager.md"),
     ),
     SectionDef(
@@ -106,8 +112,14 @@ SECTION_DEFINITIONS: tuple[SectionDef, ...] = (
         ("reports/trader_allocation_plan.md", "3_trading/trader.md"),
     ),
     SectionDef(
+        "risk_debate", "_risk_debate_formatted",
+        ("risk_debate_state",),
+        "风险", "风险辩论",
+        ("4_risk/aggressive.md", "4_risk/neutral.md", "4_risk/conservative.md"),
+    ),
+    SectionDef(
         "portfolio_manager", "final_allocation_decision",
-        ("final_allocation_decision", "risk_debate_state"),
+        ("final_allocation_decision",),
         "决策", "投资组合经理",
         ("reports/final_allocation_decision.md", "5_portfolio/decision.md"),
     ),
@@ -136,6 +148,7 @@ def section_definitions_for(selected_analysts: list[str] | None = None) -> tuple
 @dataclass
 class AnalysisConfig:
     selected_analysts: list[str] = field(default_factory=lambda: list(ANALYST_KEYS))
+    analysis_date: str | None = None
     depth_name: str = "标准"
     llm_provider: str = "openai"
     backend_url: str | None = None
@@ -323,13 +336,17 @@ class ReportRepository:
             complete = record.path / "complete_report.md"
             return complete.read_text(encoding="utf-8") if complete.exists() else ""
 
-        # research: merge bull + bear + manager
-        if section_id == "research":
-            return self._read_research_merged(record)
+        if section_id == "research_debate":
+            return self._read_research_debate(record)
 
-        # portfolio_manager: merge risk debaters + decision
+        if section_id == "research":
+            return self._read_research_manager(record)
+
+        if section_id == "risk_debate":
+            return self._read_risk_debate(record)
+
         if section_id == "portfolio_manager":
-            return self._read_portfolio_merged(record)
+            return self._read_portfolio_decision(record)
 
         # normal section
         section_path = record.sections.get(section_id)
@@ -340,26 +357,22 @@ class ReportRepository:
         complete = record.path / "complete_report.md"
         return complete.read_text(encoding="utf-8") if complete.exists() else ""
 
-    def _read_research_merged(self, record: ReportRecord) -> str:
+    def _read_research_debate(self, record: ReportRecord) -> str:
         parts: list[str] = []
         for name, rel in [("多头", "2_research/bull.md"), ("空头", "2_research/bear.md")]:
             p = record.path / rel
             if p.exists():
                 parts.append(f"### {name}\n{p.read_text(encoding='utf-8')}")
+        return "\n\n".join(parts) if parts else ""
 
-        # manager content — try several candidates
-        manager_content = ""
+    def _read_research_manager(self, record: ReportRecord) -> str:
         for rel in ("reports/research_allocation_plan.md", "2_research/manager.md", "2_research/rounds.md"):
             p = record.path / rel
             if p.exists():
-                manager_content = p.read_text(encoding="utf-8")
-                break
-        if manager_content:
-            parts.append(f"### 研究经理综合结论\n{manager_content}")
+                return p.read_text(encoding="utf-8")
+        return ""
 
-        return "\n\n".join(parts) if parts else ""
-
-    def _read_portfolio_merged(self, record: ReportRecord) -> str:
+    def _read_risk_debate(self, record: ReportRecord) -> str:
         parts: list[str] = []
         for name, rel in [
             ("激进", "4_risk/aggressive.md"),
@@ -369,17 +382,14 @@ class ReportRepository:
             p = record.path / rel
             if p.exists():
                 parts.append(f"### {name}\n{p.read_text(encoding='utf-8')}")
+        return "\n\n".join(parts) if parts else ""
 
-        decision_content = ""
+    def _read_portfolio_decision(self, record: ReportRecord) -> str:
         for rel in ("reports/final_allocation_decision.md", "5_portfolio/decision.md"):
             p = record.path / rel
             if p.exists():
-                decision_content = p.read_text(encoding="utf-8")
-                break
-        if decision_content:
-            parts.append(f"### 投资组合经理\n{decision_content}")
-
-        return "\n\n".join(parts) if parts else ""
+                return p.read_text(encoding="utf-8")
+        return ""
 
     def _discover_sections(self, report_dir: Path) -> dict[str, Path]:
         sections: dict[str, Path] = {}
@@ -712,12 +722,12 @@ class AnalysisRunner:
         invest_state = self._get_chunk_value(chunk, "investment_debate_state")
         if isinstance(invest_state, dict):
             count = invest_state.get("count", 0)
-            if count != last_counts.get("research", 0):
-                last_counts["research"] = count
+            if count != last_counts.get("research_debate", 0):
+                last_counts["research_debate"] = count
                 max_rounds = self.config.get("max_debate_rounds", 1)
                 yield DebateProgress(
                     ticker=ticker,
-                    section_id="research",
+                    section_id="research_debate",
                     current_round=count // 2,
                     max_rounds=max_rounds,
                 )
@@ -756,9 +766,9 @@ class AnalysisRunner:
         return format_research_team_history(debate)
 
     def _format_risk(self, risk: dict) -> str:
-        """Format risk debate state to Markdown."""
+        """Format risk debate state to Markdown (debaters only, no PM)."""
         from cli.main import format_risk_management_history
-        return format_risk_management_history(risk)
+        return format_risk_management_history(risk, include_manager=False)
 
     def _make_graph(self, selected_analysts: list[str] | None = None) -> Any:
         """Lazy import and create graph."""

@@ -145,6 +145,7 @@ class EtfIndustryResearchAnalystPromptTests(unittest.TestCase):
             captured["system_message"] = kwargs.get("system_message", "")
             captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
             captured["acceptance_check"] = kwargs.get("report_acceptance_check")
+            captured["rejected_report_fallback"] = kwargs.get("rejected_report_fallback")
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -439,6 +440,7 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
             captured["system_message"] = kwargs.get("system_message", "")
             captured["recovery"] = kwargs.get("unexecuted_tool_recovery", {})
             captured["acceptance_check"] = kwargs.get("report_acceptance_check")
+            captured["rejected_report_fallback"] = kwargs.get("rejected_report_fallback")
             return (AIMessage(content="Report content"), "Report content")
 
         with patch(
@@ -481,6 +483,7 @@ class EtfStockResearchAnalystPromptTests(unittest.TestCase):
             captured["acceptance_check"],
             _looks_like_complete_top_holdings_report,
         )
+        self.assertEqual(captured.get("rejected_report_fallback"), "last_attempt")
 
     def test_top_holdings_acceptance_rejects_delivery_preamble(self):
         valid_report = (
@@ -1312,7 +1315,7 @@ class EtfNewsAndSentimentAnalystPromptTests(unittest.TestCase):
         self.assertIn("Do NOT narrate your workflow, tool usage", system_msg)
         self.assertIn("Make the opening sentence concise and thesis-led", system_msg)
         self.assertIn("一、暴露与宏观主线", system_msg)
-        self.assertIn("标题后直接写2-3句结论段", system_msg)
+        self.assertIn("标题后直接写2-3句投资判断", system_msg)
         self.assertNotIn("以2-3句导语开头", system_msg)
         self.assertIn("Do NOT substitute generic labels such as '总体研判'", system_msg)
         self.assertIn("If the structure does not provide a heading, write one that is brief, forceful, and immediately usable", system_msg)
