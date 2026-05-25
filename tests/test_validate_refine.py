@@ -530,6 +530,13 @@ class CleaningOrderingTests(unittest.TestCase):
         self.assertIn("| RSI | 60 |", cleaned)
         self.assertIn("正文第一句很长 继续同一段。", cleaned)
 
+    def test_box_wrapping_does_not_split_inline_numeric_parenthetical_lists(self):
+        raw = "建议关注 (1) 成交量是否放大、(2) 份额是否回升，暂不追高。"
+
+        cleaned = normalize_boxed_text_wrapping(raw)
+
+        self.assertEqual(raw, cleaned)
+
     def test_post_judge_clean_runs_punctuation_pass(self):
         raw = "走势已确认上行?\n\n"
         cleaned = post_judge_clean(raw)

@@ -77,6 +77,11 @@ _MARKET_FLOW_CONCLUSION_LABEL_RE = re.compile(r"^\s*综合结论\s*[:：]\s*(.+)
 _MARKET_FLOW_COMBINED_TAIL_LINE_RE = re.compile(
     r"^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+[、.．]\s*综合结论和指标总览(?:[。.]|\s|$)"
 )
+_MARKET_FLOW_COMBINED_TAIL_WITH_TEXT_RE = re.compile(
+    r"^\s*(?:#{1,6}\s*)?"
+    r"[一二三四五六七八九十]+[、.．]\s*综合结论和指标总览"
+    r"(?:[。.]?\s*)?(?P<tail>.*)$"
+)
 
 
 def _etf_indicator_catalog() -> str:
@@ -137,6 +142,14 @@ def _strip_duplicate_market_flow_combined_tail(lines: list[str]) -> list[str]:
     return kept
 
 
+def _market_flow_combined_tail_inline_text(line: str) -> str:
+    match = _MARKET_FLOW_COMBINED_TAIL_WITH_TEXT_RE.match(line.strip())
+    if not match:
+        return ""
+    tail = match.group("tail").strip()
+    return "" if not tail or tail in {"。", "."} else tail
+
+
 def _normalize_market_flow_tail_sections(report: str) -> str:
     """Migrate legacy tail shapes into the combined market-flow tail section.
 
@@ -165,6 +178,7 @@ def _normalize_market_flow_tail_sections(report: str) -> str:
             or bool(_MARKET_FLOW_COMBINED_TAIL_LINE_RE.match(lines[before_idx].strip()))
         ):
             replacement_start = before_idx
+            conclusion_text = _market_flow_combined_tail_inline_text(lines[before_idx])
         elif before_idx >= 0:
             paragraph_start = before_idx
             while paragraph_start >= 0 and lines[paragraph_start].strip():
@@ -174,9 +188,11 @@ def _normalize_market_flow_tail_sections(report: str) -> str:
                 heading_idx -= 1
             if heading_idx >= 0 and _MARKET_FLOW_COMBINED_TAIL_LINE_RE.match(lines[heading_idx].strip()):
                 replacement_start = heading_idx
-                conclusion_text = "\n".join(
+                inline_text = _market_flow_combined_tail_inline_text(lines[heading_idx])
+                paragraph_text = "\n".join(
                     line.strip() for line in lines[heading_idx + 1:table_start] if line.strip()
                 ).strip()
+                conclusion_text = "\n".join(part for part in (inline_text, paragraph_text) if part).strip()
 
         replacement_end = table_end
         conclusion_idx = table_end

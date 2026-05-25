@@ -359,8 +359,11 @@ def _strip_box_edge_line(line: str) -> str:
 
 _INLINE_SECTION_HEADING_RE = re.compile(
     r"(?<=[。！？.!?\s])\s*"  # preceded by sentence-ending punct or whitespace
-    r"(\*{0,2}"  # optional bold marker
-    r"(?:[一二三四五六七八九十]+、|[（(][一二三四五六七八九十\d]+[）)])"  # heading marker
+    r"(?P<prefix>(?:#{1,6}\s*)?\*{0,2})"  # optional markdown heading/bold marker
+    r"(?P<marker>"
+    r"[一二三四五六七八九十]+、|"
+    r"（[一二三四五六七八九十\d]+）|"
+    r"\([一二三四五六七八九十]+\)"  # avoid treating inline numeric lists like (1) as sections
     r")"
 )
 
@@ -383,8 +386,7 @@ def normalize_boxed_text_wrapping(report: str) -> str:
         m = _INLINE_SECTION_HEADING_RE.search(stripped)
         if m and m.start() > 0:
             split_lines.append(stripped[: m.start()].rstrip())
-            split_lines.append("")
-            split_lines.append(stripped[m.start() :])
+            split_lines.append(stripped[m.start("marker") :])
         else:
             split_lines.append(line)
     lines = split_lines
