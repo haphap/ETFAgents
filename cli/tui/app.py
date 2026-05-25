@@ -359,7 +359,7 @@ class ETFAgentsTuiApp(App):
     .entry-primary {
         width: 1fr;
         height: 4;
-        margin: 0 1 0 0;
+        margin: 0;
         border: solid $accent;
         background: $accent;
         color: $surface;

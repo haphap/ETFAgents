@@ -319,6 +319,18 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
                 self.assertEqual(selected_labels, ["510300.SH ×"])
 
+    async def test_research_analysis_adding_second_recent_card_keeps_unique_tag_ids(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                await pilot.click("#recent-recent_510300_SH")
+                await pilot.click("#recent-recent_159915_SZ")
+                await pilot.pause()
+                screen = app.screen
+                selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
+                self.assertEqual(selected_labels, ["510300.SH ×", "159915.SZ ×"])
+
     async def test_research_analysis_screen_focuses_ticker_input(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
@@ -352,7 +364,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screen.query_one("#ra_ticker_input").value = "510300.SH"
                 await pilot.press("enter")
                 await pilot.pause()
-                await pilot.click("#sel-sel_510300_SH")
+                chip = screen.query_one(".selected-chip", Button)
+                await pilot.click(f"#{chip.id}")
                 self.assertEqual([str(button.label) for button in screen.query(".selected-chip")], [])
                 self.assertTrue(screen.query_one("#btn_ra_start", Button).disabled)
                 self.assertIn("已选择 0 个 ETF", str(screen.query_one("#selected_ticker_count", Static).render()))

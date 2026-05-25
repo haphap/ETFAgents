@@ -264,12 +264,12 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
     DEFAULT_CSS = """
     AnalysisConfigModal { align: center middle; }
     #acm_container { width: 84; height: auto; max-height: 42; border: solid $accent; background: $surface; padding: 1 2; }
-    #acm_container .acm-row { height: auto; margin: 0 0 1 0; }
+    #acm_container .acm-row { height: auto; margin: 0; }
     #acm_container .acm-col { width: 1fr; height: auto; margin-right: 2; }
     #acm_container .acm-col:last-of-type { margin-right: 0; }
     #acm_container Static { height: 1; margin: 0; }
     #acm_container Checkbox { height: 1; margin: 0; }
-    #acm_container Select { height: 3; margin: 0; }
+    #acm_container Select { height: auto; margin: 0; }
     #acm_container Input { height: 3; margin: 0; }
     #acm_container .acm-label { color: $text-muted; text-style: bold; }
     #acm_container .analyst-panel { height: auto; border: solid $panel; padding: 0 1; margin: 0 0 1 0; }
@@ -442,6 +442,7 @@ class ResearchAnalysisScreen(Screen):
         self.repository = repository or ReportRepository()
         self._analysis_config: AnalysisConfig | None = None
         self._selected_tickers: list[str] = []
+        self._selected_tag_generation = 0
 
     def compose(self) -> ComposeResult:
         recent_cards = self._recent_etf_cards()
@@ -523,6 +524,7 @@ class ResearchAnalysisScreen(Screen):
 
     def _refresh_selected_ticker_tags(self) -> None:
         tags = self.query_one("#selected_ticker_tags", Horizontal)
+        self._selected_tag_generation += 1
         for child in list(tags.children):
             child.remove()
         if not self._selected_tickers:
@@ -530,7 +532,13 @@ class ResearchAnalysisScreen(Screen):
         else:
             registry = IdRegistry("sel")
             for ticker in self._selected_tickers:
-                tags.mount(Button(f"{ticker} ×", id=f"sel-{registry.register(ticker)}", classes="selected-chip"))
+                tags.mount(
+                    Button(
+                        f"{ticker} ×",
+                        id=f"sel-{self._selected_tag_generation}-{registry.register(ticker)}",
+                        classes="selected-chip",
+                    )
+                )
         self.query_one("#selected_ticker_count", Static).update(f"已选择 {len(self._selected_tickers)} 个 ETF")
         self._refresh_start_button_state()
 
