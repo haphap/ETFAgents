@@ -338,16 +338,11 @@ class ETFAgentsTuiApp(App):
         margin: 1 0 1 0;
     }
 
-    .example-row {
-        height: auto;
-        margin: 0 0 1 0;
-    }
-
     .ticker-chip {
-        width: 1fr;
+        width: 100%;
         height: 3;
         min-width: 0;
-        margin: 0 1 0 0;
+        margin: 0 0 1 0;
         border: solid $panel;
         background: transparent;
         color: $text-muted;
@@ -360,34 +355,6 @@ class ETFAgentsTuiApp(App):
         color: $accent;
         background: transparent;
         text-style: bold;
-    }
-
-    .watchlist-summary {
-        height: 6;
-        margin: 1 0 1 0;
-    }
-
-    .summary-card {
-        width: 1fr;
-        height: 5;
-        margin: 0 1 0 0;
-        padding: 1 2;
-        border: solid $panel;
-        color: $text;
-        text-style: bold;
-        content-align: center middle;
-    }
-
-    .summary-card:last-of-type {
-        margin-right: 0;
-    }
-
-    .positive-card {
-        color: $error;
-    }
-
-    .negative-card {
-        color: $success;
     }
 
     #watchlist_cards {

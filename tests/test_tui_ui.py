@@ -287,6 +287,26 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#ra_ticker_input"))
                 self.assertIsNotNone(screen.query_one("#btn_ra_start"))
                 self.assertIsNotNone(screen.query_one("#watchlist_cards"))
+                self.assertEqual(len(screen.query(".ticker-chip")), 5)
+                with self.assertRaises(Exception):
+                    screen.query_one("#wl_total")
+
+    async def test_research_analysis_recent_etf_uses_latest_report_tickers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for index, ticker in enumerate(["510300.SH", "159915.SZ", "588000.SH"]):
+                report_dir = root / ticker / f"2026-05-2{index}"
+                report_dir.mkdir(parents=True)
+                (report_dir / "complete_report.md").write_text("评级: 持有", encoding="utf-8")
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                labels = [str(button.label) for button in screen.query(".ticker-chip")]
+                self.assertEqual(len(labels), 5)
+                self.assertIn("510300.SH", labels)
+                self.assertIn("159915.SZ", labels)
+                self.assertIn("588000.SH", labels)
 
     async def test_research_analysis_screen_focuses_ticker_input(self):
         with tempfile.TemporaryDirectory() as tmp:

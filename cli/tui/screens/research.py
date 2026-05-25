@@ -72,6 +72,7 @@ LLM_PROVIDER_ENDPOINTS = {
 
 # Sections that complete on first SectionDone (non-debate, single-shot)
 _INSTANT_DONE_SECTIONS = set(ANALYST_KEYS) | {"research", "trader", "portfolio_manager"}
+_RECENT_ETF_FALLBACKS = ("510300.SH", "159915.SZ", "513500.SH", "588000.SH", "518880.SH")
 
 
 def _depth_option_label(depth_name: str) -> str:
@@ -380,6 +381,7 @@ class ResearchAnalysisScreen(Screen):
         self._analysis_config: AnalysisConfig | None = None
 
     def compose(self) -> ComposeResult:
+        recent_tickers = self._recent_etf_tickers()
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane research-entry-pane"):
                 yield Static("Create Research Run", classes="pane-title")
@@ -389,18 +391,10 @@ class ResearchAnalysisScreen(Screen):
                 yield Static("", id="ra_entry_status", classes="status-strip")
                 yield Button("▶ Start Analysis", id="btn_ra_start", classes="entry-primary")
                 yield Static("Enter to configure", classes="entry-hint")
-                yield Static("Examples", classes="entry-section-title")
-                with Horizontal(classes="example-row"):
-                    yield Button("510300.SH", id="ex-510300", classes="ticker-chip")
-                    yield Button("159915.SZ", id="ex-159915", classes="ticker-chip")
-                with Horizontal(classes="example-row"):
-                    yield Button("513500.SH", id="ex-513500", classes="ticker-chip")
+                yield Static("近期 ETF", classes="entry-section-title")
+                for ticker in recent_tickers:
+                    yield Button(ticker, id=f"recent-{IdRegistry('recent').register(ticker)}", classes="ticker-chip")
             with Vertical(classes="right-pane"):
-                with Horizontal(classes="watchlist-summary"):
-                    yield Static("自选\n--", id="wl_total", classes="summary-card")
-                    yield Static("上涨\n--", id="wl_up", classes="summary-card positive-card")
-                    yield Static("下跌\n--", id="wl_down", classes="summary-card negative-card")
-                    yield Static("评级\n--", id="wl_rated", classes="summary-card")
                 yield Static("自选股看板 / Watchlist Monitor", classes="pane-title")
                 with ScrollableContainer(id="watchlist_cards"):
                     yield Static("加载自选股看板...", id="watchlist_status", classes="watchlist-status")
@@ -414,7 +408,7 @@ class ResearchAnalysisScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_ra_start":
             self._start_config_flow()
-        elif (event.button.id or "").startswith("ex-"):
+        elif (event.button.id or "").startswith("recent-"):
             self._append_ticker_to_input(str(event.button.label))
         elif (event.button.id or "").startswith("wl-"):
             self._append_ticker_to_input(str(event.button.label))
@@ -458,7 +452,6 @@ class ResearchAnalysisScreen(Screen):
             _safe_call_from_thread(self, self._show_watchlist_error, str(exc))
 
     def _apply_watchlist_snapshot(self, snapshot: WatchlistBoardSnapshot) -> None:
-        self._refresh_watchlist_summary(snapshot)
         cards = self.query_one("#watchlist_cards", ScrollableContainer)
         for child in list(cards.children):
             child.remove()
@@ -475,20 +468,29 @@ class ResearchAnalysisScreen(Screen):
                 )
             )
 
-    def _refresh_watchlist_summary(self, snapshot: WatchlistBoardSnapshot) -> None:
-        up = sum(1 for row in snapshot.rows if row.pct_chg is not None and row.pct_chg > 0)
-        down = sum(1 for row in snapshot.rows if row.pct_chg is not None and row.pct_chg < 0)
-        rated = sum(1 for row in snapshot.rows if row.rating)
-        self.query_one("#wl_total", Static).update(f"自选\n{len(snapshot.rows)}")
-        self.query_one("#wl_up", Static).update(f"上涨\n{up}")
-        self.query_one("#wl_down", Static).update(f"下跌\n{down}")
-        self.query_one("#wl_rated", Static).update(f"评级\n{rated}")
-
     def _show_watchlist_error(self, error: str) -> None:
         cards = self.query_one("#watchlist_cards", ScrollableContainer)
         for child in list(cards.children):
             child.remove()
         cards.mount(Static(f"自选股看板加载失败：{error}", classes="watchlist-status error-text"))
+
+    def _recent_etf_tickers(self) -> list[str]:
+        tickers: list[str] = []
+        try:
+            for record in self.repository.list_reports():
+                ticker = record.ticker.strip().upper()
+                if ticker and ticker not in tickers:
+                    tickers.append(ticker)
+                if len(tickers) >= 5:
+                    break
+        except Exception:
+            pass
+        for ticker in _RECENT_ETF_FALLBACKS:
+            if ticker not in tickers:
+                tickers.append(ticker)
+            if len(tickers) >= 5:
+                break
+        return tickers[:5]
 
     def _watchlist_card(self, row: WatchlistBoardRow) -> Vertical:
         price_class = _a_share_value_class(row.pct_chg)
