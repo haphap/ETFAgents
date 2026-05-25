@@ -383,6 +383,7 @@ class ResearchAnalysisScreen(Screen):
 
     def compose(self) -> ComposeResult:
         recent_tickers = self._recent_etf_tickers()
+        recent_tasks = self._recent_task_lines()
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane research-entry-pane"):
                 yield Static("创建研究任务", classes="pane-title")
@@ -393,12 +394,19 @@ class ResearchAnalysisScreen(Screen):
                     yield Static("尚未选择 ETF", id="selected_ticker_empty", classes="selected-empty")
                 yield Static("已选择 0 个 ETF", id="selected_ticker_count", classes="selected-count")
                 with Horizontal(classes="entry-actions"):
-                    yield Button("开始分析", id="btn_ra_start", classes="entry-primary")
+                    yield Button("开始分析", id="btn_ra_start", classes="entry-primary", disabled=True)
                     yield Button("⚙ 配置", id="btn_ra_config", classes="entry-config")
                 yield Static("近期 ETF", classes="entry-section-title")
                 with Horizontal(classes="recent-etf-row"):
                     for ticker in recent_tickers:
                         yield Button(ticker, id=f"recent-{IdRegistry('recent').register(ticker)}", classes="ticker-chip")
+                yield Static("最近任务", classes="entry-section-title")
+                with Vertical(classes="recent-task-list"):
+                    if recent_tasks:
+                        for line in recent_tasks:
+                            yield Static(line, classes="recent-task-item")
+                    else:
+                        yield Static("暂无历史任务", classes="recent-task-empty")
             with Vertical(classes="right-pane research-board-pane"):
                 yield Static("自选股看板 / Watchlist Monitor", classes="pane-title")
                 with ScrollableContainer(id="watchlist_cards"):
@@ -424,6 +432,10 @@ class ResearchAnalysisScreen(Screen):
         if event.input.id == "ra_ticker_input":
             self._commit_input_tickers()
 
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "ra_ticker_input":
+            self._refresh_start_button_state()
+
     def _start_config_flow(self) -> None:
         tickers = self._read_tickers()
         if not tickers:
@@ -447,6 +459,8 @@ class ResearchAnalysisScreen(Screen):
                 changed = True
         if changed:
             self._refresh_selected_ticker_tags()
+        else:
+            self._refresh_start_button_state()
         self.query_one("#ra_ticker_input", Input).focus()
 
     def _refresh_selected_ticker_tags(self) -> None:
@@ -458,11 +472,16 @@ class ResearchAnalysisScreen(Screen):
         else:
             registry = IdRegistry("sel")
             for ticker in self._selected_tickers:
-                tags.mount(Button(ticker, id=f"sel-{registry.register(ticker)}", classes="selected-chip"))
+                tags.mount(Button(f"{ticker} ×", id=f"sel-{registry.register(ticker)}", classes="selected-chip"))
         self.query_one("#selected_ticker_count", Static).update(f"已选择 {len(self._selected_tickers)} 个 ETF")
+        self._refresh_start_button_state()
+
+    def _refresh_start_button_state(self) -> None:
+        has_tickers = bool(self._selected_tickers or self._parse_tickers(self.query_one("#ra_ticker_input", Input).value))
+        self.query_one("#btn_ra_start", Button).disabled = not has_tickers
 
     def _remove_ticker_from_selection(self, ticker: str) -> None:
-        cleaned = ticker.strip().upper()
+        cleaned = ticker.replace("×", "").strip().upper()
         self._selected_tickers = [existing for existing in self._selected_tickers if existing != cleaned]
         self._refresh_selected_ticker_tags()
         self.query_one("#ra_ticker_input", Input).focus()
@@ -521,6 +540,16 @@ class ResearchAnalysisScreen(Screen):
             if len(tickers) >= 5:
                 break
         return tickers[:5]
+
+    def _recent_task_lines(self) -> list[str]:
+        lines: list[str] = []
+        try:
+            for record in self.repository.list_reports()[:4]:
+                rating = f" · {record.rating}" if record.rating else ""
+                lines.append(f"{record.date}  {record.ticker}{rating}")
+        except Exception:
+            return []
+        return lines
 
     def _watchlist_card(self, row: WatchlistBoardRow) -> Vertical:
         price_class = _a_share_value_class(row.pct_chg)

@@ -288,6 +288,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNotNone(screen.query_one("#btn_ra_start"))
                 self.assertIsNotNone(screen.query_one("#watchlist_cards"))
                 self.assertEqual(len(screen.query(".ticker-chip")), 5)
+                self.assertTrue(screen.query_one("#btn_ra_start", Button).disabled)
                 with self.assertRaises(Exception):
                     screen.query_one("#wl_total")
 
@@ -307,6 +308,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("510300.SH", labels)
                 self.assertIn("159915.SZ", labels)
                 self.assertIn("588000.SH", labels)
+                rendered_tasks = "\n".join(str(widget.render()) for widget in screen.query(".recent-task-item"))
+                self.assertIn("510300.SH", rendered_tasks)
 
     async def test_research_analysis_screen_focuses_ticker_input(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -328,8 +331,23 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(app.screen, ResearchAnalysisScreen)
                 self.assertEqual(screen.query_one("#ra_ticker_input").value, "")
                 selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
-                self.assertEqual(selected_labels, ["510300.SH"])
+                self.assertEqual(selected_labels, ["510300.SH ×"])
                 self.assertIn("已选择 1 个 ETF", str(screen.query_one("#selected_ticker_count", Static).render()))
+                self.assertFalse(screen.query_one("#btn_ra_start", Button).disabled)
+
+    async def test_research_analysis_selected_tag_click_removes_ticker(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                await pilot.click("#btn_research")
+                screen = app.screen
+                screen.query_one("#ra_ticker_input").value = "510300.SH"
+                await pilot.press("enter")
+                await pilot.pause()
+                await pilot.click("#sel-sel_510300_SH")
+                self.assertEqual([str(button.label) for button in screen.query(".selected-chip")], [])
+                self.assertTrue(screen.query_one("#btn_ra_start", Button).disabled)
+                self.assertIn("已选择 0 个 ETF", str(screen.query_one("#selected_ticker_count", Static).render()))
 
     async def test_research_watchlist_cards_render_snapshot(self):
         snapshot = WatchlistBoardSnapshot(
@@ -391,7 +409,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.click("#wl-wl_510300_SH")
                     screen = app.screen
                     selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
-                    self.assertEqual(selected_labels, ["510300.SH"])
+                    self.assertEqual(selected_labels, ["510300.SH ×"])
                     self.assertEqual(app.focused.id, "ra_ticker_input")
 
     async def test_research_watchlist_card_click_does_not_duplicate_selection(self):
@@ -417,7 +435,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     await pilot.press("enter")
                     await pilot.click("#wl-wl_510300_SH")
                     selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
-                    self.assertEqual(selected_labels, ["159915.SZ", "510300.SH"])
+                    self.assertEqual(selected_labels, ["159915.SZ ×", "510300.SH ×"])
 
     # --- AnalysisRunScreen: board layout ---
 

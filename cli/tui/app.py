@@ -373,6 +373,12 @@ class ETFAgentsTuiApp(App):
         text-style: bold underline;
     }
 
+    .entry-primary:disabled {
+        background: $surface;
+        color: $text-disabled;
+        text-style: none;
+    }
+
     .entry-config {
         width: 1fr;
         height: 3;
@@ -404,7 +410,7 @@ class ETFAgentsTuiApp(App):
 
     .ticker-chip {
         width: 1fr;
-        height: 1;
+        height: 3;
         min-width: 0;
         margin: 0 1 0 0;
         padding: 0;
@@ -420,6 +426,23 @@ class ETFAgentsTuiApp(App):
         color: $accent;
         background: transparent;
         text-style: bold;
+    }
+
+    .recent-task-list {
+        height: auto;
+        margin: 0 0 1 0;
+        border: solid $surface;
+        padding: 0 1;
+    }
+
+    .recent-task-item {
+        height: 1;
+        color: $text-muted;
+    }
+
+    .recent-task-empty {
+        height: 1;
+        color: $text-muted;
     }
 
     #watchlist_cards {
