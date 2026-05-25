@@ -991,7 +991,7 @@ class AnalysisRunner:
 
                 # Determine content and trigger
                 if det_key == defn.state_key:
-                    content = str(value)
+                    content = self._prepare_markdown(str(value))
                 elif det_key == "investment_debate_state":
                     if not isinstance(value, dict):
                         continue
@@ -1065,6 +1065,12 @@ class AnalysisRunner:
             if isinstance(value, dict) and key in value:
                 return value.get(key)
         return None
+
+    @staticmethod
+    def _prepare_markdown(content: str) -> str:
+        """Apply the same formatting pipeline used when saving reports."""
+        from cli.main import _prepare_report_markdown
+        return _prepare_report_markdown(content)
 
     def _format_research(self, debate: dict) -> str:
         """Format research debate state to Markdown."""
