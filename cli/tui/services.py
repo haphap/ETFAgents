@@ -10,7 +10,7 @@ import csv
 import json
 import re
 import threading
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
@@ -458,6 +458,9 @@ def load_watchlist_board(
     repository: ReportRepository,
     manager: Any | None = None,
     curr_date: str | None = None,
+    cache_path: str | Path | None = None,
+    max_age_seconds: int = 900,
+    use_cache: bool = True,
 ) -> WatchlistBoardSnapshot:
     """Build the TUI watchlist board from local watchlist, daily ETF details, and reports."""
     if curr_date is None:
@@ -467,9 +470,21 @@ def load_watchlist_board(
         manager = WatchlistManager()
 
     reports_by_ticker = _latest_reports_by_ticker(repository)
+    entries = _watchlist_entries(manager)
+    signature = _watchlist_cache_signature(curr_date, entries, reports_by_ticker)
+    resolved_cache_path = Path(cache_path).expanduser() if cache_path else _watchlist_board_cache_path()
+    if use_cache:
+        cached = _load_cached_watchlist_snapshot(
+            resolved_cache_path,
+            signature=signature,
+            max_age_seconds=max_age_seconds,
+        )
+        if cached is not None:
+            return cached
+
     rows: list[WatchlistBoardRow] = []
     error_count = 0
-    for entry in manager.list_tickers(group="default"):
+    for entry in entries:
         ticker = str(entry.get("ticker", "")).strip().upper()
         if not ticker:
             continue
@@ -491,7 +506,90 @@ def load_watchlist_board(
                 )
             )
     rows.sort(key=lambda row: (row.pct_chg is None, -(row.pct_chg or 0), row.ticker))
-    return WatchlistBoardSnapshot(rows=rows, error_count=error_count)
+    snapshot = WatchlistBoardSnapshot(rows=rows, error_count=error_count)
+    if use_cache:
+        _write_watchlist_cache(resolved_cache_path, signature=signature, snapshot=snapshot)
+    return snapshot
+
+
+def _watchlist_entries(manager: Any) -> list[dict[str, Any]]:
+    return list(manager.list_tickers(group="default"))
+
+
+def _watchlist_board_cache_path() -> Path:
+    return Path(DEFAULT_CONFIG["data_cache_dir"]).expanduser() / "tui" / "watchlist_board.json"
+
+
+def _watchlist_cache_signature(
+    curr_date: str,
+    entries: list[dict[str, Any]],
+    reports_by_ticker: dict[str, ReportRecord],
+) -> dict[str, Any]:
+    tickers = [
+        {
+            "ticker": str(entry.get("ticker", "")).strip().upper(),
+            "name": str(entry.get("name") or ""),
+        }
+        for entry in entries
+        if str(entry.get("ticker", "")).strip()
+    ]
+    reports = [
+        {
+            "ticker": ticker,
+            "date": report.date,
+            "rating": report.rating or "",
+        }
+        for ticker, report in sorted(reports_by_ticker.items())
+    ]
+    return {"curr_date": curr_date, "tickers": tickers, "reports": reports}
+
+
+def _load_cached_watchlist_snapshot(
+    path: Path,
+    *,
+    signature: dict[str, Any],
+    max_age_seconds: int,
+) -> WatchlistBoardSnapshot | None:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if payload.get("signature") != signature:
+            return None
+        cached_at = datetime.fromisoformat(str(payload.get("cached_at", "")))
+        if max_age_seconds >= 0 and (datetime.now() - cached_at).total_seconds() > max_age_seconds:
+            return None
+        rows = [
+            WatchlistBoardRow(**row)
+            for row in payload.get("snapshot", {}).get("rows", [])
+            if isinstance(row, dict)
+        ]
+        loaded_at_raw = payload.get("snapshot", {}).get("loaded_at")
+        loaded_at = datetime.fromisoformat(loaded_at_raw) if loaded_at_raw else cached_at
+        error_count = int(payload.get("snapshot", {}).get("error_count", 0))
+        return WatchlistBoardSnapshot(rows=rows, loaded_at=loaded_at, error_count=error_count)
+    except (OSError, json.JSONDecodeError, ValueError, TypeError):
+        return None
+
+
+def _write_watchlist_cache(
+    path: Path,
+    *,
+    signature: dict[str, Any],
+    snapshot: WatchlistBoardSnapshot,
+) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "signature": signature,
+            "cached_at": datetime.now().isoformat(),
+            "snapshot": {
+                "rows": [asdict(row) for row in snapshot.rows],
+                "loaded_at": snapshot.loaded_at.isoformat(),
+                "error_count": snapshot.error_count,
+            },
+        }
+        path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def _latest_reports_by_ticker(repository: ReportRepository) -> dict[str, ReportRecord]:

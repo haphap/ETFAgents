@@ -126,6 +126,82 @@ class WatchlistBoardTests(unittest.TestCase):
         self.assertEqual(snapshot.rows[0].ticker, "159915.SZ")
         self.assertIn("vendor down", snapshot.rows[0].error)
 
+    def test_load_watchlist_board_uses_cache_for_same_signature(self):
+        class _Manager:
+            def list_tickers(self, group=None):
+                return [{"ticker": "510300.SH", "name": "沪深300ETF"}]
+
+        def _detail(ticker, curr_date=None):
+            return {
+                "ticker": ticker,
+                "name": "沪深300ETF",
+                "latest_date": "20260524",
+                "close": 3.942,
+                "pct_chg": 0.5,
+            }
+
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "watchlist_cache.json"
+            with patch("etfagents.detail.get_etf_detail", side_effect=_detail) as mocked:
+                first = load_watchlist_board(
+                    ReportRepository(tmp),
+                    manager=_Manager(),
+                    curr_date="2026-05-25",
+                    cache_path=cache_path,
+                )
+            with patch("etfagents.detail.get_etf_detail", side_effect=RuntimeError("should not reload")) as mocked_cached:
+                second = load_watchlist_board(
+                    ReportRepository(tmp),
+                    manager=_Manager(),
+                    curr_date="2026-05-25",
+                    cache_path=cache_path,
+                )
+
+        self.assertEqual(mocked.call_count, 1)
+        mocked_cached.assert_not_called()
+        self.assertEqual(first.rows[0].ticker, second.rows[0].ticker)
+        self.assertEqual(second.rows[0].close, 3.942)
+
+    def test_load_watchlist_board_refreshes_cache_when_watchlist_changes(self):
+        class _FirstManager:
+            def list_tickers(self, group=None):
+                return [{"ticker": "510300.SH", "name": "沪深300ETF"}]
+
+        class _SecondManager:
+            def list_tickers(self, group=None):
+                return [{"ticker": "159915.SZ", "name": "创业板ETF"}]
+
+        def _detail(ticker, curr_date=None):
+            return {
+                "ticker": ticker,
+                "name": ticker,
+                "latest_date": "20260524",
+                "close": 1.0 if ticker == "510300.SH" else 2.0,
+                "pct_chg": 0.5,
+            }
+
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_path = Path(tmp) / "watchlist_cache.json"
+            with patch("etfagents.detail.get_etf_detail", side_effect=_detail) as mocked:
+                load_watchlist_board(
+                    ReportRepository(tmp),
+                    manager=_FirstManager(),
+                    curr_date="2026-05-25",
+                    cache_path=cache_path,
+                )
+                second = load_watchlist_board(
+                    ReportRepository(tmp),
+                    manager=_SecondManager(),
+                    curr_date="2026-05-25",
+                    cache_path=cache_path,
+                )
+
+        self.assertEqual(mocked.call_count, 2)
+        self.assertEqual(second.rows[0].ticker, "159915.SZ")
+        self.assertEqual(second.rows[0].close, 2.0)
+
 
 class IdRegistryTests(unittest.TestCase):
     def test_register_resolve_and_collision_handling(self):
