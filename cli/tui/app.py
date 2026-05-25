@@ -48,7 +48,13 @@ class ETFAgentsTuiApp(App):
         color: $text;
     }
 
-    ETFAgentsTuiApp, Container, Vertical, Horizontal, ScrollableContainer {
+    .screen-body,
+    .screen-body Vertical,
+    .screen-body Horizontal,
+    .run-layout,
+    .run-layout Vertical,
+    .run-layout Horizontal,
+    .run-layout ScrollableContainer {
         background: transparent;
     }
 
