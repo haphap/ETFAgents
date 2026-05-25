@@ -667,6 +667,7 @@ class AnalysisRunScreen(Screen):
         self._append_progress(f"{event.ticker}: 开始运行，共 {event.total_sections} 个团队章节")
         if self.current_ticker is None:
             self.current_ticker = event.ticker
+        if self.current_ticker == event.ticker:
             self._load_etf_detail(event.ticker)
 
     def _handle_section_done(self, event: SectionDone) -> None:
