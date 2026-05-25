@@ -2,20 +2,45 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from rich.align import Align
+from rich.text import Text
+
 from textual.app import ComposeResult
 from textual.containers import Center, Middle, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Static
+
+_BANNER_TEXT = (
+    Path(__file__).resolve().parent.parent.parent / "static" / "welcome.txt"
+).read_text(encoding="utf-8").rstrip("\n")
+
+
+class _DynamicBanner(Static):
+
+    DEFAULT_CSS = """
+    _DynamicBanner {
+        width: 100%;
+        height: auto;
+        padding: 1 0;
+        color: $accent;
+    }
+    """
+
+    def render(self) -> Align:
+        lines = _BANNER_TEXT.splitlines()
+        banner = Text("\n".join(lines), style="bold", justify="center")
+        subtitle = Text("Multi-agent ETF research workspace", style="dim", justify="center")
+        body = Text.assemble(banner, "\n", subtitle)
+        return Align.center(body)
 
 
 class HomeScreen(Screen):
 
     DEFAULT_CSS = """
     HomeScreen { align: center middle; }
-    #home_body { width: auto; min-width: 46; max-width: 72; height: auto; }
-    #home_banner { color: $accent; text-align: center; width: 100%; height: 6; margin-bottom: 1; }
-    #home_title { text-style: bold; color: $accent; text-align: center; width: 100%; margin-bottom: 1; }
-    #home_subtitle { color: $text-muted; text-align: center; width: 100%; margin-bottom: 2; }
+    #home_body { width: auto; min-width: 46; max-width: 80; height: auto; }
     #home_body .nav-action { width: 100%; content-align: center middle; }
     #home_hints { color: $text-muted; text-align: center; width: 100%; margin-top: 2; }
     """
@@ -24,17 +49,7 @@ class HomeScreen(Screen):
         with Center():
             with Middle():
                 with Vertical(id="home_body"):
-                    yield Static(
-                        "  _____ _____ _____    _                    _       \n"
-                        " | ____|_   _|  ___|  / \\   __ _  ___ _ __ | |_ ___ \n"
-                        " |  _|   | | | |_    / _ \\ / _` |/ _ \\ '_ \\| __/ __|\n"
-                        " | |___  | | |  _|  / ___ \\ (_| |  __/ | | | |_\\__ \\\n"
-                        " |_____| |_| |_|   /_/   \\_\\__, |\\___|_| |_|\\__|___/\n"
-                        "                           |___/                    ",
-                        id="home_banner",
-                    )
-                    yield Static("ETFAgents", id="home_title")
-                    yield Static("Multi-agent ETF research workspace", id="home_subtitle")
+                    yield _DynamicBanner()
                     yield Button("Research Analysis", id="btn_research", classes="nav-action")
                     yield Button("Reports Library", id="btn_reports", classes="nav-action")
                     yield Button("Backtest", id="btn_backtest", classes="nav-action")

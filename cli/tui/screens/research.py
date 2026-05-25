@@ -102,6 +102,45 @@ def _format_tokens(n: int) -> str:
     return str(n)
 
 
+def _format_detail_text(detail: dict) -> str:
+    lines: list[str] = []
+    name = detail.get("name") or detail.get("ticker", "")
+    close = detail.get("close")
+    pct = detail.get("pct_chg")
+    if close is not None:
+        price_str = f"{close:.3f}"
+        if pct is not None:
+            sign = "+" if pct >= 0 else ""
+            price_str += f" {sign}{pct:.2f}%"
+        lines.append(f"{name} {price_str}" if name else price_str)
+    elif name:
+        lines.append(name)
+
+    nav = detail.get("unit_nav")
+    if nav is not None:
+        pd_bps = detail.get("premium_discount_bps")
+        nav_line = f"NAV {nav:.4f}"
+        if pd_bps is not None:
+            nav_line += f" {pd_bps:+.0f}bp"
+        lines.append(nav_line)
+
+    share = detail.get("fund_share")
+    if share is not None:
+        share_line = f"规模 {share / 1e8:.0f}亿"
+        sc = detail.get("share_change_pct")
+        if sc is not None:
+            share_line += f" {sc:+.1f}%"
+        lines.append(share_line)
+
+    holdings = detail.get("holdings") or []
+    for h in holdings[:3]:
+        w = h.get("weight_pct")
+        w_str = f"{w:.1f}%" if w is not None else "?"
+        lines.append(f"  {h.get('name', '?')} {w_str}")
+
+    return "\n".join(lines) if lines else "无数据"
+
+
 def _build_analysis_runner(cfg: AnalysisConfig) -> AnalysisRunner:
     from etfagents.default_config import DEFAULT_CONFIG
     import copy
@@ -297,7 +336,6 @@ class ResearchAnalysisScreen(Screen):
         self._analysis_config: AnalysisConfig | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
         with Horizontal(classes="screen-body"):
             with Vertical(classes="left-pane"):
                 yield Static("Create Run", classes="pane-title")
@@ -396,12 +434,13 @@ class AnalysisRunScreen(Screen):
         pm_defs = [d for d in defs if d.team == "决策"]
         decision_defs = pm_defs
 
-        yield Header(show_clock=True)
+        yield Header(show_clock=False)
         with Vertical(classes="run-layout"):
             with Horizontal(classes="screen-body run-main"):
                 with Vertical(classes="left-pane"):
                     yield Static("ETF Queue", classes="pane-title")
                     yield Static(self._config_summary(), id="ra_run_config")
+                    yield Static("", id="ra_etf_detail")
                     yield Button("Cancel", id="btn_ra_cancel", classes="text-action warning-text", disabled=True)
                     yield ListView(id="ra_queue")
                 with Vertical(classes="right-pane"):
@@ -475,7 +514,11 @@ class AnalysisRunScreen(Screen):
                         yield Static("整体进度", id="ra_body_title", classes="pane-title")
                         with VerticalScroll(id="ra_body_scroll"):
                             yield Markdown("准备开始分析。", id="ra_body")
-            yield Static(self._stats_text(), id="ra_stats_bar")
+            with Horizontal(classes="stats-bar"):
+                yield Static(self._stats_progress_text(), id="stats_progress", classes="stats-seg-accent")
+                yield Static(self._stats_resources_text(), id="stats_resources", classes="stats-seg-panel")
+                yield Static(self._stats_reports_text(), id="stats_reports", classes="stats-seg-success")
+                yield Static(self._stats_right_text(), id="stats_right", classes="stats-seg-surface")
 
     def on_mount(self) -> None:
         self._start_analysis()
@@ -494,6 +537,7 @@ class AnalysisRunScreen(Screen):
         if item_id in self.ticker_ids:
             self.current_ticker = self.ticker_ids.resolve(item_id)
             self._refresh_body()
+            self._load_etf_detail(self.current_ticker)
 
     # --- Analysis lifecycle ---
 
@@ -533,19 +577,39 @@ class AnalysisRunScreen(Screen):
 
     def _config_summary(self) -> str:
         cfg = self._analysis_config
+        depth = _depth_option_label(cfg.depth_name)
         return (
-            f"ETF: {', '.join(self.tickers)}\n"
-            f"date: {cfg.analysis_date or 'today'}\n"
-            f"depth: {_depth_option_label(cfg.depth_name)}\n"
-            f"provider: {cfg.llm_provider}\n"
-            f"quick: {cfg.quick_model or 'default'}\n"
-            f"deep: {cfg.deep_model or 'default'}"
+            f"{cfg.analysis_date or 'today'} · {depth} · {cfg.llm_provider}\n"
+            f"quick:{cfg.quick_model or 'default'} · deep:{cfg.deep_model or 'default'}"
         )
 
     def _cancel_analysis(self) -> None:
         if self._active_runner:
             self._active_runner.request_cancel()
         self.query_one("#btn_ra_cancel", Button).disabled = True
+
+    def _load_etf_detail(self, ticker: str) -> None:
+        try:
+            self.query_one("#ra_etf_detail", Static).update("加载中...")
+        except Exception:
+            pass
+
+        def _worker() -> None:
+            try:
+                from etfagents.detail import get_etf_detail
+                detail = get_etf_detail(ticker)
+                text = _format_detail_text(detail)
+            except Exception:
+                text = "详情加载失败"
+            _safe_call_from_thread(self, self._update_etf_detail, text)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _update_etf_detail(self, text: str) -> None:
+        try:
+            self.query_one("#ra_etf_detail", Static).update(text)
+        except Exception:
+            pass
 
     def on_unmount(self) -> None:
         if self._active_runner:
@@ -603,6 +667,7 @@ class AnalysisRunScreen(Screen):
         self._append_progress(f"{event.ticker}: 开始运行，共 {event.total_sections} 个团队章节")
         if self.current_ticker is None:
             self.current_ticker = event.ticker
+            self._load_etf_detail(event.ticker)
 
     def _handle_section_done(self, event: SectionDone) -> None:
         self.section_contents[(event.ticker, event.section_id)] = event.content
@@ -844,34 +909,38 @@ class AnalysisRunScreen(Screen):
 
     def _refresh_stats_bar(self) -> None:
         try:
-            self.query_one("#ra_stats_bar", Static).update(self._stats_text())
+            self.query_one("#stats_progress", Static).update(self._stats_progress_text())
+            self.query_one("#stats_resources", Static).update(self._stats_resources_text())
+            self.query_one("#stats_reports", Static).update(self._stats_reports_text())
+            self.query_one("#stats_right", Static).update(self._stats_right_text())
         except Exception:
             pass
 
-    def _stats_text(self) -> str:
+    def _stats_progress_text(self) -> str:
         stats = self._read_runner_stats()
         agents_total = len(self._section_definitions()) * len(self.tickers)
         agents_done = sum(1 for done in self.section_status.values() if done)
-        reports_done = agents_done
-        reports_total = agents_total
         current_agent = self._current_agent_label()
-        elapsed = self._elapsed_text()
+        return f" ◉ Agents {agents_done}/{agents_total} · {current_agent}"
+
+    def _stats_resources_text(self) -> str:
+        stats = self._read_runner_stats()
         tokens_in = int(stats.get("tokens_in", 0) or 0)
         tokens_out = int(stats.get("tokens_out", 0) or 0)
         token_text = (
-            f"{_format_tokens(tokens_in)}↑ {_format_tokens(tokens_out)}↓"
+            f"{_format_tokens(tokens_in)}↑{_format_tokens(tokens_out)}↓"
             if tokens_in or tokens_out else "--"
         )
-        return (
-            f"Agents {agents_done}/{agents_total} | "
-            f"Agent {current_agent} | "
-            f"LLM {int(stats.get('llm_calls', 0) or 0)} | "
-            f"Tools {int(stats.get('tool_calls', 0) or 0)} | "
-            f"Tokens {token_text} | "
-            f"Reports {reports_done}/{reports_total} | "
-            f"{elapsed} | "
-            "? Help | s Settings | q Quit | Esc Back"
-        )
+        return f"LLM {int(stats.get('llm_calls', 0) or 0)} · Tools {int(stats.get('tool_calls', 0) or 0)} · {token_text}"
+
+    def _stats_reports_text(self) -> str:
+        agents_total = len(self._section_definitions()) * len(self.tickers)
+        agents_done = sum(1 for done in self.section_status.values() if done)
+        return f"Reports {agents_done}/{agents_total}"
+
+    def _stats_right_text(self) -> str:
+        elapsed = self._elapsed_text()
+        return f"{elapsed}  ? s q Esc "
 
     def _read_runner_stats(self) -> dict[str, Any]:
         runner = self._active_runner or self.runner

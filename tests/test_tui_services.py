@@ -114,10 +114,10 @@ class BacktestViewerTests(unittest.TestCase):
 class TuiSettingsTests(unittest.TestCase):
     def test_default_values(self):
         s = TuiSettings()
-        self.assertEqual(s.theme, "textual-dark")
+        self.assertEqual(s.theme, "catppuccin-mocha")
         self.assertEqual(s.density, "normal")
         self.assertEqual(s.panel_width, "normal")
-        self.assertEqual(s.left_pane_pct, 35)
+        self.assertEqual(s.left_pane_pct, 25)
 
     def test_save_load_roundtrip(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -128,30 +128,30 @@ class TuiSettingsTests(unittest.TestCase):
             self.assertEqual(loaded.theme, "nord")
             self.assertEqual(loaded.density, "compact")
             self.assertEqual(loaded.panel_width, "wide")
-            self.assertEqual(loaded.left_pane_pct, 40)
+            self.assertEqual(loaded.left_pane_pct, 30)
 
     def test_corrupt_file_returns_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "settings.json"
             path.write_text("{bad json", encoding="utf-8")
             loaded = TuiSettings.load(path)
-            self.assertEqual(loaded.theme, "textual-dark")
+            self.assertEqual(loaded.theme, "catppuccin-mocha")
 
     def test_missing_file_returns_defaults(self):
         loaded = TuiSettings.load(Path("/nonexistent/settings.json"))
-        self.assertEqual(loaded.theme, "textual-dark")
+        self.assertEqual(loaded.theme, "catppuccin-mocha")
 
     def test_non_dict_json_returns_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "settings.json"
             path.write_text("[]", encoding="utf-8")
             loaded = TuiSettings.load(path)
-            self.assertEqual(loaded.theme, "textual-dark")
+            self.assertEqual(loaded.theme, "catppuccin-mocha")
 
     def test_validate_clamps_invalid_values(self):
         s = TuiSettings(theme="nonexistent", density="invalid", panel_width="huge")
         s.validate()
-        self.assertEqual(s.theme, "textual-dark")
+        self.assertEqual(s.theme, "catppuccin-mocha")
         self.assertEqual(s.density, "normal")
         self.assertEqual(s.panel_width, "normal")
 

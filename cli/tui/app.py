@@ -44,15 +44,15 @@ class ETFAgentsTuiApp(App):
     CSS = """
     /* ── Base ─────────────────────────────────────────────── */
     Screen {
-        background: $background;
+        background: transparent;
         color: $text;
     }
 
     Header {
-        background: $background;
+        background: transparent;
         color: $text;
         border-bottom: solid $panel;
-        height: 3;
+        height: 1;
         text-style: bold;
     }
 
@@ -98,7 +98,7 @@ class ETFAgentsTuiApp(App):
 
     /* ── Form controls ───────────────────────────────────── */
     Input {
-        background: $background;
+        background: $surface;
         color: $text;
         border: tall $panel;
         margin: 0 0 1 0;
@@ -109,7 +109,7 @@ class ETFAgentsTuiApp(App):
     }
 
     Select {
-        background: $background;
+        background: $surface;
         color: $text;
         border: tall $panel;
         margin: 0 0 1 0;
@@ -232,16 +232,16 @@ class ETFAgentsTuiApp(App):
     /* ── Panel layout ─────────────────────────────────────── */
     .left-pane {
         height: 100%;
-        width: 30%;
-        min-width: 34;
+        width: 25%;
+        min-width: 28;
         border: solid $panel;
-        padding: 1 2;
+        padding: 1 1;
         background: transparent;
     }
 
     .right-pane {
         height: 100%;
-        width: 70%;
+        width: 75%;
         padding: 0 1;
         border: solid $panel;
         background: transparent;
@@ -249,26 +249,26 @@ class ETFAgentsTuiApp(App):
 
     .right-top {
         height: 35%;
-        border: solid $panel;
-        padding: 1 2;
+        border: none;
+        padding: 0 1;
         margin-bottom: 1;
         background: transparent;
     }
 
     .right-bottom {
         height: 1fr;
-        border: solid $panel;
-        padding: 1 2;
+        border: none;
+        padding: 1 1;
         background: transparent;
     }
 
     /* Panel width presets */
-    .panel-narrow .left-pane  { width: 30%; }
-    .panel-narrow .right-pane { width: 70%; }
-    .panel-normal .left-pane  { width: 35%; }
-    .panel-normal .right-pane { width: 65%; }
-    .panel-wide .left-pane    { width: 40%; }
-    .panel-wide .right-pane   { width: 60%; }
+    .panel-narrow .left-pane  { width: 20%; }
+    .panel-narrow .right-pane { width: 80%; }
+    .panel-normal .left-pane  { width: 25%; }
+    .panel-normal .right-pane { width: 75%; }
+    .panel-wide .left-pane    { width: 30%; }
+    .panel-wide .right-pane   { width: 70%; }
 
     /* Density options */
     .density-compact .left-pane,  .density-compact .right-pane  { padding: 0 0; }
@@ -277,6 +277,20 @@ class ETFAgentsTuiApp(App):
 
     /* ── Home: nav + dashboard ────────────────────────────── */
     /* ── Analysis run: board layout ───────────────────────── */
+    #ra_run_config {
+        color: $text-muted;
+        height: auto;
+        margin-bottom: 1;
+    }
+
+    #ra_etf_detail {
+        color: $text;
+        height: auto;
+        margin-bottom: 1;
+        padding: 0 1;
+        border: solid $surface;
+    }
+
     #ra_body_scroll {
         height: 1fr;
         scrollbar-size: 1 1;
@@ -288,13 +302,41 @@ class ETFAgentsTuiApp(App):
         height: auto;
     }
 
-    #ra_stats_bar {
+    .stats-bar {
         height: 1;
-        margin: 0 1;
-        padding: 0 2;
-        background: $panel;
-        color: $accent;
+        width: 100%;
+        background: transparent;
+    }
+
+    .stats-bar > Static {
+        width: 1fr;
+        height: 1;
+        padding: 0 1;
+    }
+
+    .stats-seg-accent {
+        background: $accent;
+        color: $background;
         text-style: bold;
+        content-align: left middle;
+    }
+
+    .stats-seg-panel {
+        background: $panel;
+        color: $text;
+        content-align: center middle;
+    }
+
+    .stats-seg-success {
+        background: $success;
+        color: $background;
+        content-align: center middle;
+    }
+
+    .stats-seg-surface {
+        background: $surface;
+        color: $text-muted;
+        content-align: right middle;
     }
 
     .board-column {
