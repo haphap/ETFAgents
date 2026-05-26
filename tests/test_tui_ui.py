@@ -817,7 +817,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(analyst_ids, ["market_flow"])
 
     async def test_analysis_run_ticker_status_updates(self):
-        """Verify ticker status changes from ⏳ → ✓/✗ when events fire."""
+        """Verify ticker queue uses numbered Chinese status rows."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -831,8 +831,6 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screen = app.screen
                 self.assertIsInstance(screen, AnalysisRunScreen)
                 queue = screen.query_one("#ra_queue", ListView)
-                queue.clear()
-                screen.ticker_ids.clear()
 
                 # Simulate ticker started
                 screen._handle_ticker_started(TickerStarted(ticker="510300.SH", total_sections=9))
@@ -851,8 +849,11 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 item = queue.children[0]
                 label = item.query_one(Label)
                 rendered = str(label.render())
-                self.assertIn("✓", rendered)
+                self.assertIn("> 1. 510300", rendered)
+                self.assertIn("已完成", rendered)
                 self.assertIn("BUY", rendered)
+                status = str(screen.query_one("#ra_queue_status", Static).render())
+                self.assertIn("状态:", status)
 
     async def test_analysis_run_ticker_selection(self):
         """Verify selecting a ticker in queue changes current_ticker."""
@@ -869,8 +870,6 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screen = app.screen
                 self.assertIsInstance(screen, AnalysisRunScreen)
                 queue = screen.query_one("#ra_queue", ListView)
-                queue.clear()
-                screen.ticker_ids.clear()
                 screen.current_ticker = None
 
                 # Start two tickers

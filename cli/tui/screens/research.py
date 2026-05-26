@@ -1121,6 +1121,7 @@ class AnalysisRunScreen(Screen):
         self._last_stats: dict[str, Any] = {}
         self._backtest_signals: dict[str, dict[str, Any]] = {}
         self._etf_details: dict[str, dict[str, Any]] = {}
+        self._ticker_run_state: dict[str, str] = {}
         self.section_picker_ids = IdRegistry("pick")
         self._picker_open_group: str | None = None
 
@@ -1143,7 +1144,7 @@ class AnalysisRunScreen(Screen):
                         yield Static(self._config_summary(), id="ra_run_config")
                     yield Button("⏹ 取消分析", id="btn_ra_cancel", classes="cancel-btn warning-text", disabled=True)
                     yield Static("🧠 研究队列", classes="pane-title")
-                    yield Static("⏳分析中  ✓完成  ✗失败  ⊘取消", classes="queue-legend")
+                    yield Static("状态: ⚪ 0/0 排期中", id="ra_queue_status", classes="queue-status")
                     yield ListView(id="ra_queue")
                 with Vertical(classes="right-pane"):
                     # Team tabs (right-top)
@@ -1272,6 +1273,7 @@ class AnalysisRunScreen(Screen):
         self._debate_rounds.clear()
         self._backtest_signals.clear()
         self._etf_details.clear()
+        self._ticker_run_state = {ticker: "pending" for ticker in self.tickers}
         self._active_column = ""
         self.ticker_ids.clear()
         self.progress_lines.clear()
@@ -1281,12 +1283,16 @@ class AnalysisRunScreen(Screen):
 
         queue = self.query_one("#ra_queue", ListView)
         queue.clear()
+        for ticker in self.tickers:
+            ticker_id = self.ticker_ids.register(ticker)
+            queue.append(ListItem(Label(self._queue_item_label(ticker)), id=ticker_id))
 
         runner = self.runner or self._build_runner()
         self._active_runner = runner
         self.query_one("#btn_ra_cancel", Button).disabled = False
         self._append_progress(f"开始分析 {', '.join(self.tickers)}")
         self._refresh_board()
+        self._refresh_queue_panel()
         self._refresh_stats_bar()
         self._analysis_thread = threading.Thread(
             target=self._run_analysis,
@@ -1422,15 +1428,69 @@ class AnalysisRunScreen(Screen):
             self._handle_ticker_cancelled(event)
         self._refresh_stats_bar()
 
+    def _queue_item_label(self, ticker: str, suffix: str = "") -> str:
+        status_label = {
+            "pending": "排期中",
+            "running": "分析中",
+            "done": "已完成",
+            "failed": "失败",
+            "cancelled": "已取消",
+        }.get(self._ticker_run_state.get(ticker, "pending"), "排期中")
+        index = self.tickers.index(ticker) + 1 if ticker in self.tickers else len(self.tickers) + 1
+        short_ticker = ticker.split(".", 1)[0]
+        return f"> {index}. {short_ticker} ({status_label}{suffix})"
+
+    def _sync_queue_item(self, ticker: str, suffix: str = "") -> None:
+        ticker_id = self.ticker_ids.register(ticker)
+        try:
+            item = self.query_one(f"#{ticker_id}", ListItem)
+        except Exception:
+            try:
+                self.query_one("#ra_queue", ListView).append(
+                    ListItem(Label(self._queue_item_label(ticker, suffix)), id=ticker_id)
+                )
+            except Exception:
+                pass
+            return
+        try:
+            item.query_one(Label).update(self._queue_item_label(ticker, suffix))
+        except Exception:
+            pass
+
+    def _refresh_queue_panel(self) -> None:
+        ticker = self.current_ticker
+        queue_defs = self._section_group_defs()["analysts"]
+        total = len(queue_defs)
+        completed = 0
+        if ticker:
+            completed = sum(
+                1 for defn in queue_defs
+                if self._board_state.get((ticker, defn.section_id)) == "done"
+            )
+        if any(state == "running" for state in self._ticker_run_state.values()):
+            state_icon, state_text = "🟢", "运行中"
+        elif any(state == "failed" for state in self._ticker_run_state.values()):
+            state_icon, state_text = "🔴", "有失败"
+        elif self._ticker_run_state and all(state == "done" for state in self._ticker_run_state.values()):
+            state_icon, state_text = "✅", "已完成"
+        else:
+            state_icon, state_text = "⚪", "排期中"
+        try:
+            self.query_one("#ra_queue_status", Static).update(
+                f"状态: {state_icon} {completed}/{total} {state_text}"
+            )
+        except Exception:
+            pass
+
     def _handle_ticker_started(self, event: TickerStarted) -> None:
-        ticker_id = self.ticker_ids.register(event.ticker)
-        queue = self.query_one("#ra_queue", ListView)
-        queue.append(ListItem(Label(f"⏳ {event.ticker}"), id=ticker_id))
+        self._ticker_run_state[event.ticker] = "running"
+        self._sync_queue_item(event.ticker)
         self._append_progress(f"{event.ticker}: 开始运行，共 {event.total_sections} 个团队章节")
         if self.current_ticker is None:
             self.current_ticker = event.ticker
         if self.current_ticker == event.ticker:
             self._load_etf_detail(event.ticker)
+        self._refresh_queue_panel()
 
     def _handle_section_done(self, event: SectionDone) -> None:
         self.section_contents[(event.ticker, event.section_id)] = event.content
@@ -1450,6 +1510,7 @@ class AnalysisRunScreen(Screen):
         self._append_progress(f"{event.ticker}: {title} 已更新 ({event.completed}/{event.total})")
         self._set_active_column(event.section_id)
         self._refresh_board()
+        self._refresh_queue_panel()
         self._refresh_body()
 
     def _handle_debate_progress(self, event: DebateProgress) -> None:
@@ -1467,16 +1528,12 @@ class AnalysisRunScreen(Screen):
                 self._board_state[key] = "running"
 
         self._refresh_board()
+        self._refresh_queue_panel()
 
     def _handle_ticker_done(self, event: TickerDone) -> None:
-        ticker_id = self.ticker_ids.register(event.ticker)
         rating_str = f" {event.rating}" if event.rating else ""
-        try:
-            item = self.query_one(f"#{ticker_id}", ListItem)
-            label = item.query_one(Label)
-            label.update(f"✓ {event.ticker}{rating_str}")
-        except Exception:
-            pass
+        self._ticker_run_state[event.ticker] = "done"
+        self._sync_queue_item(event.ticker, suffix=rating_str)
 
         # Mark all sections as done for this ticker
         for defn in self._section_definitions():
@@ -1485,6 +1542,7 @@ class AnalysisRunScreen(Screen):
         self.repository.invalidate()
         self._append_progress(f"{event.ticker}: 分析完成{rating_str}")
         self._refresh_board()
+        self._refresh_queue_panel()
 
         # Show AI summary from portfolio manager content
         pm_content = self.section_contents.get((event.ticker, "portfolio_manager"), "")
@@ -1496,13 +1554,8 @@ class AnalysisRunScreen(Screen):
                 pass
 
     def _handle_ticker_failed(self, event: TickerFailed) -> None:
-        ticker_id = self.ticker_ids.register(event.ticker)
-        try:
-            item = self.query_one(f"#{ticker_id}", ListItem)
-            label = item.query_one(Label)
-            label.update(f"✗ {event.ticker}")
-        except Exception:
-            pass
+        self._ticker_run_state[event.ticker] = "failed"
+        self._sync_queue_item(event.ticker)
 
         # Mark all unfinished sections as failed
         for defn in self._section_definitions():
@@ -1512,16 +1565,13 @@ class AnalysisRunScreen(Screen):
 
         self._append_progress(f"{event.ticker}: 分析失败 - {event.error}")
         self._refresh_board()
+        self._refresh_queue_panel()
 
     def _handle_ticker_cancelled(self, event: TickerCancelled) -> None:
-        ticker_id = self.ticker_ids.register(event.ticker)
-        try:
-            item = self.query_one(f"#{ticker_id}", ListItem)
-            label = item.query_one(Label)
-            label.update(f"⊘ {event.ticker}")
-        except Exception:
-            pass
+        self._ticker_run_state[event.ticker] = "cancelled"
+        self._sync_queue_item(event.ticker)
         self._append_progress(f"{event.ticker}: 已取消")
+        self._refresh_queue_panel()
 
     # --- Board refresh ---
 

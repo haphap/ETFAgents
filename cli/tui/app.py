@@ -616,9 +616,10 @@ class ETFAgentsTuiApp(App):
         text-style: none;
     }
 
-    .queue-legend {
+    .queue-status {
         height: 1;
-        color: $text-disabled;
+        color: $text;
+        margin-bottom: 1;
     }
 
     #ra_body_scroll {
