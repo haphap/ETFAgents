@@ -15,6 +15,7 @@ if Static is None:
 
 from cli.tui.app import (
     AnalysisConfigModal,
+    ErrorDetailModal,
     ETFAgentsTuiApp,
     HomeScreen,
     LLM_PROVIDER_OPTIONS,
@@ -550,7 +551,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
             "pct_chg": 1.25,
             "volume": 123450000,
             "volume_change_pct": 23.45,
-            "fund_share": 12_530_000_000,
+            "fund_share": 1_250_000,
             "share_change_pct": -1.2,
             "holdings": [
                 {"name": "贵州茅台", "weight_pct": 5.23},
@@ -573,7 +574,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
             "volume": 123450000,
             "volume_change_pct": 23.45,
             "turnover_rate": 3.5,
-            "fund_share": 12_530_000_000,
+            "fund_share": 1_250_000,
             "share_change_pct": -1.2,
             "holdings": [
                 {"name": "中国石油", "weight_pct": 5.23},
@@ -1254,11 +1255,50 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     error="boom",
                 ))
                 await pilot.pause()
+                # Dismiss the error modal that pops up
+                self.assertIsInstance(app.screen, ErrorDetailModal)
+                app.screen.dismiss(None)
+                await pilot.pause()
 
                 screen._open_section_picker("analysts")
                 await pilot.pause()
                 labels = _list_view_labels(screen.app.screen.query_one("#section_picker_list", ListView))
                 self.assertTrue(any("✗ 市场与资金流" in label for label in labels))
+
+    async def test_analysis_run_failed_ticker_shows_error_modal_with_traceback(self):
+        """TickerFailed should pop up ErrorDetailModal with traceback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+
+                screen._handle_ticker_failed(TickerFailed(
+                    ticker="510300.SH",
+                    error="LLM provider returned 500",
+                    traceback="Traceback (most recent call last):\n  File \"graph.py\", line 42\nRuntimeError: LLM provider returned 500",
+                ))
+                await pilot.pause()
+
+                modal = app.screen
+                self.assertIsInstance(modal, ErrorDetailModal)
+                title = str(modal.query_one(".err-title", Static).render())
+                self.assertIn("510300.SH", title)
+                summary = str(modal.query_one(".err-summary", Static).render())
+                self.assertIn("LLM provider returned 500", summary)
+                tb = str(modal.query_one(".err-tb", Static).render())
+                self.assertIn("Traceback", tb)
+
+                app.screen.dismiss(None)
+                await pilot.pause()
+                self.assertIsInstance(app.screen, AnalysisRunScreen)
 
     # --- Stats bar ---
 

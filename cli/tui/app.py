@@ -24,6 +24,7 @@ from cli.tui.screens import (  # noqa: F401
     AnalysisConfigModal,
     AnalysisRunScreen,
     BacktestScreen,
+    ErrorDetailModal,
     HelpScreen,
     HomeScreen,
     LLM_PROVIDER_OPTIONS,

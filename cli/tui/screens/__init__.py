@@ -4,6 +4,7 @@ from cli.tui.screens.home import HomeScreen
 from cli.tui.screens.research import (
     AnalysisConfigModal,
     AnalysisRunScreen,
+    ErrorDetailModal,
     LLM_PROVIDER_OPTIONS,
     ResearchAnalysisScreen,
     _build_analysis_runner,
@@ -19,6 +20,7 @@ __all__ = [
     "AnalysisConfigModal",
     "AnalysisRunScreen",
     "BacktestScreen",
+    "ErrorDetailModal",
     "HelpScreen",
     "HomeScreen",
     "LLM_PROVIDER_OPTIONS",

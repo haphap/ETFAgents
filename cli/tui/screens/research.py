@@ -161,7 +161,7 @@ def _format_detail_text(detail: dict) -> str:
         sc_str = "--"
         if sc is not None:
             sc_str = f"{sc:+.1f}%"
-        lines.append(f"份额：{share / 1e8:.0f}亿份 ({sc_str})")
+        lines.append(f"份额：{share / 1e4:.0f}亿份 ({sc_str})")
 
     holdings = detail.get("holdings") or []
     if holdings:
@@ -245,7 +245,7 @@ def _format_detail_rich(detail: dict) -> dict[str, Any]:
     if share is not None:
         sc = detail.get("share_change_pct")
         sc_str = f"{sc:+.1f}%" if sc is not None else "--"
-        parts.append(f"份额: {share / 1e8:.0f}亿份 ({sc_str})")
+        parts.append(f"份额: {share / 1e4:.0f}亿份 ({sc_str})")
     metrics_text = "\n".join(parts) if parts else ""
 
     holdings_bars = Text("持仓占比 TOP5:\n", style="bold")
@@ -974,6 +974,49 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
             return self.query_one(f"#{widget_id}", Checkbox).value
         except Exception:
             return False
+
+
+# ---------------------------------------------------------------------------
+# ErrorDetailModal
+# ---------------------------------------------------------------------------
+
+class ErrorDetailModal(ModalScreen[None]):
+    """Modal showing fatal analysis error with traceback."""
+
+    DEFAULT_CSS = """
+    ErrorDetailModal { align: center middle; }
+    #err_container { width: 90; height: auto; max-height: 32; border: solid $error; background: $surface; padding: 1 2; }
+    #err_container .err-title { color: $error; text-style: bold; height: 1; margin-bottom: 1; }
+    #err_container .err-summary { color: $text; height: auto; margin-bottom: 1; }
+    #err_container .err-tb-scroll { height: auto; max-height: 20; border: solid $panel; padding: 0 1; scrollbar-size: 1 1; }
+    #err_container .err-tb { color: $text-muted; height: auto; }
+    #err_container .err-actions { height: 3; margin-top: 1; }
+    #err_container .err-close { width: 14; height: 3; border: solid $error; background: transparent; color: $error; content-align: center middle; text-style: bold; }
+    """
+
+    def __init__(self, ticker: str, error: str, traceback_text: str = "") -> None:
+        super().__init__()
+        self._ticker = ticker
+        self._error = error
+        self._traceback_text = traceback_text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="err_container"):
+            yield Static(f"分析失败 — {self._ticker}", classes="err-title")
+            yield Static(self._error, classes="err-summary")
+            if self._traceback_text:
+                with ScrollableContainer(classes="err-tb-scroll"):
+                    yield Static(self._traceback_text, classes="err-tb")
+            with Horizontal(classes="err-actions"):
+                yield Static("", classes="acm-action-spacer")
+                yield Button("关闭", id="btn_err_close", classes="err-close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_err_close":
+            self.dismiss(None)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
 
 
 # ---------------------------------------------------------------------------
@@ -1710,6 +1753,13 @@ class AnalysisRunScreen(Screen):
         self._append_progress(f"{event.ticker}: 分析失败 - {event.error}")
         self._refresh_board()
         self._refresh_queue_panel()
+
+        # Show error modal with traceback
+        self.app.push_screen(ErrorDetailModal(
+            ticker=event.ticker,
+            error=event.error,
+            traceback_text=event.traceback,
+        ))
 
     def _handle_ticker_cancelled(self, event: TickerCancelled) -> None:
         self._ticker_run_state[event.ticker] = "cancelled"
