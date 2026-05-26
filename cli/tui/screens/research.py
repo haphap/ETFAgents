@@ -380,31 +380,47 @@ def _weight_bar(pct: float | None, max_pct: float = 50.0, bar_width: int = 10) -
 
 
 def _price_ruler(stop: float, current: float, target: float, width: int = 36) -> str:
-    """Draw a text ruler showing current price position between stop and target.
+    """Draw a text ruler with labels ordered by their numeric price.
 
     Returns empty string when the range is degenerate.
     """
-    span = target - stop
+    values = [
+        ("止损价", stop),
+        ("现价", current),
+        ("目标价", target),
+    ]
+    ordered = sorted(values, key=lambda item: item[1])
+    grouped: list[tuple[float, list[str]]] = []
+    for label, value in ordered:
+        if grouped and value == grouped[-1][0]:
+            grouped[-1][1].append(label)
+        else:
+            grouped.append((value, [label]))
+
+    span = grouped[-1][0] - grouped[0][0]
     if span <= 0:
         return ""
-    pos = (current - stop) / span
-    pos = max(0.0, min(1.0, pos))
-    marker_col = round(pos * (width - 1))
 
-    stop_str = _signal_number(stop)
-    current_str = _signal_number(current)
-    target_str = _signal_number(target)
-    price_line = f"{'止损价 ' + stop_str:<14}{'现价 ' + current_str:<14}{'目标价 ' + target_str}"
-    if marker_col <= 0:
-        ruler_line = "╋" + "━" * (width - 1)
-    elif marker_col >= width - 1:
-        ruler_line = "─" * (width - 1) + "╋"
-    else:
-        ruler_line = "─" * marker_col + "╋" + "━" * (width - 1 - marker_col)
+    labels = [
+        f"{'╋ ' if '现价' in label_group else ''}{'/'.join(label_group)} {_signal_number(value)}"
+        for value, label_group in grouped
+    ]
+    connectors: list[str] = []
+    connector_budget = max(width, 6)
+    for index in range(len(grouped) - 1):
+        distance = grouped[index + 1][0] - grouped[index][0]
+        length = max(3, round(distance / span * connector_budget))
+        connectors.append("─" * length)
+
+    parts: list[str] = []
+    for index, label in enumerate(labels):
+        if index:
+            parts.append(connectors[index - 1])
+        parts.append(label)
+    ruler_line = " ".join(parts)
 
     return (
         f"```\n"
-        f"{price_line}\n"
         f"{ruler_line}\n"
         f"```"
     )

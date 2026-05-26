@@ -637,8 +637,20 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertLess(rendered.index("止损价"), rendered.index("现价"))
         self.assertLess(rendered.index("现价"), rendered.index("目标价"))
 
+    def test_price_ruler_orders_current_after_target_when_price_exceeds_target(self):
+        rendered = _price_ruler(1.756, 1.99, 1.834)
+
+        self.assertLess(rendered.index("止损价"), rendered.index("目标价"))
+        self.assertLess(rendered.index("目标价"), rendered.index("现价"))
+
+    def test_price_ruler_groups_equal_stop_and_target_prices(self):
+        rendered = _price_ruler(2.0, 1.5, 2.0)
+
+        self.assertIn("止损价/目标价 2", rendered)
+        self.assertLess(rendered.index("现价"), rendered.index("止损价/目标价"))
+
     def test_price_ruler_degenerate_range_returns_empty(self):
-        self.assertEqual(_price_ruler(2.0, 1.5, 2.0), "")
+        self.assertEqual(_price_ruler(2.0, 2.0, 2.0), "")
 
     def test_extract_price_from_text_finds_stop(self):
         signal = {
