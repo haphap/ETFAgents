@@ -29,7 +29,11 @@ from cli.tui.app import (
     SettingsScreen,
     HelpScreen,
 )
-from cli.tui.screens.research import _format_detail_text, _highlight_report_numbers
+from cli.tui.screens.research import (
+    _format_detail_rich,
+    _format_detail_text,
+    _highlight_report_numbers,
+)
 from cli.tui.services import (
     AnalysisConfig,
     BacktestViewer,
@@ -553,6 +557,47 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("交易量：12345万手 (+23.4%)", text)
         self.assertIn("份额：125亿份 (-1.2%)", text)
         self.assertIn("头部持仓：1. 贵州茅台 5.2%；2. 五粮液 3.1%", text)
+
+    def test_format_detail_rich_uses_readable_holding_names_without_icons(self):
+        components = _format_detail_rich({
+            "ticker": "510300.SH",
+            "name": "沪深300ETF",
+            "close": 4.12,
+            "pct_chg": 1.25,
+            "volume": 123450000,
+            "volume_change_pct": 23.45,
+            "turnover_rate": 3.5,
+            "fund_share": 12_530_000_000,
+            "share_change_pct": -1.2,
+            "holdings": [
+                {"name": "中国石油", "weight_pct": 5.23},
+            ],
+        })
+
+        self.assertIn("代码: 沪深300ETF", str(components["name_text"]))
+        self.assertIn("换手: 3.5%", components["metrics_text"])
+        self.assertIn("中国石油 5.2%", str(components["holdings_bars"]))
+        self.assertNotIn("🏭 中国", str(components["holdings_bars"]))
+
+    def test_analysis_run_config_summary_uses_provider_not_model(self):
+        screen = AnalysisRunScreen(
+            ["510300.SH"],
+            AnalysisConfig(
+                analysis_date="2026-05-25",
+                llm_provider="deepseek",
+                quick_model="gpt-5.4-mini",
+                deep_model="gpt-5.4",
+            ),
+            runner=_NoopAnalysisRunner(),
+        )
+
+        summary = screen._config_summary()
+
+        self.assertIn("日期: 2026-05-25", summary)
+        self.assertIn("提供商: deepseek", summary)
+        self.assertIn("深度:", summary)
+        self.assertNotIn("模型", summary)
+        self.assertNotIn("日:", summary)
 
     def test_highlight_report_numbers_skips_tables_and_code(self):
         text = _highlight_report_numbers(

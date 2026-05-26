@@ -150,6 +150,34 @@ def _market_flow_combined_tail_inline_text(line: str) -> str:
     return "" if not tail or tail in {"。", "."} else tail
 
 
+def _find_previous_market_flow_combined_tail_heading(lines: list[str], start: int) -> int | None:
+    for index in range(start, -1, -1):
+        stripped = lines[index].strip()
+        if (
+            stripped == _MARKET_FLOW_COMBINED_TAIL_HEADING
+            or _MARKET_FLOW_COMBINED_TAIL_LINE_RE.match(stripped)
+        ):
+            return index
+    return None
+
+
+def _collect_market_flow_tail_conclusion(lines: list[str], start: int, end: int) -> str:
+    parts: list[str] = []
+    for raw_line in lines[start:end]:
+        stripped = raw_line.strip()
+        if not stripped:
+            continue
+        normalized = re.sub(r"^#{1,6}\s*", "", stripped)
+        if normalized in {"指标总览", "四、指标总览", "综合结论", _MARKET_FLOW_COMBINED_TAIL_HEADING}:
+            continue
+        label_match = _MARKET_FLOW_CONCLUSION_LABEL_RE.match(stripped)
+        if label_match:
+            stripped = label_match.group(1).strip()
+        if stripped:
+            parts.append(stripped)
+    return "\n".join(parts).strip()
+
+
 def _normalize_market_flow_tail_sections(report: str) -> str:
     """Migrate legacy tail shapes into the combined market-flow tail section.
 
@@ -173,8 +201,18 @@ def _normalize_market_flow_tail_sections(report: str) -> str:
         while before_idx >= 0 and not lines[before_idx].strip():
             before_idx -= 1
         before_stripped = re.sub(r"^#{1,6}\s*", "", lines[before_idx].strip()) if before_idx >= 0 else ""
-        if before_idx >= 0 and (
-            before_stripped in {"指标总览", "四、指标总览", _MARKET_FLOW_COMBINED_TAIL_HEADING}
+        if before_idx >= 0 and before_stripped in {"指标总览", "四、指标总览"}:
+            replacement_start = before_idx
+            heading_idx = _find_previous_market_flow_combined_tail_heading(lines, before_idx - 1)
+            if heading_idx is not None:
+                replacement_start = heading_idx
+                inline_text = _market_flow_combined_tail_inline_text(lines[heading_idx])
+                paragraph_text = _collect_market_flow_tail_conclusion(lines, heading_idx + 1, before_idx)
+                conclusion_text = "\n".join(
+                    part for part in (inline_text, paragraph_text) if part
+                ).strip()
+        elif before_idx >= 0 and (
+            before_stripped == _MARKET_FLOW_COMBINED_TAIL_HEADING
             or bool(_MARKET_FLOW_COMBINED_TAIL_LINE_RE.match(lines[before_idx].strip()))
         ):
             replacement_start = before_idx

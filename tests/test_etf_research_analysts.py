@@ -996,6 +996,30 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         self.assertIn("\n四、综合结论和指标总览\n\n偏多配置，等待回踩确认。", normalized)
         self.assertIn("\n\n| 指标 |", normalized)
 
+    def test_market_flow_tail_normalizer_keeps_table_after_combined_heading_and_indicator_label(self):
+        report = (
+            "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
+            "一、市场结构与量价诊断\n趋势导语。\n\n"
+            "二、交易确认与执行计划\n执行导语。\n\n"
+            "三、关键价位与条件情景推演\n情景导语。\n\n"
+            "四、综合结论和指标总览\n"
+            "综合结论：偏多配置，等待回踩确认。\n\n"
+            "指标总览\n"
+            "| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |\n"
+            "| --- | --- | --- | --- | --- |\n"
+            "| close | 1.23 | 高位 | 偏多 | 1.20 |"
+        )
+
+        normalized = _normalize_market_flow_tail_sections(report)
+        normalized_again = _normalize_market_flow_tail_sections(normalized)
+
+        self.assertEqual(normalized, normalized_again)
+        self.assertEqual(1, normalized.count("四、综合结论和指标总览"))
+        self.assertIn("偏多配置，等待回踩确认。", normalized)
+        self.assertIn("| 指标 | 数值 | 位置 | 交易含义 | 关键阈值 |", normalized)
+        self.assertIn("| close | 1.23 | 高位 | 偏多 | 1.20 |", normalized)
+        self.assertNotIn("\n指标总览\n", normalized)
+
     def test_market_flow_tail_normalizer_converts_inline_conclusion_without_table(self):
         report = (
             "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"

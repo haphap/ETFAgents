@@ -194,20 +194,8 @@ def _format_price_rich(close: float | None, pct_chg: float | None) -> Text:
     return text
 
 
-def _holding_icon(name: str) -> str:
-    if any(token in name for token in ("紫金", "黄金", "矿", "铜", "铝", "钼", "稀土")):
-        return "⛏️"
-    if any(token in name for token in ("建", "工", "交", "铁", "洛阳")):
-        return "🏗️"
-    if any(token in name for token in ("北方", "化", "药", "材料")):
-        return "🧪"
-    if any(token in name for token in ("华友", "宁德", "电池", "锂")):
-        return "🔋"
-    return "🏭"
-
-
 def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 6) -> Text:
-    """Unicode bar chart for top holdings. E.g. '████ 宁德 5.2%'."""
+    """Unicode bar chart for top holdings. E.g. '████ 中国石油 5.2%'."""
     if not holdings:
         return Text("无持仓数据", style="dim")
     top = holdings[:5]
@@ -219,13 +207,13 @@ def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 6) -> Text
         bar_len = round(w / max_w * max_bar) if max_w > 0 else 0
         bar = "█" * max(bar_len, 1)
         pad = " " * (max_bar - len(bar))
-        name = (h.get("name") or h.get("code") or "?")[:4]
-        short_name = name[:2]
+        name = str(h.get("name") or h.get("code") or "?").strip() or "?"
+        display_name = name if len(name) <= 8 else f"{name[:7]}…"
         w_str = f"{w:.1f}%" if w else "?"
         if i > 0:
             text.append("\n")
         text.append(f"{bar}{pad} ", style="bold")
-        text.append(f"{_holding_icon(name)} {short_name} {w_str}")
+        text.append(f"{display_name} {w_str}")
     return text
 
 
@@ -1164,16 +1152,13 @@ class AnalysisRunScreen(Screen):
         depth_req = RESEARCH_DEPTH_REQUIREMENTS.get(cfg.depth_name, {})
         debate_rounds = depth_req.get("debate_rounds", "?")
         risk_rounds = depth_req.get("risk_rounds", "?")
-        quick = _short_model_label(str(cfg.quick_model or "default"))
-        deep = _short_model_label(str(cfg.deep_model or "default"))
-        if len(quick) > 14:
-            quick = f"{quick[:13]}…"
-        if len(deep) > 14:
-            deep = f"{deep[:13]}…"
+        provider = cfg.llm_provider or "default"
+        if len(provider) > 16:
+            provider = f"{provider[:15]}…"
         return (
-            f"日: {cfg.analysis_date or 'today'}\n"
-            f"模: {quick}/{deep}\n"
-            f"深: {cfg.depth_name} {debate_rounds}×{risk_rounds}"
+            f"日期: {cfg.analysis_date or 'today'}\n"
+            f"提供商: {provider}\n"
+            f"深度: {cfg.depth_name} {debate_rounds}×{risk_rounds}"
         )
 
     def _cancel_analysis(self) -> None:
