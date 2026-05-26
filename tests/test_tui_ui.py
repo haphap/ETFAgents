@@ -29,7 +29,16 @@ from cli.tui.app import (
     SettingsScreen,
     HelpScreen,
 )
-from cli.tui.screens.research import _format_detail_text
+from cli.tui.screens.research import (
+    _extract_price_from_text,
+    _format_detail_rich,
+    _format_detail_text,
+    _format_execution_summary,
+    _highlight_report_numbers,
+    _price_ruler,
+    _truncate_condition,
+    _weight_bar,
+)
 from cli.tui.services import (
     AnalysisConfig,
     BacktestViewer,
@@ -119,6 +128,10 @@ class _FakePaperEngine:
 
     def sell(self, ticker, quantity, user_id=None, analysis_id=None):
         return {"ticker": ticker, "quantity": quantity, "status": "filled"}
+
+
+def _list_view_labels(list_view: ListView) -> list[str]:
+    return [str(item.query_one(Label).render()) for item in list_view.children]
 
 
 class _FakeAnalysisRunner:
@@ -458,10 +471,10 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     selected_labels = [str(button.label) for button in screen.query(".selected-chip")]
                     self.assertEqual(selected_labels, ["159915.SZ ×", "510300.SH ×"])
 
-    # --- AnalysisRunScreen: board layout ---
+    # --- AnalysisRunScreen: tab layout ---
 
-    async def test_analysis_run_board_has_four_columns(self):
-        """Board should have 4 columns: analysts, research, risk, decision."""
+    async def test_analysis_run_board_has_four_tabs(self):
+        """Analysis run should expose compact team tabs."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -474,14 +487,13 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 screen = app.screen
                 self.assertIsInstance(screen, AnalysisRunScreen)
-                # All 4 columns present
-                self.assertIsNotNone(screen.query_one("#col_analysts"))
-                self.assertIsNotNone(screen.query_one("#col_research"))
-                self.assertIsNotNone(screen.query_one("#col_risk"))
-                self.assertIsNotNone(screen.query_one("#col_decision"))
+                self.assertIsNotNone(screen.query_one("#rtab-analysts", Button))
+                self.assertIsNotNone(screen.query_one("#rtab-research", Button))
+                self.assertIsNotNone(screen.query_one("#rtab-risk", Button))
+                self.assertIsNotNone(screen.query_one("#rtab-decision", Button))
 
-    async def test_analysis_run_places_trader_under_risk_before_risk_debate(self):
-        """The TUI board groups trader in risk before risk debate."""
+    async def test_analysis_run_groups_trader_under_risk_before_risk_debate(self):
+        """The risk tab groups trader before risk debate."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -493,16 +505,11 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
                 screen = app.screen
-                risk_col = screen.query_one("#col_risk")
-                risk_child_ids = [child.id for child in risk_col.children]
-                self.assertLess(
-                    risk_child_ids.index("rsec-trader"),
-                    risk_child_ids.index("rsec-risk_debate"),
-                )
-                self.assertEqual(screen.query_one("#rsec-trader").parent.id, "col_risk")
+                risk_ids = [defn.section_id for defn in screen._section_group_defs()["risk"]]
+                self.assertLess(risk_ids.index("trader"), risk_ids.index("risk_debate"))
 
-    async def test_analysis_run_places_research_progress_under_debate_item(self):
-        """Research debate progress belongs directly below the debate item."""
+    async def test_analysis_run_research_tab_contains_debate_and_manager(self):
+        """Research tab contains debate before manager."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -514,15 +521,11 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
                 screen = app.screen
-                research_col = screen.query_one("#col_research")
-                child_ids = [child.id for child in research_col.children]
-                self.assertLess(
-                    child_ids.index("research_progress"),
-                    child_ids.index("rsec-research"),
-                )
+                research_ids = [defn.section_id for defn in screen._section_group_defs()["research"]]
+                self.assertEqual(research_ids[:2], ["research_debate", "research"])
 
-    async def test_analysis_run_board_analysts_dual_column(self):
-        """Analyst column should have 6 items in 3x2 grid."""
+    async def test_analysis_run_analysts_tab_contains_selected_analysts(self):
+        """Analyst tab should include configured analyst sections."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -534,10 +537,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
                 screen = app.screen
-                # 6 analyst buttons
                 from cli.tui.services import ANALYST_KEYS
-                for key in ANALYST_KEYS:
-                    self.assertIsNotNone(screen.query_one(f"#rsec-{key}", Button))
+                analyst_ids = [defn.section_id for defn in screen._section_group_defs()["analysts"]]
+                self.assertEqual(analyst_ids, ANALYST_KEYS)
 
     def test_format_detail_text_uses_requested_single_line_items(self):
         text = _format_detail_text({
@@ -561,6 +563,241 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("份额：125亿份 (-1.2%)", text)
         self.assertIn("头部持仓：1. 贵州茅台 5.2%；2. 五粮液 3.1%", text)
 
+    def test_format_detail_rich_uses_readable_holding_names_without_icons(self):
+        components = _format_detail_rich({
+            "ticker": "510300.SH",
+            "name": "沪深300ETF",
+            "close": 4.12,
+            "pct_chg": 1.25,
+            "volume": 123450000,
+            "volume_change_pct": 23.45,
+            "turnover_rate": 3.5,
+            "fund_share": 12_530_000_000,
+            "share_change_pct": -1.2,
+            "holdings": [
+                {"name": "中国石油", "weight_pct": 5.23},
+            ],
+        })
+
+        self.assertIn("代码: 沪深300ETF", str(components["name_text"]))
+        self.assertIn("换手: 3.5%", components["metrics_text"])
+        self.assertIn("中国石油 5.2%", str(components["holdings_bars"]))
+        self.assertNotIn("🏭 中国", str(components["holdings_bars"]))
+
+    def test_analysis_run_config_summary_uses_provider_not_model(self):
+        screen = AnalysisRunScreen(
+            ["510300.SH"],
+            AnalysisConfig(
+                analysis_date="2026-05-25",
+                llm_provider="deepseek",
+                quick_model="gpt-5.4-mini",
+                deep_model="gpt-5.4",
+            ),
+            runner=_NoopAnalysisRunner(),
+        )
+
+        summary = screen._config_summary()
+
+        self.assertIn("日期: 2026-05-25", summary)
+        self.assertIn("提供商: deepseek", summary)
+        self.assertIn("深度:", summary)
+        self.assertNotIn("模型", summary)
+        self.assertNotIn("日:", summary)
+
+    def test_highlight_report_numbers_skips_tables_and_code(self):
+        text = _highlight_report_numbers(
+            "目标价 2.058，仓位 2.0%\n"
+            "| 指标 | 数值 |\n"
+            "| close | 1.966 |\n"
+            "代码 `price 1.23` 保持\n"
+            "```\n"
+            "stop 1.850\n"
+            "```"
+        )
+
+        self.assertIn("目标价 **2.058**，仓位 **2.0%**", text)
+        self.assertIn("| close | 1.966 |", text)
+        self.assertIn("`price 1.23`", text)
+        self.assertIn("stop 1.850", text)
+
+    def test_weight_bar_renders_blocks(self):
+        rendered = _weight_bar(25.0)
+        self.assertIn("█", rendered)
+        self.assertIn("░", rendered)
+        self.assertIn("25.0%", rendered)
+
+    def test_weight_bar_none_returns_dash(self):
+        self.assertEqual(_weight_bar(None), "--")
+
+    def test_price_ruler_shows_marker(self):
+        rendered = _price_ruler(1.85, 1.966, 2.058)
+        self.assertIn("╋", rendered)
+        self.assertIn("1.85", rendered)
+        self.assertIn("2.058", rendered)
+        self.assertIn("止损", rendered)
+        self.assertIn("目标", rendered)
+
+    def test_price_ruler_degenerate_range_returns_empty(self):
+        self.assertEqual(_price_ruler(2.0, 1.5, 2.0), "")
+
+    def test_extract_price_from_text_finds_stop(self):
+        signal = {
+            "risk_controls": [
+                "严格锚定2.025元动态止损线防范尾部流动性踩踏",
+            ],
+        }
+        price = _extract_price_from_text(signal, ("risk_controls",), ("止损", "跌破"))
+        self.assertEqual(price, 2.025)
+
+    def test_extract_price_from_text_finds_add_target(self):
+        signal = {
+            "add_conditions": [
+                "价格放量突破2.110元且份额连续3个交易日净流入",
+            ],
+        }
+        price = _extract_price_from_text(signal, ("add_conditions",), ("突破", "加仓"))
+        self.assertEqual(price, 2.110)
+
+    def test_extract_price_from_text_returns_none_without_hint(self):
+        signal = {"risk_controls": ["监控焦煤仓单异动"]}
+        price = _extract_price_from_text(signal, ("risk_controls",), ("止损",))
+        self.assertIsNone(price)
+
+    def test_truncate_condition_at_sentence_break(self):
+        text = "仅当价格回踩20日均线1.79元支撑带，且成交量达到近20日均量1.3倍以上时生效"
+        truncated = _truncate_condition(text, 30)
+        self.assertTrue(len(truncated) <= 31)  # may include the break char
+        self.assertTrue(truncated.endswith("，") or truncated.endswith("…"))
+
+    def test_truncate_condition_short_text_unchanged(self):
+        self.assertEqual(_truncate_condition("短句。", 50), "短句。")
+
+    def test_format_execution_summary_no_signal(self):
+        rendered = str(_format_execution_summary(None))
+        self.assertIn("等待", rendered)
+
+    def test_format_execution_summary_rating_and_visuals(self):
+        result = _format_execution_summary(
+            {
+                "rating": "OVERWEIGHT",
+                "target_weight_pct": 25.0,
+                "target_weight_min_pct": 20.0,
+                "target_weight_max_pct": 30.0,
+                "add_triggers": [{"metric": "close", "op": ">", "threshold": 2.058, "action": "add"}],
+                "risk_rules": [{"metric": "close", "op": "<", "threshold": 1.85, "action": "stop"}],
+            },
+            {"close": 1.966},
+        )
+        self.assertIsInstance(result, str)
+        # Rating
+        self.assertIn("增持", result)
+        self.assertIn("🟢", result)
+        # Weight bar
+        self.assertIn("█", result)
+        self.assertIn("░", result)
+        self.assertIn("25.0%", result)
+        # Price ruler
+        self.assertIn("╋", result)
+        self.assertIn("2.058", result)
+        self.assertIn("1.85", result)
+        # Target/stop with emoji
+        self.assertIn("🎯", result)
+        self.assertIn("🛡", result)
+
+    def test_format_execution_summary_extracts_prices_from_condition_text(self):
+        """When structured triggers are empty, prices should be extracted from conditions."""
+        result = _format_execution_summary(
+            {
+                "rating": "OVERWEIGHT",
+                "target_weight_pct": 30.0,
+                "add_triggers": [],
+                "risk_rules": [],
+                "add_conditions": [
+                    "加仓触发条件为价格放量突破2.110元且份额连续3个交易日净流入",
+                ],
+                "risk_controls": [
+                    "严格锚定2.025元动态止损线防范尾部流动性踩踏",
+                ],
+            },
+            {"close": 2.084},
+        )
+        self.assertIn("2.11", result)
+        self.assertIn("2.025", result)
+        self.assertIn("╋", result)  # price ruler should appear
+
+    async def test_analysis_run_renders_execution_summary_from_signal(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+                screen._etf_details["510300.SH"] = {"ticker": "510300.SH", "close": 1.966}
+
+                screen._handle_section_done(SectionDone(
+                    ticker="510300.SH",
+                    section_id="portfolio_manager",
+                    content="持仓建议",
+                    completed=9,
+                    total=9,
+                    backtest_signal={
+                        "rating": "OVERWEIGHT",
+                        "target_weight_pct": 2.0,
+                        "target_weight_min_pct": 1.0,
+                        "target_weight_max_pct": 3.0,
+                        "execution_delay": "next_open",
+                        "add_triggers": [{"metric": "close", "op": ">", "threshold": 2.058, "action": "add", "note": "突破加仓"}],
+                        "risk_rules": [{"metric": "close", "op": "<", "threshold": 1.85, "action": "stop", "note": "跌破止损"}],
+                    },
+                ))
+                await pilot.pause()
+
+                screen._on_section_picked("execution_summary")
+                await pilot.pause()
+                rendered = screen.query_one("#ra_body")._markdown
+                self.assertIn("增持", rendered)
+                self.assertIn("2.0%", rendered)
+                self.assertIn("2.058", rendered)
+                self.assertIn("1.85", rendered)
+
+    async def test_analysis_run_exec_summary_toggles_back_to_report(self):
+        """Switching from execution summary to a report section shows the report."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+                screen._handle_section_done(SectionDone(
+                    ticker="510300.SH",
+                    section_id="portfolio_manager",
+                    content="PM report body",
+                    completed=9,
+                    total=9,
+                    backtest_signal={"rating": "HOLD", "target_weight_pct": 2.0},
+                ))
+                await pilot.pause()
+
+                screen._on_section_picked("execution_summary")
+                await pilot.pause()
+                self.assertIn("持有", screen.query_one("#ra_body")._markdown)
+
+                screen._on_section_picked("portfolio_manager")
+                await pilot.pause()
+                self.assertIn("PM report body", screen.query_one("#ra_body")._markdown)
+
     async def test_analysis_run_board_follows_selected_analysts(self):
         """Board should only show selected analysts."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -576,11 +813,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 screen = app.screen
                 self.assertIsInstance(screen, AnalysisRunScreen)
-                # market_flow should be present
-                self.assertIsNotNone(screen.query_one("#rsec-market_flow", Button))
-                # macro_regime should NOT be present
-                results = screen.query("#rsec-macro_regime")
-                self.assertEqual(len(results), 0)
+                analyst_ids = [defn.section_id for defn in screen._section_group_defs()["analysts"]]
+                self.assertEqual(analyst_ids, ["market_flow"])
 
     async def test_analysis_run_ticker_status_updates(self):
         """Verify ticker status changes from ⏳ → ✓/✗ when events fire."""
@@ -681,10 +915,10 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(runner.calls[0][0], ["510300.SH"])
                 self.assertEqual(runner.calls[0][2], ["market_flow"])
 
-    # --- Board item click shows report ---
+    # --- Tab section selection shows report ---
 
-    async def test_analysis_run_board_item_click_shows_report(self):
-        """Clicking a board item button should show section report in body."""
+    async def test_analysis_run_section_picker_selection_shows_report(self):
+        """Selecting a section from the tab picker should show its report."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -705,16 +939,67 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     total=9,
                 ))
                 await pilot.pause()
-                # Click the market_flow board item
-                await pilot.click("#rsec-market_flow")
+                await pilot.click("#rtab-analysts")
+                await pilot.pause()
+                await pilot.press("enter")
                 await pilot.pause()
                 self.assertIn("市场与资金流", str(screen.query_one("#ra_body_title", Static).render()))
                 self.assertIn("市场资金流报告正文", screen.query_one("#ra_body")._markdown)
+                self.assertIn("hidden-widget", screen.query_one("#ra_section_picker").classes)
+
+    async def test_analysis_run_section_picker_closes_when_clicking_elsewhere(self):
+        """The inline picker should behave like a popover, not a sticky modal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                await pilot.click("#rtab-analysts")
+                await pilot.pause()
+                self.assertNotIn("hidden-widget", screen.query_one("#ra_section_picker").classes)
+
+                await pilot.click("#ra_body")
+                await pilot.pause()
+                self.assertIn("hidden-widget", screen.query_one("#ra_section_picker").classes)
+
+    async def test_analysis_run_decision_picker_lists_execution_summary_under_pm(self):
+        """Core summary is a decision subitem instead of a separate card."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+                screen._handle_section_done(SectionDone(
+                    ticker="510300.SH",
+                    section_id="portfolio_manager",
+                    content="PM",
+                    completed=9,
+                    total=9,
+                    backtest_signal={"rating": "HOLD", "target_weight_pct": 2.0},
+                ))
+                await pilot.click("#rtab-decision")
+                await pilot.pause()
+
+                labels = _list_view_labels(screen.query_one("#section_picker_list", ListView))
+                self.assertEqual(labels[:2], ["✓ 投资组合经理", "✓   核心执行摘要"])
 
     # --- Board state updates ---
 
-    async def test_analysis_run_board_updates_on_section_done(self):
-        """SectionDone should update board item icon and column header."""
+    async def test_analysis_run_tabs_update_on_section_done(self):
+        """SectionDone should update tab counts and active state."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -738,12 +1023,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
 
-                # Board item should show ✔
-                btn = screen.query_one("#rsec-market_flow", Button)
-                self.assertIn("✔", str(btn.label))
-                # Column header should show 1/6
-                header = screen.query_one("#col_analysts_header", Static)
-                self.assertIn("1/6", str(header.render()))
+                tab = screen.query_one("#rtab-analysts", Button)
+                self.assertIn("1/6", str(tab.label))
+                self.assertIn("section-tab-active", tab.classes)
 
     # --- Debate progress ---
 
@@ -771,10 +1053,10 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
 
-                # Check progress bar content
-                progress = screen.query_one("#research_progress", Static)
-                rendered = str(progress.render())
-                self.assertIn("2/3", rendered)
+                screen._open_section_picker("research")
+                await pilot.pause()
+                labels = _list_view_labels(screen.app.screen.query_one("#section_picker_list", ListView))
+                self.assertTrue(any("多空辩论" in label for label in labels))
 
     async def test_analysis_run_risk_debate_progress(self):
         """Risk debate progress should update risk column."""
@@ -800,9 +1082,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
 
-                # Risk item should be done
-                btn = screen.query_one("#rsec-risk_debate", Button)
-                self.assertIn("✔", str(btn.label))
+                tab = screen.query_one("#rtab-risk", Button)
+                self.assertIn("1/2", str(tab.label))
 
     async def test_analysis_run_debate_progress_is_ticker_scoped(self):
         """Debate progress from another ticker must not overwrite the selected ticker."""
@@ -833,9 +1114,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
 
-                progress = screen.query_one("#risk_progress", Static)
-                self.assertIn("1/3", str(progress.render()))
-                self.assertNotIn("3/3", str(progress.render()))
+                self.assertEqual(screen._debate_rounds[("510300.SH", "risk_debate")], (1, 3))
+                self.assertEqual(screen._debate_rounds[("159915.SZ", "risk_debate")], (3, 3))
 
     async def test_analysis_run_failed_ticker_marks_running_sections_failed(self):
         """TickerFailed should fail running board items, not only pending ones."""
@@ -859,8 +1139,10 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
 
-                btn = screen.query_one("#rsec-market_flow", Button)
-                self.assertIn("✘", str(btn.label))
+                screen._open_section_picker("analysts")
+                await pilot.pause()
+                labels = _list_view_labels(screen.app.screen.query_one("#section_picker_list", ListView))
+                self.assertTrue(any("✗ 市场与资金流" in label for label in labels))
 
     # --- Stats bar ---
 
@@ -924,10 +1206,10 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsInstance(screen, AnalysisRunScreen)
                 self.assertIsInstance(screen.query_one("#ra_body_scroll"), ScrollableContainer)
 
-    # --- Active column highlighting ---
+    # --- Active tab highlighting ---
 
-    async def test_analysis_run_active_column_highlighted(self):
-        """Active column should have column-active class."""
+    async def test_analysis_run_active_tab_highlighted(self):
+        """Active team tab should have section-tab-active class."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -950,8 +1232,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
 
-                col = screen.query_one("#col_analysts")
-                self.assertIn("column-active", col.classes)
+                tab = screen.query_one("#rtab-analysts")
+                self.assertIn("section-tab-active", tab.classes)
 
     # --- BacktestScreen ---
 

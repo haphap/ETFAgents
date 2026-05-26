@@ -194,8 +194,8 @@ def _format_price_rich(close: float | None, pct_chg: float | None) -> Text:
     return text
 
 
-def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 4) -> Text:
-    """Unicode bar chart for top holdings. E.g. '████ 宁德 5.2%'."""
+def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 6) -> Text:
+    """Unicode bar chart for top holdings. E.g. '████ 中国石油 5.2%'."""
     if not holdings:
         return Text("无持仓数据", style="dim")
     top = holdings[:5]
@@ -207,12 +207,13 @@ def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 4) -> Text
         bar_len = round(w / max_w * max_bar) if max_w > 0 else 0
         bar = "█" * max(bar_len, 1)
         pad = " " * (max_bar - len(bar))
-        name = (h.get("name") or h.get("code") or "?")[:2]
+        name = str(h.get("name") or h.get("code") or "?").strip() or "?"
+        display_name = name if len(name) <= 8 else f"{name[:7]}…"
         w_str = f"{w:.1f}%" if w else "?"
         if i > 0:
             text.append("\n")
         text.append(f"{bar}{pad} ", style="bold")
-        text.append(f"{name} {w_str}")
+        text.append(f"{display_name} {w_str}")
     return text
 
 
@@ -220,27 +221,34 @@ def _format_detail_rich(detail: dict) -> dict[str, Any]:
     """Parse ETF detail dict into structured Rich renderables for card widgets."""
     name = detail.get("name") or detail.get("ticker", "")
     ticker = detail.get("ticker", "")
-    suffix = f" ({ticker})" if ticker and ticker != name else ""
-    name_text = Text(f"{name}{suffix}", style="bold")
+    display_name = name or ticker or "--"
+    name_text = Text(f"代码: {display_name}", style="bold")
 
     close = detail.get("close")
     pct_chg = detail.get("pct_chg")
-    price_text = _format_price_rich(close, pct_chg)
+    price_text = Text("现价: ")
+    price_text.append(_format_price_rich(close, pct_chg))
 
     parts: list[str] = []
     vol = detail.get("volume")
     if vol is not None:
         vc = detail.get("volume_change_pct")
         vc_str = f"{vc:+.1f}%" if vc is not None else "--"
-        parts.append(f"量：{vol / 1e4:.0f}万手({vc_str})")
+        parts.append(f"量  : {vol / 1e4:.0f}万手 ({vc_str})")
+    turnover = detail.get("turnover_rate") or detail.get("turnover")
+    if turnover is not None:
+        parts.append(f"换手: {turnover:.1f}%")
+    else:
+        parts.append("换手: --")
     share = detail.get("fund_share")
     if share is not None:
         sc = detail.get("share_change_pct")
         sc_str = f"{sc:+.1f}%" if sc is not None else "--"
-        parts.append(f"份额：{share / 1e8:.0f}亿份({sc_str})")
-    metrics_text = "  ".join(parts) if parts else ""
+        parts.append(f"份额: {share / 1e8:.0f}亿份 ({sc_str})")
+    metrics_text = "\n".join(parts) if parts else ""
 
-    holdings_bars = _format_holdings_bars(detail.get("holdings"))
+    holdings_bars = Text("持仓占比 TOP5:\n", style="bold")
+    holdings_bars.append(_format_holdings_bars(detail.get("holdings")))
 
     return {
         "name_text": name_text,
@@ -248,6 +256,304 @@ def _format_detail_rich(detail: dict) -> dict[str, Any]:
         "metrics_text": metrics_text,
         "holdings_bars": holdings_bars,
     }
+
+
+_RATING_LABELS = {
+    "BUY": "买入",
+    "OVERWEIGHT": "增持",
+    "HOLD": "持有",
+    "UNDERWEIGHT": "减持",
+    "SELL": "卖出",
+}
+
+
+def _signal_number(value: Any, suffix: str = "") -> str:
+    if value is None:
+        return "--"
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if suffix == "%":
+        return f"{num:.1f}%"
+    return f"{num:.3f}".rstrip("0").rstrip(".")
+
+
+def _signal_threshold(rule: dict[str, Any]) -> str:
+    threshold = rule.get("threshold")
+    if isinstance(threshold, (list, tuple)) and len(threshold) == 2:
+        return f"{_signal_number(threshold[0])}-{_signal_number(threshold[1])}"
+    return _signal_number(threshold)
+
+
+_CONDITION_STRIP_RE = re.compile(r"^\s*\d+[.、)）]\s*|^[-*•]\s*|`[^`]*`")
+_PRICE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)(?:\s*元)")
+
+
+def _clean_condition_text(text: str) -> str:
+    """Strip leading numbering, backtick wrappers, and key prefixes from condition text."""
+    cleaned = _CONDITION_STRIP_RE.sub("", text).strip()
+    # Strip leading key-like prefixes: "加仓触发条件：" / "reduce_triggers: ..."
+    cleaned = re.sub(r"^[\w_]+\s*[:：]\s*", "", cleaned)
+    # Strip leading quoted labels like `加仓触发条件` –
+    cleaned = re.sub(r"^[`「『].*?[`」』]\s*[-–—]\s*", "", cleaned)
+    return cleaned.strip()
+
+
+def _first_rule_line(signal: dict[str, Any], keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = signal.get(key)
+        if isinstance(value, list) and value:
+            first = value[0]
+            if isinstance(first, dict):
+                note = first.get("note") or first.get("action") or ""
+                threshold = _signal_threshold(first)
+                metric = first.get("metric") or ""
+                op = first.get("op") or ""
+                parts = [part for part in (metric, op, threshold) if part and part != "--"]
+                prefix = " ".join(parts)
+                return f"{prefix} {note}".strip() if note else prefix
+            if isinstance(first, str):
+                return _clean_condition_text(first)
+    return ""
+
+
+def _extract_price_rule(signal: dict[str, Any], rule_keys: tuple[str, ...], actions: tuple[str, ...]) -> float | None:
+    # First try structured trigger rules
+    for key in rule_keys:
+        rules = signal.get(key)
+        if not isinstance(rules, list):
+            continue
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            metric = str(rule.get("metric") or "").lower()
+            action = str(rule.get("action") or "").lower()
+            if metric not in {"close", "price", "nav"}:
+                continue
+            if actions and not any(hint in action for hint in actions):
+                continue
+            threshold = rule.get("threshold")
+            if isinstance(threshold, (int, float)):
+                return float(threshold)
+    return None
+
+
+def _extract_price_from_text(
+    signal: dict[str, Any],
+    text_keys: tuple[str, ...],
+    hint_patterns: tuple[str, ...],
+) -> float | None:
+    """Extract a price from condition text using hint patterns near '元' prices."""
+    for key in text_keys:
+        items = signal.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, str):
+                continue
+            for hint in hint_patterns:
+                # Look for pattern: hint...price元 or price元...hint (within ~30 chars)
+                for m in _PRICE_PATTERN.finditer(item):
+                    price_pos = m.start()
+                    try:
+                        price = float(m.group(1))
+                    except ValueError:
+                        continue
+                    # Check if any hint is near this price (within 40 chars)
+                    context_start = max(0, price_pos - 40)
+                    context_end = min(len(item), price_pos + 40)
+                    context = item[context_start:context_end]
+                    if hint in context:
+                        return price
+    return None
+
+
+def _weight_bar(pct: float | None, max_pct: float = 50.0, bar_width: int = 10) -> str:
+    """Render a Unicode bar chart for portfolio weight, e.g. '██░░░░░░░░ **2.0%**'."""
+    if pct is None:
+        return "--"
+    filled = round(pct / max_pct * bar_width) if max_pct > 0 else 0
+    filled = max(0, min(filled, bar_width))
+    return "█" * filled + "░" * (bar_width - filled) + f" **{pct:.1f}%**"
+
+
+def _price_ruler(stop: float, current: float, target: float, width: int = 36) -> str:
+    """Draw a text ruler showing current price position between stop and target.
+
+    Returns empty string when the range is degenerate.
+    """
+    span = target - stop
+    if span <= 0:
+        return ""
+    pos = (current - stop) / span
+    pos = max(0.0, min(1.0, pos))
+    marker_col = round(pos * (width - 1))
+
+    left = "─" * marker_col
+    right = "━" * (width - 1 - marker_col)
+    ruler_line = f"{left}╋{right}"
+
+    stop_str = _signal_number(stop)
+    current_str = _signal_number(current)
+    target_str = _signal_number(target)
+
+    label_line = [" "] * (width + 1)
+    for i, ch in enumerate(stop_str):
+        if i < len(label_line):
+            label_line[i] = ch
+    cur_start = max(len(stop_str) + 1, marker_col - len(current_str) // 2)
+    for i, ch in enumerate(current_str):
+        idx = cur_start + i
+        if 0 <= idx < len(label_line):
+            label_line[idx] = ch
+    tgt_start = max(cur_start + len(current_str) + 1, width + 1 - len(target_str))
+    while len(label_line) < tgt_start + len(target_str):
+        label_line.append(" ")
+    for i, ch in enumerate(target_str):
+        label_line[tgt_start + i] = ch
+
+    tag_line = [" "] * len(label_line)
+    for i, ch in enumerate("止损"):
+        if i < len(tag_line):
+            tag_line[i] = ch
+    cur_tag_start = max(3, marker_col - 1)
+    for i, ch in enumerate("现价"):
+        idx = cur_tag_start + i
+        if 0 <= idx < len(tag_line):
+            tag_line[idx] = ch
+    tgt_tag_start = max(cur_tag_start + 3, tgt_start)
+    while len(tag_line) < tgt_tag_start + 2:
+        tag_line.append(" ")
+    for i, ch in enumerate("目标"):
+        tag_line[tgt_tag_start + i] = ch
+
+    return (
+        f"```\n"
+        f"  {ruler_line}\n"
+        f"  {''.join(label_line)}\n"
+        f"  {''.join(tag_line)}\n"
+        f"```"
+    )
+
+
+_RATING_EMOJI = {
+    "BUY": "🟢",
+    "OVERWEIGHT": "🟢",
+    "HOLD": "🟡",
+    "UNDERWEIGHT": "🔴",
+    "SELL": "🔴",
+}
+
+
+def _truncate_condition(text: str, limit: int = 50) -> str:
+    """Truncate a cleaned condition string with ellipsis."""
+    if not text:
+        return ""
+    for sep in ("。", "；", "，", ",", ";"):
+        idx = text.find(sep)
+        if 0 < idx <= limit:
+            return text[: idx + 1]
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "…"
+
+
+def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, Any] | None = None) -> str:
+    """Build a Markdown execution summary from a backtest signal."""
+    if not signal:
+        return "*等待组合经理生成结构化投资策略。*"
+
+    rating = str(signal.get("rating") or "HOLD").upper()
+    rating_label = _RATING_LABELS.get(rating, rating)
+    target_weight = signal.get("target_weight_pct")
+    weight_min = signal.get("target_weight_min_pct")
+    weight_max = signal.get("target_weight_max_pct")
+    execution_delay = signal.get("execution_delay") or "--"
+    add_line = _truncate_condition(_first_rule_line(signal, ("add_triggers", "add_conditions")))
+    reduce_line = _truncate_condition(_first_rule_line(signal, ("reduce_triggers", "reduce_conditions", "exit_triggers", "exit_conditions")))
+    risk_line = _truncate_condition(_first_rule_line(signal, ("risk_rules", "risk_controls")))
+    current = detail.get("close") if detail else None
+
+    target_price = _extract_price_rule(signal, ("add_triggers", "rebalance_triggers"), ("add", "buy", "rebalance"))
+    if target_price is None:
+        target_price = _extract_price_from_text(
+            signal, ("add_conditions",), ("突破", "加仓", "目标", "上方", "上行"),
+        )
+    stop_price = _extract_price_rule(signal, ("risk_rules", "reduce_triggers", "exit_triggers"), ("reduce", "exit", "sell", "stop"))
+    if stop_price is None:
+        stop_price = _extract_price_from_text(
+            signal, ("risk_controls", "reduce_conditions"), ("止损", "跌破", "防守", "下方", "stop"),
+        )
+
+    emoji = _RATING_EMOJI.get(rating, "🟡")
+    lines: list[str] = []
+
+    lines.append(f"{emoji} 研报结论：**{rating_label}**")
+    lines.append("")
+
+    weight_str = _weight_bar(target_weight)
+    if weight_min is not None or weight_max is not None:
+        weight_str += f"  (区间 {_signal_number(weight_min, '%')}-{_signal_number(weight_max, '%')})"
+    lines.append(f"推荐仓位：{weight_str}")
+
+    if target_price is not None:
+        lines.append(f"目标价格：**{_signal_number(target_price)}** 🎯")
+    if stop_price is not None:
+        lines.append(f"止损价格：**{_signal_number(stop_price)}** 🛡️")
+    if current is not None:
+        lines.append(f"现价位置：**{_signal_number(current)}**")
+
+    if stop_price is not None and target_price is not None and current is not None:
+        ruler = _price_ruler(stop_price, current, target_price)
+        if ruler:
+            lines.append("")
+            lines.append(ruler)
+
+    lines.append("")
+    lines.append(f"执行延迟：{execution_delay}")
+    if add_line:
+        lines.append(f"加仓依据：{add_line}")
+    if reduce_line:
+        lines.append(f"减仓依据：{reduce_line}")
+    if risk_line:
+        lines.append(f"风控规则：{risk_line}")
+    return "\n".join(lines)
+
+
+_NUMERIC_TOKEN_RE = re.compile(
+    r"(?<![\w`*])("
+    r"\d{4}-\d{2}-\d{2}|"
+    r"[+-]?\d+(?:\.\d+)?\s*(?:%|％|倍|万手|亿份|元|日|天|周|月)?"
+    r")(?![\w`*])"
+)
+
+
+def _highlight_report_numbers(markdown: str) -> str:
+    """Bold numeric tokens in prose without disturbing code blocks or tables."""
+    if not markdown:
+        return markdown
+    highlighted: list[str] = []
+    in_fence = False
+    for line in markdown.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("```"):
+            in_fence = not in_fence
+            highlighted.append(line)
+            continue
+        if in_fence or stripped.startswith("|"):
+            highlighted.append(line)
+            continue
+
+        parts = re.split(r"(`[^`]*`)", line)
+        rendered_parts: list[str] = []
+        for part in parts:
+            if part.startswith("`") and part.endswith("`"):
+                rendered_parts.append(part)
+            else:
+                rendered_parts.append(_NUMERIC_TOKEN_RE.sub(r"**\1**", part))
+        highlighted.append("".join(rendered_parts))
+    return "\n".join(highlighted)
 
 
 def _extract_ai_summary(pm_content: str) -> str:
@@ -775,15 +1081,15 @@ class ResearchAnalysisScreen(Screen):
 
 
 # ---------------------------------------------------------------------------
-# AnalysisRunScreen — 4-column kanban board
+# AnalysisRunScreen — compact tabs + execution dashboard
 # ---------------------------------------------------------------------------
 
 class AnalysisRunScreen(Screen):
-    """Run ETF analysis with a 4-column kanban board.
+    """Run ETF analysis with compact team tabs and a report dashboard.
 
-    Left pane: ETF queue/status + config summary.
-    Right-top: board columns (分析团队 | 研究 | 风险 | 决策).
-    Right-bottom: overall progress or selected section report.
+    Left pane: ETF detail, compact metadata, queue.
+    Right-top: team tabs (分析团队 | 研究 | 风险 | 决策).
+    Right-bottom: structured execution summary and selected section report.
     """
 
     def __init__(
@@ -813,101 +1119,42 @@ class AnalysisRunScreen(Screen):
         self.progress_lines: list[str] = []
         self._started_at: float | None = None
         self._last_stats: dict[str, Any] = {}
+        self._backtest_signals: dict[str, dict[str, Any]] = {}
+        self._etf_details: dict[str, dict[str, Any]] = {}
+        self.section_picker_ids = IdRegistry("pick")
+        self._picker_open_group: str | None = None
 
     def compose(self) -> ComposeResult:
         defs = self._section_definitions()
-        analyst_defs = [d for d in defs if d.team == "分析师"]
-        research_defs = [d for d in defs if d.team == "研究"]
-        trader_defs = [d for d in defs if d.section_id == "trader"]
-        risk_defs = trader_defs + [d for d in defs if d.team == "风险"]
-        pm_defs = [d for d in defs if d.team == "决策"]
-        decision_defs = pm_defs
-
         yield Header(show_clock=False)
         with Vertical(classes="run-layout"):
             with Horizontal(classes="screen-body run-main"):
                 with Vertical(classes="left-pane"):
-                    yield Static("ETF Queue", classes="pane-title")
+                    yield Static("📊 基本信息", classes="pane-title")
                     with Vertical(id="ra_etf_card", classes="sidebar-card etf-card"):
                         yield Static("", id="ra_etf_name", classes="etf-name")
                         yield Static("", id="ra_etf_price", classes="etf-price-line")
                         yield Static("", id="ra_etf_metrics", classes="etf-metrics")
                         yield Static("", id="ra_etf_holdings", classes="etf-holdings")
-                    yield Static("", id="ra_ai_summary", classes="ai-summary")
+                    yield Static("", id="ra_ai_summary", classes="hidden-widget")
                     yield Static("", id="ra_etf_detail", classes="hidden-widget")
+                    yield Static("📋 分析元数据", classes="pane-title")
                     with Vertical(id="ra_config_card", classes="sidebar-card config-card"):
                         yield Static(self._config_summary(), id="ra_run_config")
                     yield Button("⏹ 取消分析", id="btn_ra_cancel", classes="cancel-btn warning-text", disabled=True)
+                    yield Static("🧠 研究队列", classes="pane-title")
                     yield Static("⏳分析中  ✓完成  ✗失败  ⊘取消", classes="queue-legend")
                     yield ListView(id="ra_queue")
                 with Vertical(classes="right-pane"):
-                    # Board (right-top)
+                    # Team tabs (right-top)
                     with Horizontal(classes="right-top", id="ra_sections"):
-                        # Column 1: Analysts (wide)
-                        with Vertical(classes="board-column column-inactive board-col-wide", id="col_analysts"):
-                            yield Static(
-                                f"分析团队 (0/{len(analyst_defs)})",
-                                id="col_analysts_header",
-                                classes="column-header",
-                            )
-                            for i in range(0, len(analyst_defs), 2):
-                                with Horizontal(classes="board-row"):
-                                    yield Button(
-                                        f"○ {analyst_defs[i].title}",
-                                        id=f"rsec-{analyst_defs[i].section_id}",
-                                        classes="board-item",
-                                    )
-                                    if i + 1 < len(analyst_defs):
-                                        yield Button(
-                                            f"○ {analyst_defs[i + 1].title}",
-                                            id=f"rsec-{analyst_defs[i + 1].section_id}",
-                                            classes="board-item",
-                                        )
-                        # Column 2: Research
-                        if research_defs:
-                            with Vertical(classes="board-column column-inactive", id="col_research"):
-                                yield Static(
-                                    f"研究 (0/{len(research_defs)})",
-                                    id="col_research_header",
-                                    classes="column-header",
-                                )
-                                for defn in research_defs:
-                                    yield Button(
-                                        f"○ {defn.title}",
-                                        id=f"rsec-{defn.section_id}",
-                                        classes="board-item",
-                                    )
-                                    if defn.section_id == "research_debate":
-                                        yield Static("", id="research_progress", classes="debate-progress")
-                        # Column 3: Risk
-                        if risk_defs:
-                            with Vertical(classes="board-column column-inactive", id="col_risk"):
-                                yield Static(
-                                    f"风险 (0/{len(risk_defs)})",
-                                    id="col_risk_header",
-                                    classes="column-header",
-                                )
-                                for defn in risk_defs:
-                                    yield Button(
-                                        f"○ {defn.title}",
-                                        id=f"rsec-{defn.section_id}",
-                                        classes="board-item",
-                                    )
-                                    if defn.section_id == "risk_debate":
-                                        yield Static("", id="risk_progress", classes="debate-progress")
-                        # Column 4: Decision
-                        with Vertical(classes="board-column column-inactive", id="col_decision"):
-                            yield Static(
-                                f"决策 (0/{len(decision_defs)})",
-                                id="col_decision_header",
-                                classes="column-header",
-                            )
-                            for defn in decision_defs:
-                                yield Button(
-                                    f"○ {defn.title}",
-                                    id=f"rsec-{defn.section_id}",
-                                    classes="board-item",
-                                )
+                        yield Button("📊 分析团队 0/0 ▾", id="rtab-analysts", classes="section-tab")
+                        yield Button("📖 研究 0/0 ▾", id="rtab-research", classes="section-tab")
+                        yield Button("⚠️ 风险 0/0 ▾", id="rtab-risk", classes="section-tab")
+                        yield Button("🎯 决策 0/0 ▾", id="rtab-decision", classes="section-tab")
+                    with Vertical(id="ra_section_picker", classes="section-picker-popover hidden-widget"):
+                        yield Static("", id="section_picker_title", classes="section-picker-title")
+                        yield ListView(id="section_picker_list")
                     # Report body (right-bottom)
                     with Vertical(classes="right-bottom"):
                         yield Static("整体进度", id="ra_body_title", classes="pane-title")
@@ -925,18 +1172,93 @@ class AnalysisRunScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id or ""
         if btn_id == "btn_ra_cancel":
+            self._hide_section_picker()
             self._cancel_analysis()
-        elif btn_id.startswith("rsec-"):
-            section_id = btn_id[5:]
-            self.current_section = section_id
-            self._refresh_body()
+        elif btn_id.startswith("rtab-"):
+            self._open_section_picker(btn_id[5:])
+
+    def on_click(self, event) -> None:
+        if not self._picker_open_group:
+            return
+        widget = getattr(event, "widget", None)
+        while widget is not None:
+            widget_id = getattr(widget, "id", None)
+            if widget_id in {"ra_section_picker", "ra_sections"}:
+                return
+            widget = getattr(widget, "parent", None)
+        self._hide_section_picker()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         item_id = event.item.id or ""
+        if item_id in self.section_picker_ids:
+            self._on_section_picked(self.section_picker_ids.resolve(item_id))
+            return
         if item_id in self.ticker_ids:
+            self._hide_section_picker()
             self.current_ticker = self.ticker_ids.resolve(item_id)
             self._refresh_body()
+            self._refresh_board()
             self._load_etf_detail(self.current_ticker)
+
+    def _open_section_picker(self, group: str) -> None:
+        ticker = self.current_ticker
+        if not ticker:
+            return
+        if self._picker_open_group == group:
+            self._hide_section_picker()
+            return
+        defs = list(self._section_group_defs().get(group, []))
+        if not defs:
+            return
+        options = []
+        for defn in defs:
+            options.append((
+                defn.section_id,
+                defn.title,
+                self._board_state.get((ticker, defn.section_id), "pending"),
+            ))
+            if group == "decision" and defn.section_id == "portfolio_manager":
+                summary_state = "done" if ticker in self._backtest_signals else "pending"
+                options.append(("execution_summary", "  核心执行摘要", summary_state))
+        title = {
+            "analysts": "📊 分析团队",
+            "research": "📖 研究",
+            "risk": "⚠️ 风险",
+            "decision": "🎯 决策",
+        }.get(group, "选择章节")
+        self.section_picker_ids.clear()
+        picker = self.query_one("#section_picker_list", ListView)
+        picker.clear()
+        for section_id, label, state in options:
+            icon = {"pending": "○", "running": "▒", "done": "✓", "failed": "✗"}.get(state, "○")
+            picker.append(ListItem(Label(f"{icon} {label}"), id=self.section_picker_ids.register(section_id)))
+        self.query_one("#section_picker_title", Static).update(title)
+        popover = self.query_one("#ra_section_picker")
+        popover.remove_class("hidden-widget")
+        popover.remove_class("picker-analysts", "picker-research", "picker-risk", "picker-decision")
+        popover.add_class(f"picker-{group}")
+        self._picker_open_group = group
+        if options:
+            picker.index = 0
+        picker.focus()
+
+    def _hide_section_picker(self) -> None:
+        self._picker_open_group = None
+        self.section_picker_ids.clear()
+        try:
+            self.query_one("#section_picker_list", ListView).clear()
+            self.query_one("#ra_section_picker").add_class("hidden-widget")
+        except Exception:
+            pass
+
+    def _on_section_picked(self, section_id: str | None) -> None:
+        if not section_id:
+            return
+        self.current_section = section_id
+        self._set_active_column(section_id)
+        self._hide_section_picker()
+        self._refresh_board()
+        self._refresh_body()
 
     # --- Analysis lifecycle ---
 
@@ -948,6 +1270,8 @@ class AnalysisRunScreen(Screen):
         self.section_status.clear()
         self._board_state.clear()
         self._debate_rounds.clear()
+        self._backtest_signals.clear()
+        self._etf_details.clear()
         self._active_column = ""
         self.ticker_ids.clear()
         self.progress_lines.clear()
@@ -962,6 +1286,7 @@ class AnalysisRunScreen(Screen):
         self._active_runner = runner
         self.query_one("#btn_ra_cancel", Button).disabled = False
         self._append_progress(f"开始分析 {', '.join(self.tickers)}")
+        self._refresh_board()
         self._refresh_stats_bar()
         self._analysis_thread = threading.Thread(
             target=self._run_analysis,
@@ -976,12 +1301,16 @@ class AnalysisRunScreen(Screen):
 
     def _config_summary(self) -> str:
         cfg = self._analysis_config
-        depth = _depth_option_label(cfg.depth_name)
+        depth_req = RESEARCH_DEPTH_REQUIREMENTS.get(cfg.depth_name, {})
+        debate_rounds = depth_req.get("debate_rounds", "?")
+        risk_rounds = depth_req.get("risk_rounds", "?")
+        provider = cfg.llm_provider or "default"
+        if len(provider) > 16:
+            provider = f"{provider[:15]}…"
         return (
-            f"日期：{cfg.analysis_date or 'today'}\n"
-            f"深度：{depth}\n"
-            f"提供商：{cfg.llm_provider}\n"
-            f"模型：{cfg.quick_model or 'default'} / {cfg.deep_model or 'default'}"
+            f"日期: {cfg.analysis_date or 'today'}\n"
+            f"提供商: {provider}\n"
+            f"深度: {cfg.depth_name} {debate_rounds}×{risk_rounds}"
         )
 
     def _cancel_analysis(self) -> None:
@@ -1019,12 +1348,17 @@ class AnalysisRunScreen(Screen):
             except Exception:
                 pass
             return
+        ticker = detail.get("ticker")
+        if ticker:
+            self._etf_details[str(ticker)] = dict(detail)
         try:
             components = _format_detail_rich(detail)
             self.query_one("#ra_etf_name", Static).update(components["name_text"])
             self.query_one("#ra_etf_price", Static).update(components["price_text"])
             self.query_one("#ra_etf_metrics", Static).update(components["metrics_text"])
             self.query_one("#ra_etf_holdings", Static).update(components["holdings_bars"])
+            if self.current_section == "execution_summary":
+                self._refresh_body()
         except Exception:
             pass
         # Also update hidden legacy widget
@@ -1101,6 +1435,8 @@ class AnalysisRunScreen(Screen):
     def _handle_section_done(self, event: SectionDone) -> None:
         self.section_contents[(event.ticker, event.section_id)] = event.content
         self.section_status[(event.ticker, event.section_id)] = True
+        if event.backtest_signal:
+            self._backtest_signals[event.ticker] = dict(event.backtest_signal)
 
         # Update board state
         if event.section_id in _INSTANT_DONE_SECTIONS:
@@ -1191,13 +1527,13 @@ class AnalysisRunScreen(Screen):
 
     def _set_active_column(self, section_id: str) -> None:
         if section_id in ANALYST_KEYS:
-            self._active_column = "col_analysts"
+            self._active_column = "rtab-analysts"
         elif section_id in ("research_debate", "research"):
-            self._active_column = "col_research"
+            self._active_column = "rtab-research"
         elif section_id in ("trader", "risk_debate"):
-            self._active_column = "col_risk"
-        elif section_id == "portfolio_manager":
-            self._active_column = "col_decision"
+            self._active_column = "rtab-risk"
+        elif section_id in ("portfolio_manager", "execution_summary"):
+            self._active_column = "rtab-decision"
 
     def _refresh_board(self) -> None:
         """Update board item labels, column headers, progress bars, and active column."""
@@ -1205,92 +1541,28 @@ class AnalysisRunScreen(Screen):
         if not ticker:
             return
 
-        defs = self._section_definitions()
-        analyst_defs = [d for d in defs if d.team == "分析师"]
-        research_defs = [d for d in defs if d.team == "研究"]
-        trader_defs = [d for d in defs if d.section_id == "trader"]
-        risk_defs = trader_defs + [d for d in defs if d.team == "风险"]
-        pm_defs = [d for d in defs if d.team == "决策"]
+        groups = self._section_group_defs()
 
-        _STATUS_ICONS = {"pending": "○", "running": "▒", "done": "✔", "failed": "✘"}
-
-        # Update each board item
-        for defn in defs:
-            state = self._board_state.get((ticker, defn.section_id), "pending")
-            icon = _STATUS_ICONS.get(state, "○")
-            try:
-                btn = self.query_one(f"#rsec-{defn.section_id}", Button)
-                btn.label = f"{icon} {defn.title}"
-                btn.remove_class("board-item-done", "board-item-failed")
-                if state == "done":
-                    btn.add_class("board-item-done")
-                elif state == "failed":
-                    btn.add_class("board-item-failed")
-            except Exception:
-                pass
-
-        # Column headers with counts
         def _done_count(section_ids: list[str]) -> int:
             return sum(
                 1 for sid in section_ids
                 if self._board_state.get((ticker, sid)) == "done"
             )
 
-        analyst_ids = [d.section_id for d in analyst_defs]
-        try:
-            self.query_one("#col_analysts_header", Static).update(
-                f"分析团队 ({_done_count(analyst_ids)}/{len(analyst_ids)})"
-            )
-        except Exception:
-            pass
-
-        if research_defs:
+        tab_defs = [
+            ("rtab-analysts", "📊 分析团队", groups["analysts"]),
+            ("rtab-research", "📖 研究", groups["research"]),
+            ("rtab-risk", "⚠️ 风险", groups["risk"]),
+            ("rtab-decision", "🎯 决策", groups["decision"]),
+        ]
+        for tab_id, label, group_defs in tab_defs:
+            ids = [d.section_id for d in group_defs]
             try:
-                self.query_one("#col_research_header", Static).update(
-                    f"研究 ({_done_count([d.section_id for d in research_defs])}/{len(research_defs)})"
-                )
-            except Exception:
-                pass
-
-        if risk_defs:
-            try:
-                self.query_one("#col_risk_header", Static).update(
-                    f"风险 ({_done_count([d.section_id for d in risk_defs])}/{len(risk_defs)})"
-                )
-            except Exception:
-                pass
-
-        decision_ids = [d.section_id for d in pm_defs]
-        try:
-            self.query_one("#col_decision_header", Static).update(
-                f"决策 ({_done_count(decision_ids)}/{len(decision_ids)})"
-            )
-        except Exception:
-            pass
-
-        # Debate progress bars
-        for prog_id, debate_key in [("research_progress", "research_debate"), ("risk_progress", "risk_debate")]:
-            rounds = self._debate_rounds.get((ticker, debate_key))
-            try:
-                widget = self.query_one(f"#{prog_id}", Static)
-                if rounds:
-                    widget.update(_debate_progress_bar(rounds[0], rounds[1]))
-                else:
-                    widget.update("")
-            except Exception:
-                pass
-
-        # Active column highlighting
-        col_ids = ["col_analysts", "col_research", "col_risk", "col_decision"]
-        for col_id in col_ids:
-            try:
-                col = self.query_one(f"#{col_id}")
-                if col_id == self._active_column:
-                    col.remove_class("column-inactive")
-                    col.add_class("column-active")
-                else:
-                    col.remove_class("column-active")
-                    col.add_class("column-inactive")
+                tab = self.query_one(f"#{tab_id}", Button)
+                tab.label = f"{label} {_done_count(ids)}/{len(ids)} ▾"
+                tab.remove_class("section-tab-active")
+                if tab_id == self._active_column:
+                    tab.add_class("section-tab-active")
             except Exception:
                 pass
 
@@ -1305,12 +1577,21 @@ class AnalysisRunScreen(Screen):
             self.query_one("#ra_body", Markdown).update(self._progress_markdown())
             return
 
+        if self.current_section == "execution_summary":
+            self.query_one("#ra_body_title", Static).update("核心执行摘要")
+            summary_md = _format_execution_summary(
+                self._backtest_signals.get(self.current_ticker),
+                self._etf_details.get(self.current_ticker),
+            )
+            self.query_one("#ra_body", Markdown).update(summary_md)
+            return
+
         # risk_debate — show actual risk debate content
         if self.current_section == "risk_debate":
             self.query_one("#ra_body_title", Static).update("风险辩论")
             content = self.section_contents.get((self.current_ticker, "risk_debate"))
             if content:
-                self.query_one("#ra_body", Markdown).update(content)
+                self.query_one("#ra_body", Markdown).update(_highlight_report_numbers(content))
             else:
                 rounds = self._debate_rounds.get((self.current_ticker, "risk_debate"))
                 if rounds:
@@ -1334,7 +1615,7 @@ class AnalysisRunScreen(Screen):
 
         self.query_one("#ra_body_title", Static).update(str(title))
         if content:
-            self.query_one("#ra_body", Markdown).update(content)
+            self.query_one("#ra_body", Markdown).update(_highlight_report_numbers(content))
         else:
             self.query_one("#ra_body", Markdown).update("该团队尚未产出报告，分析仍在进行或尚未开始。")
 
@@ -1413,6 +1694,15 @@ class AnalysisRunScreen(Screen):
 
     def _section_definitions(self) -> tuple[SectionDef, ...]:
         return section_definitions_for(self._analysis_config.selected_analysts)
+
+    def _section_group_defs(self) -> dict[str, list[SectionDef]]:
+        defs = list(self._section_definitions())
+        return {
+            "analysts": [d for d in defs if d.team == "分析师"],
+            "research": [d for d in defs if d.team == "研究"],
+            "risk": [d for d in defs if d.section_id in {"trader", "risk_debate"}],
+            "decision": [d for d in defs if d.team == "决策"],
+        }
 
     def _elapsed_text(self) -> str:
         if self._started_at is None:
