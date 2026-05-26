@@ -36,6 +36,7 @@ from cli.tui.screens.research import (
     _format_execution_summary,
     _highlight_report_numbers,
     _price_ruler,
+    _price_trend_chart,
     _truncate_condition,
     _weight_bar,
 )
@@ -652,6 +653,78 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
     def test_price_ruler_degenerate_range_returns_empty(self):
         self.assertEqual(_price_ruler(2.0, 2.0, 2.0), "")
 
+    # -- _price_trend_chart tests --
+
+    def test_price_trend_chart_empty_data(self):
+        self.assertEqual(_price_trend_chart([]), "")
+
+    def test_price_trend_chart_single_point(self):
+        self.assertEqual(_price_trend_chart([4.12]), "")
+
+    def test_price_trend_chart_basic_structure(self):
+        prices = [1.8, 1.85, 1.9, 1.88, 1.92, 1.95, 1.93, 1.97, 1.99, 2.0]
+        result = _price_trend_chart(prices)
+        self.assertTrue(result.startswith("```"))
+        self.assertTrue(result.endswith("```"))
+        self.assertIn("┤", result)
+        self.assertIn("└", result)
+        self.assertIn("●", result)
+
+    def test_price_trend_chart_current_marked(self):
+        prices = [1.0, 1.5, 2.0, 2.5, 3.0]
+        result = _price_trend_chart(prices)
+        # ● should appear (marks the last/current price)
+        self.assertIn("●", result)
+        # Only one ● in the chart
+        self.assertEqual(result.count("●"), 1)
+
+    def test_price_trend_chart_recent_marked(self):
+        prices = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4]
+        result = _price_trend_chart(prices)
+        self.assertIn("○", result)
+
+    def test_price_trend_chart_flat_prices(self):
+        prices = [4.12] * 10
+        result = _price_trend_chart(prices)
+        # Should not crash and should produce valid output
+        self.assertIn("●", result)
+        self.assertIn("```", result)
+
+    def test_price_trend_chart_with_reference_lines(self):
+        prices = [1.8, 1.85, 1.9, 1.88, 1.92, 1.95, 1.93, 1.97, 1.99, 2.0]
+        result = _price_trend_chart(prices, stop_price=1.82, target_price=1.98)
+        self.assertIn("╌", result)
+
+    def test_price_trend_chart_25_days(self):
+        # Simulate 25 trading days with realistic price movement
+        import math
+        prices = [2.0 + 0.1 * math.sin(i * 0.3) + i * 0.005 for i in range(25)]
+        result = _price_trend_chart(prices)
+        self.assertIn("●", result)
+        self.assertIn("┤", result)
+        self.assertIn("└", result)
+        lines = result.strip().split("\n")
+        self.assertGreater(len(lines), 3)  # at least header row + some data + footer
+
+    def test_price_trend_chart_ascending(self):
+        prices = [float(i) for i in range(1, 11)]
+        result = _price_trend_chart(prices)
+        # ● should be on the top row (highest price = last)
+        content_lines = result.strip("` \n").split("\n")
+        top_line = content_lines[0]
+        self.assertIn("●", top_line)
+
+    def test_price_trend_chart_width_within_bounds(self):
+        prices = [1.9 + i * 0.01 for i in range(25)]
+        width = 38
+        result = _price_trend_chart(prices, width=width)
+        for line in result.split("\n"):
+            if line.strip() == "```":
+                continue
+            # CJK chars count as 2, but reference labels are at the end
+            # Just verify no line is egregiously long
+            self.assertLessEqual(len(line), width + 10)
+
     def test_extract_price_from_text_finds_stop(self):
         signal = {
             "risk_controls": [
@@ -689,6 +762,10 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("等待", rendered)
 
     def test_format_execution_summary_rating_and_visuals(self):
+        price_history = [
+            {"date": f"202605{i:02d}", "close": 1.9 + i * 0.005}
+            for i in range(1, 21)
+        ]
         result = _format_execution_summary(
             {
                 "rating": "OVERWEIGHT",
@@ -698,7 +775,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 "add_triggers": [{"metric": "close", "op": ">", "threshold": 2.058, "action": "add"}],
                 "risk_rules": [{"metric": "close", "op": "<", "threshold": 1.85, "action": "stop"}],
             },
-            {"close": 1.966},
+            {"close": 1.966, "price_history": price_history},
         )
         self.assertIsInstance(result, str)
         # Rating
@@ -715,6 +792,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         # Target/stop with emoji
         self.assertIn("🎯", result)
         self.assertIn("🛡", result)
+        # Price trend chart
+        self.assertIn("●", result)
+        self.assertIn("📉", result)
 
     def test_format_execution_summary_extracts_prices_from_condition_text(self):
         """When structured triggers are empty, prices should be extracted from conditions."""
@@ -768,7 +848,14 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 screen = app.screen
                 screen.current_ticker = "510300.SH"
-                screen._etf_details["510300.SH"] = {"ticker": "510300.SH", "close": 1.966}
+                screen._etf_details["510300.SH"] = {
+                    "ticker": "510300.SH",
+                    "close": 1.966,
+                    "price_history": [
+                        {"date": f"202605{i:02d}", "close": 1.9 + i * 0.005}
+                        for i in range(1, 21)
+                    ],
+                }
 
                 screen._handle_section_done(SectionDone(
                     ticker="510300.SH",

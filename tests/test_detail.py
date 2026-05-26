@@ -181,6 +181,11 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertEqual(result["holdings"][0]["code"], "600519")
         self.assertEqual(result["fund_share"], 125.3)
         self.assertIsNotNone(result["share_change_pct"])
+        # Price history
+        self.assertIsNotNone(result["price_history"])
+        self.assertEqual(len(result["price_history"]), 2)
+        self.assertEqual(result["price_history"][-1]["close"], 4.12)
+        self.assertEqual(result["price_history"][0]["date"], "20260519")
 
     @patch("etfagents.dataflows.interface.route_to_vendor")
     def test_holdings_name_does_not_fall_back_to_code(self, mock_vendor):
@@ -212,6 +217,7 @@ class GetEtfDetailTests(unittest.TestCase):
         self.assertEqual(result["ticker"], "INVALID.TICKER")
         self.assertIsNone(result["name"])
         self.assertIsNone(result["close"])
+        self.assertIsNone(result["price_history"])
 
     @patch("etfagents.dataflows.interface.route_to_vendor")
     def test_non_a_share_ticker(self, mock_vendor):
@@ -268,6 +274,28 @@ class GetEtfDetailTests(unittest.TestCase):
         result = get_etf_detail("510300.SH", curr_date="2026-05-20")
         self.assertEqual(result["fund_share"], 0.0)
         self.assertEqual(result["share_change_pct"], -100.0)
+
+    @patch("etfagents.dataflows.interface.route_to_vendor")
+    def test_price_history_caps_at_25_rows(self, mock_vendor):
+        header = "trade_date,open,high,low,close,vol,amount,pct_chg\n"
+        rows = "".join(
+            f"202601{i:02d},4.{i:02d},4.{i+1:02d},4.{i-1:02d},4.{i:02d},1000,4000,0.1\n"
+            for i in range(1, 32)
+        )
+        big_csv = f"# Price\n\n{header}{rows}"
+
+        def _vendor_side_effect(method, *args, **kwargs):
+            if method == "get_etf_price_data":
+                return big_csv
+            return "No data found."
+
+        mock_vendor.side_effect = _vendor_side_effect
+        result = get_etf_detail("510300.SH", curr_date="2026-01-31")
+        self.assertIsNotNone(result["price_history"])
+        self.assertEqual(len(result["price_history"]), 25)
+        # Last entry should be the most recent
+        self.assertEqual(result["price_history"][-1]["date"], "20260131")
+
 
 class GetEtfHistoryReportsTests(unittest.TestCase):
     def test_no_results_dir(self):

@@ -426,6 +426,131 @@ def _price_ruler(stop: float, current: float, target: float, width: int = 36) ->
     )
 
 
+def _price_trend_chart(
+    prices: list[float],
+    *,
+    height: int = 6,
+    width: int = 38,
+    stop_price: float | None = None,
+    target_price: float | None = None,
+) -> str:
+    """Render a multi-line ASCII price trend chart inside Markdown code fences.
+
+    Args:
+        prices: Chronological close prices (oldest first).
+        height: Number of Y-axis rows.
+        width: Maximum character width including Y-axis labels.
+        stop_price: Optional stop-loss reference line.
+        target_price: Optional target reference line.
+
+    Returns:
+        Markdown code-fenced chart string, or "" if data is insufficient.
+    """
+    if len(prices) < 2:
+        return ""
+
+    lo, hi = min(prices), max(prices)
+    # Extend range to include reference prices if within 20% of range
+    span = hi - lo if hi != lo else abs(hi) * 0.1 or 0.1
+    margin = span * 0.2
+    for ref in (stop_price, target_price):
+        if ref is not None:
+            if lo - margin <= ref <= hi + margin:
+                lo = min(lo, ref)
+                hi = max(hi, ref)
+
+    if hi == lo:
+        # Flat prices — render a simple single-row line
+        label = f"{hi:.2f}" if hi < 100 else f"{hi:.1f}"
+        label_w = len(label) + 2  # "label ┤"
+        plot_w = max(width - label_w - 1, len(prices))
+        dots = "·" * (len(prices) - 1) + "●"
+        if len(dots) > plot_w:
+            dots = dots[:plot_w]
+        return f"```\n{label:>{label_w - 2}} ┤{dots}\n{'':>{label_w - 2}} └{'─' * len(dots)}\n```"
+
+    # Y-axis label formatting
+    decimals = 2 if hi < 100 else 1
+    fmt = f".{decimals}f"
+    levels = [hi - i * (hi - lo) / (height - 1) for i in range(height)]
+    labels = [f"{lv:{fmt}}" for lv in levels]
+    label_w = max(len(lb) for lb in labels) + 1  # +1 for space before ┤
+
+    # Available plot width
+    plot_w = width - label_w - 1  # subtract ┤
+    if plot_w < 4:
+        plot_w = 4
+
+    # Downsample if needed (preserve first and last)
+    if len(prices) > plot_w:
+        indices = [round(i * (len(prices) - 1) / (plot_w - 1)) for i in range(plot_w)]
+        sampled = [prices[idx] for idx in indices]
+    else:
+        sampled = list(prices)
+
+    n = len(sampled)
+
+    # Determine reference line rows
+    def _row_for_price(p: float) -> int | None:
+        if p < lo or p > hi:
+            return None
+        return round((hi - p) / (hi - lo) * (height - 1))
+
+    stop_row = _row_for_price(stop_price) if stop_price is not None else None
+    target_row = _row_for_price(target_price) if target_price is not None else None
+
+    # Build grid
+    chart_lines: list[str] = []
+    for row in range(height):
+        level = levels[row]
+        half_step = (hi - lo) / (height - 1) / 2
+        cells: list[str] = []
+        for col in range(n):
+            val = sampled[col]
+            if abs(val - level) <= half_step:
+                if col == n - 1:
+                    cells.append("●")
+                elif col >= n - 3:
+                    cells.append("○")
+                else:
+                    cells.append("·")
+            else:
+                cells.append(" ")
+        plot = "".join(cells)
+
+        # Add reference line dashes in empty positions
+        ref_label = ""
+        is_ref_row = False
+        if stop_row == row and target_row == row:
+            ref_label = "止/标"
+            is_ref_row = True
+        elif stop_row == row:
+            ref_label = "止"
+            is_ref_row = True
+        elif target_row == row:
+            ref_label = "标"
+            is_ref_row = True
+
+        if is_ref_row:
+            plot_chars = list(plot)
+            for i in range(len(plot_chars)):
+                if plot_chars[i] == " ":
+                    plot_chars[i] = "╌"
+            plot = "".join(plot_chars)
+
+        label = labels[row]
+        line = f"{label:>{label_w}}┤{plot}"
+        if ref_label:
+            line += f" {ref_label}"
+        chart_lines.append(line)
+
+    # X-axis
+    x_axis = f"{'':>{label_w}}└{'─' * n}"
+    chart_lines.append(x_axis)
+
+    return "```\n" + "\n".join(chart_lines) + "\n```"
+
+
 _RATING_EMOJI = {
     "BUY": "🟢",
     "OVERWEIGHT": "🟢",
@@ -510,6 +635,21 @@ def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, A
         if ruler:
             lines.append("")
             lines.append(ruler)
+
+    # Price trend chart
+    price_history = detail.get("price_history") if detail else None
+    if price_history:
+        close_prices = [p["close"] for p in price_history if p.get("close") is not None]
+        if close_prices:
+            chart = _price_trend_chart(
+                close_prices,
+                stop_price=stop_price,
+                target_price=target_price,
+            )
+            if chart:
+                lines.append("")
+                lines.append("📉 价格趋势")
+                lines.append(chart)
 
     lines.append("")
     lines.append(f"执行延迟：{execution_delay}")
