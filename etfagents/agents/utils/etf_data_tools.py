@@ -70,7 +70,7 @@ _ETF_INDICATOR_ALIASES = {
 
 _SHARED_SNAPSHOT_SCHEMA_VERSION = {
     "macro": 1,
-    "commodity": 1,
+    "commodity": 2,
 }
 
 _MACRO_SAFE_HAVEN_SPECS = [
@@ -108,6 +108,12 @@ _COMMODITY_SPECS = [
     ("工业品 · PVC", "V", "DCE", "PVC主力", "Real estate piping demand, calcium-carbide cost curve"),
     ("工业品 · 纯碱", "SA", "CZCE", "纯碱主力", "Glass production demand, photovoltaic expansion, capacity cycle"),
 ]
+
+_TUSHARE_CONTINUOUS_EXCHANGE_SUFFIXES = {
+    "SHFE": "SHF",
+    "CZCE": "ZCE",
+    "GFEX": "GFE",
+}
 
 _AGRICULTURE_RESEARCH_KEYWORDS = ("农牧饲渔", "养殖业")
 _AGRICULTURE_RESEARCH_TRIGGERS = ("农牧饲渔", "养殖", "饲料", "生猪", "动物保健", "农产品加工")
@@ -868,6 +874,42 @@ def _load_tushare_futures_daily_contract_frames(
     return frames
 
 
+@lru_cache(maxsize=128)
+def _load_tushare_futures_continuous_frame(
+    fut_code: str,
+    exchange: str,
+    curr_date: str,
+    look_back_days: int = 240,
+) -> pd.DataFrame | None:
+    start_dt = _parse_trade_date(curr_date) - timedelta(days=look_back_days)
+    suffix = _TUSHARE_CONTINUOUS_EXCHANGE_SUFFIXES.get(exchange, exchange)
+    try:
+        frame = _query_pro(
+            "fut_daily",
+            ts_code=f"{fut_code.upper()}.{suffix}",
+            start_date=start_dt.strftime("%Y%m%d"),
+            end_date=_parse_trade_date(curr_date).strftime("%Y%m%d"),
+            fields="ts_code,trade_date,close,settle,vol,oi",
+        )
+    except DataVendorUnavailable:
+        return None
+    if frame is None:
+        return pd.DataFrame()
+    return frame
+
+
+def _normalize_tushare_futures_daily_frame(frame: pd.DataFrame | None) -> pd.DataFrame:
+    if frame is None or frame.empty or "trade_date" not in frame.columns:
+        return pd.DataFrame()
+    normalized = frame.copy()
+    normalized["trade_date"] = pd.to_datetime(normalized["trade_date"], errors="coerce")
+    for column in ("close", "settle", "vol", "oi"):
+        if column not in normalized.columns:
+            normalized[column] = pd.NA
+        normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
+    return normalized.dropna(subset=["trade_date"]).sort_values("trade_date").reset_index(drop=True)
+
+
 @lru_cache(maxsize=64)
 def _load_tushare_futures_main_frame(
     fut_code: str,
@@ -875,6 +917,12 @@ def _load_tushare_futures_main_frame(
     curr_date: str,
     look_back_days: int = 240,
 ) -> pd.DataFrame:
+    continuous = _normalize_tushare_futures_daily_frame(
+        _load_tushare_futures_continuous_frame(fut_code, exchange, curr_date, look_back_days)
+    )
+    if not continuous.empty:
+        return continuous
+
     start_dt = _parse_trade_date(curr_date) - timedelta(days=look_back_days)
     start_api = start_dt.strftime("%Y%m%d")
     end_api = _parse_trade_date(curr_date).strftime("%Y%m%d")
@@ -894,7 +942,6 @@ def _load_tushare_futures_main_frame(
         return pd.DataFrame()
     if "delist_date" in catalog.columns:
         catalog = catalog.sort_values("delist_date")
-    catalog = catalog.tail(12)
 
     ts_codes = catalog.get("ts_code", pd.Series(dtype=str)).dropna().astype(str).tolist()
     batched = _load_tushare_futures_daily_exchange_frame(exchange, curr_date, look_back_days)
@@ -913,13 +960,9 @@ def _load_tushare_futures_main_frame(
         return pd.DataFrame()
 
     merged = pd.concat(frames, ignore_index=True)
-    if "trade_date" not in merged.columns:
+    merged = _normalize_tushare_futures_daily_frame(merged)
+    if merged.empty:
         return pd.DataFrame()
-    merged["trade_date"] = pd.to_datetime(merged["trade_date"], errors="coerce")
-    for column in ("close", "settle", "vol", "oi"):
-        if column not in merged.columns:
-            merged[column] = pd.NA
-        merged[column] = pd.to_numeric(merged[column], errors="coerce")
     merged = merged.dropna(subset=["trade_date"]).sort_values(["trade_date", "oi", "vol"])
     if merged.empty:
         return pd.DataFrame()
@@ -1522,7 +1565,7 @@ def _render_commodity_snapshot(curr_date: str, payload: dict[str, Any]) -> str:
     return "\n\n".join(
         [
             f"# Commodity Cluster Snapshot ({curr_date})",
-            "Data sources: Tushare futures daily data stitched across the most active contracts, plus Tushare warehouse-receipt data where available. "
+            "Data sources: Tushare futures main continuous contracts, plus Tushare warehouse-receipt data where available. "
             "This replaces equity / ETF proxy instruments so the commodity read-through is anchored in directly traded commodity pricing and physical-inventory evidence.",
             _markdown_table(
                 ["Cluster", "Reference", "Latest", "30D %", "90D %", "30D OI %", "30D WSR %", "Key macro variable signaled"],
