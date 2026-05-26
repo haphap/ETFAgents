@@ -985,13 +985,39 @@ class ErrorDetailModal(ModalScreen[None]):
 
     DEFAULT_CSS = """
     ErrorDetailModal { align: center middle; }
-    #err_container { width: 90; height: auto; max-height: 32; border: solid $error; background: $surface; padding: 1 2; }
-    #err_container .err-title { color: $error; text-style: bold; height: 1; margin-bottom: 1; }
-    #err_container .err-summary { color: $text; height: auto; margin-bottom: 1; }
-    #err_container .err-tb-scroll { height: auto; max-height: 20; border: solid $panel; padding: 0 1; scrollbar-size: 1 1; }
-    #err_container .err-tb { color: $text-muted; height: auto; }
-    #err_container .err-actions { height: 3; margin-top: 1; }
-    #err_container .err-close { width: 14; height: 3; border: solid $error; background: transparent; color: $error; content-align: center middle; text-style: bold; }
+    #err_container {
+        width: 80; height: auto; max-height: 38;
+        border: double $error; background: $surface; padding: 1 2;
+    }
+    #err_container .err-title {
+        color: $error; text-style: bold; height: 1; margin-bottom: 1;
+    }
+    #err_container .err-desc {
+        color: $text; height: auto; margin-bottom: 1;
+    }
+    #err_container .err-summary-box {
+        height: auto; max-height: 6;
+        border: solid $warning; padding: 0 1; margin-bottom: 1;
+    }
+    #err_container .err-summary {
+        color: $warning; height: auto;
+    }
+    #err_container .err-tb-scroll {
+        height: auto; max-height: 14;
+        border: solid $panel; background: $surface-darken-1;
+        padding: 0 1; scrollbar-size: 1 1;
+    }
+    #err_container .err-tb {
+        color: $text-muted; height: auto;
+    }
+    #err_container .err-actions {
+        height: 3; margin-top: 1; align-horizontal: center;
+    }
+    #err_container .err-close {
+        width: 18; height: 3;
+        border: solid $error; background: transparent;
+        color: $error; content-align: center middle; text-style: bold;
+    }
     """
 
     def __init__(self, ticker: str, error: str, traceback_text: str = "") -> None:
@@ -1002,14 +1028,22 @@ class ErrorDetailModal(ModalScreen[None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="err_container"):
-            yield Static(f"分析失败 — {self._ticker}", classes="err-title")
-            yield Static(self._error, classes="err-summary")
+            yield Static("✕  分析中断 — 致命错误", classes="err-title")
+            yield Static(
+                f"agents 运行过程中发生不可恢复的错误，{self._ticker} 分析已终止。",
+                classes="err-desc",
+            )
+            summary_box = Vertical(classes="err-summary-box")
+            summary_box.border_title = "错误摘要"
+            with summary_box:
+                yield Static(self._error, classes="err-summary")
             if self._traceback_text:
-                with ScrollableContainer(classes="err-tb-scroll"):
+                tb_box = ScrollableContainer(classes="err-tb-scroll")
+                tb_box.border_title = "完整 Traceback"
+                with tb_box:
                     yield Static(self._traceback_text, classes="err-tb")
             with Horizontal(classes="err-actions"):
-                yield Static("", classes="acm-action-spacer")
-                yield Button("关闭", id="btn_err_close", classes="err-close")
+                yield Button("关闭  Esc", id="btn_err_close", classes="err-close")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "btn_err_close":

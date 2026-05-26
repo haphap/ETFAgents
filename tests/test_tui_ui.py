@@ -1290,7 +1290,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 modal = app.screen
                 self.assertIsInstance(modal, ErrorDetailModal)
                 title = str(modal.query_one(".err-title", Static).render())
-                self.assertIn("510300.SH", title)
+                self.assertIn("分析中断", title)
+                desc = str(modal.query_one(".err-desc", Static).render())
+                self.assertIn("510300.SH", desc)
                 summary = str(modal.query_one(".err-summary", Static).render())
                 self.assertIn("LLM provider returned 500", summary)
                 tb = str(modal.query_one(".err-tb", Static).render())
