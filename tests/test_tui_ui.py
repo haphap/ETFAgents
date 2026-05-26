@@ -1023,7 +1023,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
 
                 labels = _list_view_labels(screen.query_one("#section_picker_list", ListView))
-                self.assertEqual(labels[:2], ["✓ 投资组合经理", "✓   核心执行摘要"])
+                self.assertEqual(labels[:2], ["✓ 投资组合经理", "✓ 核心执行摘要"])
 
     # --- Board state updates ---
 

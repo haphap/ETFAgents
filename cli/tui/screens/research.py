@@ -1221,7 +1221,7 @@ class AnalysisRunScreen(Screen):
             ))
             if group == "decision" and defn.section_id == "portfolio_manager":
                 summary_state = "done" if ticker in self._backtest_signals else "pending"
-                options.append(("execution_summary", "  核心执行摘要", summary_state))
+                options.append(("execution_summary", "核心执行摘要", summary_state))
         title = {
             "analysts": "📊 分析团队",
             "research": "📖 研究",
