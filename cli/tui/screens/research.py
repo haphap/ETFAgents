@@ -286,6 +286,20 @@ def _signal_threshold(rule: dict[str, Any]) -> str:
     return _signal_number(threshold)
 
 
+_CONDITION_STRIP_RE = re.compile(r"^\s*\d+[.、)）]\s*|^[-*•]\s*|`[^`]*`")
+_PRICE_PATTERN = re.compile(r"(\d+(?:\.\d+)?)(?:\s*元)")
+
+
+def _clean_condition_text(text: str) -> str:
+    """Strip leading numbering, backtick wrappers, and key prefixes from condition text."""
+    cleaned = _CONDITION_STRIP_RE.sub("", text).strip()
+    # Strip leading key-like prefixes: "加仓触发条件：" / "reduce_triggers: ..."
+    cleaned = re.sub(r"^[\w_]+\s*[:：]\s*", "", cleaned)
+    # Strip leading quoted labels like `加仓触发条件` –
+    cleaned = re.sub(r"^[`「『].*?[`」』]\s*[-–—]\s*", "", cleaned)
+    return cleaned.strip()
+
+
 def _first_rule_line(signal: dict[str, Any], keys: tuple[str, ...]) -> str:
     for key in keys:
         value = signal.get(key)
@@ -300,11 +314,12 @@ def _first_rule_line(signal: dict[str, Any], keys: tuple[str, ...]) -> str:
                 prefix = " ".join(parts)
                 return f"{prefix} {note}".strip() if note else prefix
             if isinstance(first, str):
-                return first.strip()
+                return _clean_condition_text(first)
     return ""
 
 
 def _extract_price_rule(signal: dict[str, Any], rule_keys: tuple[str, ...], actions: tuple[str, ...]) -> float | None:
+    # First try structured trigger rules
     for key in rule_keys:
         rules = signal.get(key)
         if not isinstance(rules, list):
@@ -324,9 +339,130 @@ def _extract_price_rule(signal: dict[str, Any], rule_keys: tuple[str, ...], acti
     return None
 
 
-def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, Any] | None = None) -> Text:
+def _extract_price_from_text(
+    signal: dict[str, Any],
+    text_keys: tuple[str, ...],
+    hint_patterns: tuple[str, ...],
+) -> float | None:
+    """Extract a price from condition text using hint patterns near '元' prices."""
+    for key in text_keys:
+        items = signal.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, str):
+                continue
+            for hint in hint_patterns:
+                # Look for pattern: hint...price元 or price元...hint (within ~30 chars)
+                for m in _PRICE_PATTERN.finditer(item):
+                    price_pos = m.start()
+                    try:
+                        price = float(m.group(1))
+                    except ValueError:
+                        continue
+                    # Check if any hint is near this price (within 40 chars)
+                    context_start = max(0, price_pos - 40)
+                    context_end = min(len(item), price_pos + 40)
+                    context = item[context_start:context_end]
+                    if hint in context:
+                        return price
+    return None
+
+
+def _weight_bar(pct: float | None, max_pct: float = 50.0, bar_width: int = 10) -> str:
+    """Render a Unicode bar chart for portfolio weight, e.g. '██░░░░░░░░ **2.0%**'."""
+    if pct is None:
+        return "--"
+    filled = round(pct / max_pct * bar_width) if max_pct > 0 else 0
+    filled = max(0, min(filled, bar_width))
+    return "█" * filled + "░" * (bar_width - filled) + f" **{pct:.1f}%**"
+
+
+def _price_ruler(stop: float, current: float, target: float, width: int = 36) -> str:
+    """Draw a text ruler showing current price position between stop and target.
+
+    Returns empty string when the range is degenerate.
+    """
+    span = target - stop
+    if span <= 0:
+        return ""
+    pos = (current - stop) / span
+    pos = max(0.0, min(1.0, pos))
+    marker_col = round(pos * (width - 1))
+
+    left = "─" * marker_col
+    right = "━" * (width - 1 - marker_col)
+    ruler_line = f"{left}╋{right}"
+
+    stop_str = _signal_number(stop)
+    current_str = _signal_number(current)
+    target_str = _signal_number(target)
+
+    label_line = [" "] * (width + 1)
+    for i, ch in enumerate(stop_str):
+        if i < len(label_line):
+            label_line[i] = ch
+    cur_start = max(len(stop_str) + 1, marker_col - len(current_str) // 2)
+    for i, ch in enumerate(current_str):
+        idx = cur_start + i
+        if 0 <= idx < len(label_line):
+            label_line[idx] = ch
+    tgt_start = max(cur_start + len(current_str) + 1, width + 1 - len(target_str))
+    while len(label_line) < tgt_start + len(target_str):
+        label_line.append(" ")
+    for i, ch in enumerate(target_str):
+        label_line[tgt_start + i] = ch
+
+    tag_line = [" "] * len(label_line)
+    for i, ch in enumerate("止损"):
+        if i < len(tag_line):
+            tag_line[i] = ch
+    cur_tag_start = max(3, marker_col - 1)
+    for i, ch in enumerate("现价"):
+        idx = cur_tag_start + i
+        if 0 <= idx < len(tag_line):
+            tag_line[idx] = ch
+    tgt_tag_start = max(cur_tag_start + 3, tgt_start)
+    while len(tag_line) < tgt_tag_start + 2:
+        tag_line.append(" ")
+    for i, ch in enumerate("目标"):
+        tag_line[tgt_tag_start + i] = ch
+
+    return (
+        f"```\n"
+        f"  {ruler_line}\n"
+        f"  {''.join(label_line)}\n"
+        f"  {''.join(tag_line)}\n"
+        f"```"
+    )
+
+
+_RATING_EMOJI = {
+    "BUY": "🟢",
+    "OVERWEIGHT": "🟢",
+    "HOLD": "🟡",
+    "UNDERWEIGHT": "🔴",
+    "SELL": "🔴",
+}
+
+
+def _truncate_condition(text: str, limit: int = 50) -> str:
+    """Truncate a cleaned condition string with ellipsis."""
+    if not text:
+        return ""
+    for sep in ("。", "；", "，", ",", ";"):
+        idx = text.find(sep)
+        if 0 < idx <= limit:
+            return text[: idx + 1]
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "…"
+
+
+def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, Any] | None = None) -> str:
+    """Build a Markdown execution summary from a backtest signal."""
     if not signal:
-        return Text("📈 核心执行摘要\n等待组合经理生成结构化投资策略。", style="dim")
+        return "*等待组合经理生成结构化投资策略。*"
 
     rating = str(signal.get("rating") or "HOLD").upper()
     rating_label = _RATING_LABELS.get(rating, rating)
@@ -334,39 +470,55 @@ def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, A
     weight_min = signal.get("target_weight_min_pct")
     weight_max = signal.get("target_weight_max_pct")
     execution_delay = signal.get("execution_delay") or "--"
-    add_line = _first_rule_line(signal, ("add_triggers", "add_conditions"))
-    reduce_line = _first_rule_line(signal, ("reduce_triggers", "reduce_conditions", "exit_triggers", "exit_conditions"))
-    risk_line = _first_rule_line(signal, ("risk_rules", "risk_controls"))
+    add_line = _truncate_condition(_first_rule_line(signal, ("add_triggers", "add_conditions")))
+    reduce_line = _truncate_condition(_first_rule_line(signal, ("reduce_triggers", "reduce_conditions", "exit_triggers", "exit_conditions")))
+    risk_line = _truncate_condition(_first_rule_line(signal, ("risk_rules", "risk_controls")))
     current = detail.get("close") if detail else None
-    target_price = _extract_price_rule(signal, ("add_triggers", "rebalance_triggers"), ("add", "buy", "rebalance"))
-    stop_price = _extract_price_rule(signal, ("risk_rules", "reduce_triggers", "exit_triggers"), ("reduce", "exit", "sell", "stop"))
 
-    text = Text()
-    text.append("📈 核心执行摘要\n", style="bold")
-    rating_style = "bold red" if rating in {"BUY", "OVERWEIGHT"} else "bold green" if rating in {"UNDERWEIGHT", "SELL"} else "bold"
-    text.append("研报结论：")
-    text.append(rating_label, style=rating_style)
-    text.append("\n推荐仓位：")
-    text.append(_signal_number(target_weight, "%"), style="bold")
+    target_price = _extract_price_rule(signal, ("add_triggers", "rebalance_triggers"), ("add", "buy", "rebalance"))
+    if target_price is None:
+        target_price = _extract_price_from_text(
+            signal, ("add_conditions",), ("突破", "加仓", "目标", "上方", "上行"),
+        )
+    stop_price = _extract_price_rule(signal, ("risk_rules", "reduce_triggers", "exit_triggers"), ("reduce", "exit", "sell", "stop"))
+    if stop_price is None:
+        stop_price = _extract_price_from_text(
+            signal, ("risk_controls", "reduce_conditions"), ("止损", "跌破", "防守", "下方", "stop"),
+        )
+
+    emoji = _RATING_EMOJI.get(rating, "🟡")
+    lines: list[str] = []
+
+    lines.append(f"{emoji} 研报结论：**{rating_label}**")
+    lines.append("")
+
+    weight_str = _weight_bar(target_weight)
     if weight_min is not None or weight_max is not None:
-        text.append(f"  区间 {_signal_number(weight_min, '%')}-{_signal_number(weight_max, '%')}")
-    text.append(f"\n执行延迟：{execution_delay}")
-    if current is not None:
-        text.append("\n现价位置：")
-        text.append(_signal_number(current), style="bold")
+        weight_str += f"  (区间 {_signal_number(weight_min, '%')}-{_signal_number(weight_max, '%')})"
+    lines.append(f"推荐仓位：{weight_str}")
+
     if target_price is not None:
-        text.append("\n目标触发：")
-        text.append(_signal_number(target_price), style="bold red")
+        lines.append(f"目标价格：**{_signal_number(target_price)}** 🎯")
     if stop_price is not None:
-        text.append("\n风险触发：")
-        text.append(_signal_number(stop_price), style="bold green")
+        lines.append(f"止损价格：**{_signal_number(stop_price)}** 🛡️")
+    if current is not None:
+        lines.append(f"现价位置：**{_signal_number(current)}**")
+
+    if stop_price is not None and target_price is not None and current is not None:
+        ruler = _price_ruler(stop_price, current, target_price)
+        if ruler:
+            lines.append("")
+            lines.append(ruler)
+
+    lines.append("")
+    lines.append(f"执行延迟：{execution_delay}")
     if add_line:
-        text.append(f"\n加仓依据：{add_line[:72]}")
+        lines.append(f"加仓依据：{add_line}")
     if reduce_line:
-        text.append(f"\n减仓依据：{reduce_line[:72]}")
+        lines.append(f"减仓依据：{reduce_line}")
     if risk_line:
-        text.append(f"\n风控规则：{risk_line[:72]}")
-    return text
+        lines.append(f"风控规则：{risk_line}")
+    return "\n".join(lines)
 
 
 _NUMERIC_TOKEN_RE = re.compile(
@@ -1427,11 +1579,11 @@ class AnalysisRunScreen(Screen):
 
         if self.current_section == "execution_summary":
             self.query_one("#ra_body_title", Static).update("核心执行摘要")
-            summary_text = _format_execution_summary(
+            summary_md = _format_execution_summary(
                 self._backtest_signals.get(self.current_ticker),
                 self._etf_details.get(self.current_ticker),
             )
-            self.query_one("#ra_body", Markdown).update(str(summary_text))
+            self.query_one("#ra_body", Markdown).update(summary_md)
             return
 
         # risk_debate — show actual risk debate content

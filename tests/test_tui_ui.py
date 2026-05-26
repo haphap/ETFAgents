@@ -30,9 +30,14 @@ from cli.tui.app import (
     HelpScreen,
 )
 from cli.tui.screens.research import (
+    _extract_price_from_text,
     _format_detail_rich,
     _format_detail_text,
+    _format_execution_summary,
     _highlight_report_numbers,
+    _price_ruler,
+    _truncate_condition,
+    _weight_bar,
 )
 from cli.tui.services import (
     AnalysisConfig,
@@ -615,6 +620,111 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("`price 1.23`", text)
         self.assertIn("stop 1.850", text)
 
+    def test_weight_bar_renders_blocks(self):
+        rendered = _weight_bar(25.0)
+        self.assertIn("█", rendered)
+        self.assertIn("░", rendered)
+        self.assertIn("25.0%", rendered)
+
+    def test_weight_bar_none_returns_dash(self):
+        self.assertEqual(_weight_bar(None), "--")
+
+    def test_price_ruler_shows_marker(self):
+        rendered = _price_ruler(1.85, 1.966, 2.058)
+        self.assertIn("╋", rendered)
+        self.assertIn("1.85", rendered)
+        self.assertIn("2.058", rendered)
+        self.assertIn("止损", rendered)
+        self.assertIn("目标", rendered)
+
+    def test_price_ruler_degenerate_range_returns_empty(self):
+        self.assertEqual(_price_ruler(2.0, 1.5, 2.0), "")
+
+    def test_extract_price_from_text_finds_stop(self):
+        signal = {
+            "risk_controls": [
+                "严格锚定2.025元动态止损线防范尾部流动性踩踏",
+            ],
+        }
+        price = _extract_price_from_text(signal, ("risk_controls",), ("止损", "跌破"))
+        self.assertEqual(price, 2.025)
+
+    def test_extract_price_from_text_finds_add_target(self):
+        signal = {
+            "add_conditions": [
+                "价格放量突破2.110元且份额连续3个交易日净流入",
+            ],
+        }
+        price = _extract_price_from_text(signal, ("add_conditions",), ("突破", "加仓"))
+        self.assertEqual(price, 2.110)
+
+    def test_extract_price_from_text_returns_none_without_hint(self):
+        signal = {"risk_controls": ["监控焦煤仓单异动"]}
+        price = _extract_price_from_text(signal, ("risk_controls",), ("止损",))
+        self.assertIsNone(price)
+
+    def test_truncate_condition_at_sentence_break(self):
+        text = "仅当价格回踩20日均线1.79元支撑带，且成交量达到近20日均量1.3倍以上时生效"
+        truncated = _truncate_condition(text, 30)
+        self.assertTrue(len(truncated) <= 31)  # may include the break char
+        self.assertTrue(truncated.endswith("，") or truncated.endswith("…"))
+
+    def test_truncate_condition_short_text_unchanged(self):
+        self.assertEqual(_truncate_condition("短句。", 50), "短句。")
+
+    def test_format_execution_summary_no_signal(self):
+        rendered = str(_format_execution_summary(None))
+        self.assertIn("等待", rendered)
+
+    def test_format_execution_summary_rating_and_visuals(self):
+        result = _format_execution_summary(
+            {
+                "rating": "OVERWEIGHT",
+                "target_weight_pct": 25.0,
+                "target_weight_min_pct": 20.0,
+                "target_weight_max_pct": 30.0,
+                "add_triggers": [{"metric": "close", "op": ">", "threshold": 2.058, "action": "add"}],
+                "risk_rules": [{"metric": "close", "op": "<", "threshold": 1.85, "action": "stop"}],
+            },
+            {"close": 1.966},
+        )
+        self.assertIsInstance(result, str)
+        # Rating
+        self.assertIn("增持", result)
+        self.assertIn("🟢", result)
+        # Weight bar
+        self.assertIn("█", result)
+        self.assertIn("░", result)
+        self.assertIn("25.0%", result)
+        # Price ruler
+        self.assertIn("╋", result)
+        self.assertIn("2.058", result)
+        self.assertIn("1.85", result)
+        # Target/stop with emoji
+        self.assertIn("🎯", result)
+        self.assertIn("🛡", result)
+
+    def test_format_execution_summary_extracts_prices_from_condition_text(self):
+        """When structured triggers are empty, prices should be extracted from conditions."""
+        result = _format_execution_summary(
+            {
+                "rating": "OVERWEIGHT",
+                "target_weight_pct": 30.0,
+                "add_triggers": [],
+                "risk_rules": [],
+                "add_conditions": [
+                    "加仓触发条件为价格放量突破2.110元且份额连续3个交易日净流入",
+                ],
+                "risk_controls": [
+                    "严格锚定2.025元动态止损线防范尾部流动性踩踏",
+                ],
+            },
+            {"close": 2.084},
+        )
+        self.assertIn("2.11", result)
+        self.assertIn("2.025", result)
+        self.assertIn("╋", result)  # price ruler should appear
+
     async def test_analysis_run_renders_execution_summary_from_signal(self):
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
@@ -655,6 +765,38 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("2.0%", rendered)
                 self.assertIn("2.058", rendered)
                 self.assertIn("1.85", rendered)
+
+    async def test_analysis_run_exec_summary_toggles_back_to_report(self):
+        """Switching from execution summary to a report section shows the report."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+                screen._handle_section_done(SectionDone(
+                    ticker="510300.SH",
+                    section_id="portfolio_manager",
+                    content="PM report body",
+                    completed=9,
+                    total=9,
+                    backtest_signal={"rating": "HOLD", "target_weight_pct": 2.0},
+                ))
+                await pilot.pause()
+
+                screen._on_section_picked("execution_summary")
+                await pilot.pause()
+                self.assertIn("持有", screen.query_one("#ra_body")._markdown)
+
+                screen._on_section_picked("portfolio_manager")
+                await pilot.pause()
+                self.assertIn("PM report body", screen.query_one("#ra_body")._markdown)
 
     async def test_analysis_run_board_follows_selected_analysts(self):
         """Board should only show selected analysts."""
