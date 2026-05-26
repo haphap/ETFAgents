@@ -74,8 +74,15 @@ class AnalysisRunnerContractTests(unittest.TestCase):
     def setUp(self):
         self._stub_patcher = patch.dict(sys.modules, _build_stubs())
         self._stub_patcher.start()
+        self._markdown_patcher = patch.object(
+            AnalysisRunner,
+            "_prepare_markdown",
+            staticmethod(lambda content: content),
+        )
+        self._markdown_patcher.start()
 
     def tearDown(self):
+        self._markdown_patcher.stop()
         self._stub_patcher.stop()
 
     def test_stream_emits_ticker_started_then_section_done_then_ticker_done(self):
@@ -292,6 +299,37 @@ class AnalysisRunnerContractTests(unittest.TestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].section_id, "research")
         self.assertEqual(events[0].content, "Final manager decision")
+
+    def test_section_done_carries_backtest_signal_when_available(self):
+        """Structured investment signals should reach the TUI with section events."""
+        runner = AnalysisRunner()
+        emitted: dict[str, str] = {}
+        signal = {
+            "rating": "OVERWEIGHT",
+            "target_weight_pct": 2.0,
+        }
+
+        events = list(runner._detect_section_updates(
+            {"final_allocation_decision": "Final manager decision"},
+            {"backtest_signal": signal},
+            emitted,
+            "510300.SH",
+        ))
+
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].section_id, "portfolio_manager")
+        self.assertEqual(events[0].backtest_signal, signal)
+
+    def test_section_done_backtest_signal_defaults_to_none(self):
+        event = SectionDone(
+            ticker="510300.SH",
+            section_id="market_flow",
+            content="report",
+            completed=1,
+            total=9,
+        )
+
+        self.assertIsNone(event.backtest_signal)
 
 
 if __name__ == "__main__":

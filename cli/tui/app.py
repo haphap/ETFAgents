@@ -260,10 +260,9 @@ class ETFAgentsTuiApp(App):
     }
 
     .right-top {
-        height: auto;
-        max-height: 40%;
+        height: 3;
         border: none;
-        padding: 0 1;
+        padding: 0;
         margin-bottom: 1;
         background: transparent;
     }
@@ -642,6 +641,54 @@ class ETFAgentsTuiApp(App):
 
     #ra_body {
         height: auto;
+    }
+
+    .section-tab {
+        width: 1fr;
+        height: 3;
+        min-width: 0;
+        margin: 0 1 0 0;
+        padding: 0 1;
+        border: solid $panel;
+        background: transparent;
+        color: $text;
+        text-style: none;
+        content-align: center middle;
+    }
+
+    .section-tab:last-of-type {
+        margin-right: 0;
+    }
+
+    .section-tab:hover,
+    .section-tab-active {
+        border: solid $accent;
+        color: $accent;
+        background: transparent;
+        text-style: bold;
+    }
+
+    .execution-summary {
+        height: auto;
+        min-height: 4;
+        max-height: 10;
+        margin-bottom: 1;
+        padding: 0 1;
+        border: solid $panel;
+        color: $text;
+        background: transparent;
+    }
+
+    .section-picker {
+        width: 48;
+        height: auto;
+        max-height: 18;
+    }
+
+    #section_picker_list {
+        height: auto;
+        max-height: 12;
+        border: solid $surface;
     }
 
     .stats-bar {

@@ -196,6 +196,7 @@ class SectionDone:
     content: str
     completed: int
     total: int
+    backtest_signal: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -1015,8 +1016,18 @@ class AnalysisRunner:
                     content=content,
                     completed=completed,
                     total=len(section_definitions),
+                    backtest_signal=self._extract_backtest_signal(accumulated),
                 )
                 break
+
+    @staticmethod
+    def _extract_backtest_signal(state: dict) -> dict[str, Any] | None:
+        """Return the best available structured investment signal."""
+        for key in ("backtest_signal", "portfolio_backtest_signal", "trader_backtest_signal"):
+            signal = state.get(key)
+            if isinstance(signal, dict) and signal:
+                return dict(signal)
+        return None
 
     def _detect_debate_progress(
         self,
