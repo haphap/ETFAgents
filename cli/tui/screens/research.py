@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import textwrap
 import threading
 import time
 from datetime import datetime
@@ -390,49 +391,21 @@ def _price_ruler(stop: float, current: float, target: float, width: int = 36) ->
     pos = max(0.0, min(1.0, pos))
     marker_col = round(pos * (width - 1))
 
-    left = "─" * marker_col
-    right = "━" * (width - 1 - marker_col)
-    ruler_line = f"{left}╋{right}"
-
     stop_str = _signal_number(stop)
     current_str = _signal_number(current)
     target_str = _signal_number(target)
-
-    label_line = [" "] * (width + 1)
-    for i, ch in enumerate(stop_str):
-        if i < len(label_line):
-            label_line[i] = ch
-    cur_start = max(len(stop_str) + 1, marker_col - len(current_str) // 2)
-    for i, ch in enumerate(current_str):
-        idx = cur_start + i
-        if 0 <= idx < len(label_line):
-            label_line[idx] = ch
-    tgt_start = max(cur_start + len(current_str) + 1, width + 1 - len(target_str))
-    while len(label_line) < tgt_start + len(target_str):
-        label_line.append(" ")
-    for i, ch in enumerate(target_str):
-        label_line[tgt_start + i] = ch
-
-    tag_line = [" "] * len(label_line)
-    for i, ch in enumerate("止损"):
-        if i < len(tag_line):
-            tag_line[i] = ch
-    cur_tag_start = max(3, marker_col - 1)
-    for i, ch in enumerate("现价"):
-        idx = cur_tag_start + i
-        if 0 <= idx < len(tag_line):
-            tag_line[idx] = ch
-    tgt_tag_start = max(cur_tag_start + 3, tgt_start)
-    while len(tag_line) < tgt_tag_start + 2:
-        tag_line.append(" ")
-    for i, ch in enumerate("目标"):
-        tag_line[tgt_tag_start + i] = ch
+    price_line = f"{'止损价 ' + stop_str:<14}{'现价 ' + current_str:<14}{'目标价 ' + target_str}"
+    if marker_col <= 0:
+        ruler_line = "╋" + "━" * (width - 1)
+    elif marker_col >= width - 1:
+        ruler_line = "─" * (width - 1) + "╋"
+    else:
+        ruler_line = "─" * marker_col + "╋" + "━" * (width - 1 - marker_col)
 
     return (
         f"```\n"
-        f"  {ruler_line}\n"
-        f"  {''.join(label_line)}\n"
-        f"  {''.join(tag_line)}\n"
+        f"{price_line}\n"
+        f"{ruler_line}\n"
         f"```"
     )
 
@@ -459,6 +432,18 @@ def _truncate_condition(text: str, limit: int = 50) -> str:
     return text[:limit] + "…"
 
 
+def _format_summary_note(label: str, text: str, width: int = 46) -> list[str]:
+    if not text:
+        return []
+    wrapped = textwrap.wrap(
+        text,
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return [f"**{label}：**", *(wrapped or [text])]
+
+
 def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, Any] | None = None) -> str:
     """Build a Markdown execution summary from a backtest signal."""
     if not signal:
@@ -470,9 +455,9 @@ def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, A
     weight_min = signal.get("target_weight_min_pct")
     weight_max = signal.get("target_weight_max_pct")
     execution_delay = signal.get("execution_delay") or "--"
-    add_line = _truncate_condition(_first_rule_line(signal, ("add_triggers", "add_conditions")))
-    reduce_line = _truncate_condition(_first_rule_line(signal, ("reduce_triggers", "reduce_conditions", "exit_triggers", "exit_conditions")))
-    risk_line = _truncate_condition(_first_rule_line(signal, ("risk_rules", "risk_controls")))
+    add_line = _first_rule_line(signal, ("add_triggers", "add_conditions"))
+    reduce_line = _first_rule_line(signal, ("reduce_triggers", "reduce_conditions", "exit_triggers", "exit_conditions"))
+    risk_line = _first_rule_line(signal, ("risk_rules", "risk_controls"))
     current = detail.get("close") if detail else None
 
     target_price = _extract_price_rule(signal, ("add_triggers", "rebalance_triggers"), ("add", "buy", "rebalance"))
@@ -512,12 +497,12 @@ def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, A
 
     lines.append("")
     lines.append(f"执行延迟：{execution_delay}")
-    if add_line:
-        lines.append(f"加仓依据：{add_line}")
-    if reduce_line:
-        lines.append(f"减仓依据：{reduce_line}")
-    if risk_line:
-        lines.append(f"风控规则：{risk_line}")
+    for note_line in _format_summary_note("加仓依据", add_line):
+        lines.append(note_line)
+    for note_line in _format_summary_note("减仓依据", reduce_line):
+        lines.append(note_line)
+    for note_line in _format_summary_note("风控规则", risk_line):
+        lines.append(note_line)
     return "\n".join(lines)
 
 

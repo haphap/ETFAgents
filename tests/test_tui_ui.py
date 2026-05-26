@@ -634,8 +634,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("╋", rendered)
         self.assertIn("1.85", rendered)
         self.assertIn("2.058", rendered)
-        self.assertIn("止损", rendered)
-        self.assertIn("目标", rendered)
+        self.assertLess(rendered.index("止损价"), rendered.index("现价"))
+        self.assertLess(rendered.index("现价"), rendered.index("目标价"))
 
     def test_price_ruler_degenerate_range_returns_empty(self):
         self.assertEqual(_price_ruler(2.0, 1.5, 2.0), "")
@@ -724,6 +724,24 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2.11", result)
         self.assertIn("2.025", result)
         self.assertIn("╋", result)  # price ruler should appear
+
+    def test_format_execution_summary_wraps_long_notes_without_truncating_signal(self):
+        result = _format_execution_summary(
+            {
+                "rating": "HOLD",
+                "target_weight_pct": 10.0,
+                "execution_delay": "next_open",
+                "risk_controls": [
+                    "DIF与DEA形成死叉且成交量连续放大，若价格跌破1.756元止损位则立即降低敞口",
+                ],
+            },
+            {"close": 1.834},
+        )
+
+        self.assertIn("**风控规则：**", result)
+        self.assertIn("DIF与DEA形成死叉", result)
+        self.assertIn("立即降低敞口", result)
+        self.assertNotIn("DIF与…", result)
 
     async def test_analysis_run_renders_execution_summary_from_signal(self):
         with tempfile.TemporaryDirectory() as tmp:
