@@ -603,7 +603,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 await pilot.pause()
 
-                rendered = str(screen.query_one("#ra_execution_summary", Static).render())
+                screen._on_section_picked("execution_summary")
+                await pilot.pause()
+                rendered = screen.query_one("#ra_body")._markdown
                 self.assertIn("增持", rendered)
                 self.assertIn("2.0%", rendered)
                 self.assertIn("2.058", rendered)
@@ -756,6 +758,56 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 self.assertIn("市场与资金流", str(screen.query_one("#ra_body_title", Static).render()))
                 self.assertIn("市场资金流报告正文", screen.query_one("#ra_body")._markdown)
+                self.assertIn("hidden-widget", screen.query_one("#ra_section_picker").classes)
+
+    async def test_analysis_run_section_picker_closes_when_clicking_elsewhere(self):
+        """The inline picker should behave like a popover, not a sticky modal."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                await pilot.click("#rtab-analysts")
+                await pilot.pause()
+                self.assertNotIn("hidden-widget", screen.query_one("#ra_section_picker").classes)
+
+                await pilot.click("#ra_body")
+                await pilot.pause()
+                self.assertIn("hidden-widget", screen.query_one("#ra_section_picker").classes)
+
+    async def test_analysis_run_decision_picker_lists_execution_summary_under_pm(self):
+        """Core summary is a decision subitem instead of a separate card."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+                screen._handle_section_done(SectionDone(
+                    ticker="510300.SH",
+                    section_id="portfolio_manager",
+                    content="PM",
+                    completed=9,
+                    total=9,
+                    backtest_signal={"rating": "HOLD", "target_weight_pct": 2.0},
+                ))
+                await pilot.click("#rtab-decision")
+                await pilot.pause()
+
+                labels = _list_view_labels(screen.query_one("#section_picker_list", ListView))
+                self.assertEqual(labels[:2], ["✓ 投资组合经理", "✓   核心执行摘要"])
 
     # --- Board state updates ---
 

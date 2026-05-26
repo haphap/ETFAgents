@@ -194,7 +194,19 @@ def _format_price_rich(close: float | None, pct_chg: float | None) -> Text:
     return text
 
 
-def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 4) -> Text:
+def _holding_icon(name: str) -> str:
+    if any(token in name for token in ("紫金", "黄金", "矿", "铜", "铝", "钼", "稀土")):
+        return "⛏️"
+    if any(token in name for token in ("建", "工", "交", "铁", "洛阳")):
+        return "🏗️"
+    if any(token in name for token in ("北方", "化", "药", "材料")):
+        return "🧪"
+    if any(token in name for token in ("华友", "宁德", "电池", "锂")):
+        return "🔋"
+    return "🏭"
+
+
+def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 6) -> Text:
     """Unicode bar chart for top holdings. E.g. '████ 宁德 5.2%'."""
     if not holdings:
         return Text("无持仓数据", style="dim")
@@ -207,12 +219,13 @@ def _format_holdings_bars(holdings: list[dict] | None, max_bar: int = 4) -> Text
         bar_len = round(w / max_w * max_bar) if max_w > 0 else 0
         bar = "█" * max(bar_len, 1)
         pad = " " * (max_bar - len(bar))
-        name = (h.get("name") or h.get("code") or "?")[:2]
+        name = (h.get("name") or h.get("code") or "?")[:4]
+        short_name = name[:2]
         w_str = f"{w:.1f}%" if w else "?"
         if i > 0:
             text.append("\n")
         text.append(f"{bar}{pad} ", style="bold")
-        text.append(f"{name} {w_str}")
+        text.append(f"{_holding_icon(name)} {short_name} {w_str}")
     return text
 
 
@@ -220,27 +233,34 @@ def _format_detail_rich(detail: dict) -> dict[str, Any]:
     """Parse ETF detail dict into structured Rich renderables for card widgets."""
     name = detail.get("name") or detail.get("ticker", "")
     ticker = detail.get("ticker", "")
-    suffix = f" ({ticker})" if ticker and ticker != name else ""
-    name_text = Text(f"{name}{suffix}", style="bold")
+    display_name = name or ticker or "--"
+    name_text = Text(f"代码: {display_name}", style="bold")
 
     close = detail.get("close")
     pct_chg = detail.get("pct_chg")
-    price_text = _format_price_rich(close, pct_chg)
+    price_text = Text("现价: ")
+    price_text.append(_format_price_rich(close, pct_chg))
 
     parts: list[str] = []
     vol = detail.get("volume")
     if vol is not None:
         vc = detail.get("volume_change_pct")
         vc_str = f"{vc:+.1f}%" if vc is not None else "--"
-        parts.append(f"量：{vol / 1e4:.0f}万手({vc_str})")
+        parts.append(f"量  : {vol / 1e4:.0f}万手 ({vc_str})")
+    turnover = detail.get("turnover_rate") or detail.get("turnover")
+    if turnover is not None:
+        parts.append(f"换手: {turnover:.1f}%")
+    else:
+        parts.append("换手: --")
     share = detail.get("fund_share")
     if share is not None:
         sc = detail.get("share_change_pct")
         sc_str = f"{sc:+.1f}%" if sc is not None else "--"
-        parts.append(f"份额：{share / 1e8:.0f}亿份({sc_str})")
-    metrics_text = "  ".join(parts) if parts else ""
+        parts.append(f"份额: {share / 1e8:.0f}亿份 ({sc_str})")
+    metrics_text = "\n".join(parts) if parts else ""
 
-    holdings_bars = _format_holdings_bars(detail.get("holdings"))
+    holdings_bars = Text("持仓占比 TOP5:\n", style="bold")
+    holdings_bars.append(_format_holdings_bars(detail.get("holdings")))
 
     return {
         "name_text": name_text,
@@ -676,45 +696,6 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
 
 
 # ---------------------------------------------------------------------------
-# SectionPickerModal
-# ---------------------------------------------------------------------------
-
-class SectionPickerModal(ModalScreen[str | None]):
-    """Compact section picker opened from analysis run tabs."""
-
-    def __init__(self, title: str, options: list[tuple[str, str, str]]):
-        super().__init__()
-        self.title = title
-        self.options = options
-        self.ids = IdRegistry("pick")
-
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="modal section-picker"):
-            yield Static(self.title, classes="modal-title")
-            items: list[ListItem] = []
-            for section_id, label, state in self.options:
-                icon = {"pending": "○", "running": "▒", "done": "✓", "failed": "✗"}.get(state, "○")
-                items.append(ListItem(Label(f"{icon} {label}"), id=self.ids.register(section_id)))
-            yield ListView(*items, id="section_picker_list")
-            yield Static("Enter 选择 / Esc 关闭", classes="modal-hint")
-
-    def on_mount(self) -> None:
-        try:
-            self.query_one("#section_picker_list", ListView).focus()
-        except Exception:
-            pass
-
-    def on_list_view_selected(self, event: ListView.Selected) -> None:
-        item_id = event.item.id or ""
-        if item_id in self.ids:
-            self.dismiss(self.ids.resolve(item_id))
-
-    def on_key(self, event) -> None:
-        if event.key == "escape":
-            self.dismiss(None)
-
-
-# ---------------------------------------------------------------------------
 # ResearchAnalysisScreen (input)
 # ---------------------------------------------------------------------------
 
@@ -1000,6 +981,8 @@ class AnalysisRunScreen(Screen):
         self._last_stats: dict[str, Any] = {}
         self._backtest_signals: dict[str, dict[str, Any]] = {}
         self._etf_details: dict[str, dict[str, Any]] = {}
+        self.section_picker_ids = IdRegistry("pick")
+        self._picker_open_group: str | None = None
 
     def compose(self) -> ComposeResult:
         defs = self._section_definitions()
@@ -1029,9 +1012,11 @@ class AnalysisRunScreen(Screen):
                         yield Button("📖 研究 0/0 ▾", id="rtab-research", classes="section-tab")
                         yield Button("⚠️ 风险 0/0 ▾", id="rtab-risk", classes="section-tab")
                         yield Button("🎯 决策 0/0 ▾", id="rtab-decision", classes="section-tab")
+                    with Vertical(id="ra_section_picker", classes="section-picker-popover hidden-widget"):
+                        yield Static("", id="section_picker_title", classes="section-picker-title")
+                        yield ListView(id="section_picker_list")
                     # Report body (right-bottom)
                     with Vertical(classes="right-bottom"):
-                        yield Static("📈 核心执行摘要\n等待组合经理生成结构化投资策略。", id="ra_execution_summary", classes="execution-summary")
                         yield Static("整体进度", id="ra_body_title", classes="pane-title")
                         with ScrollableContainer(id="ra_body_scroll"):
                             yield Markdown("准备开始分析。", id="ra_body")
@@ -1047,13 +1032,29 @@ class AnalysisRunScreen(Screen):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         btn_id = event.button.id or ""
         if btn_id == "btn_ra_cancel":
+            self._hide_section_picker()
             self._cancel_analysis()
         elif btn_id.startswith("rtab-"):
             self._open_section_picker(btn_id[5:])
 
+    def on_click(self, event) -> None:
+        if not self._picker_open_group:
+            return
+        widget = getattr(event, "widget", None)
+        while widget is not None:
+            widget_id = getattr(widget, "id", None)
+            if widget_id in {"ra_section_picker", "ra_sections"}:
+                return
+            widget = getattr(widget, "parent", None)
+        self._hide_section_picker()
+
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         item_id = event.item.id or ""
+        if item_id in self.section_picker_ids:
+            self._on_section_picked(self.section_picker_ids.resolve(item_id))
+            return
         if item_id in self.ticker_ids:
+            self._hide_section_picker()
             self.current_ticker = self.ticker_ids.resolve(item_id)
             self._refresh_body()
             self._refresh_board()
@@ -1063,30 +1064,59 @@ class AnalysisRunScreen(Screen):
         ticker = self.current_ticker
         if not ticker:
             return
-        defs = self._section_group_defs().get(group, [])
+        if self._picker_open_group == group:
+            self._hide_section_picker()
+            return
+        defs = list(self._section_group_defs().get(group, []))
         if not defs:
             return
-        options = [
-            (
+        options = []
+        for defn in defs:
+            options.append((
                 defn.section_id,
                 defn.title,
                 self._board_state.get((ticker, defn.section_id), "pending"),
-            )
-            for defn in defs
-        ]
+            ))
+            if group == "decision" and defn.section_id == "portfolio_manager":
+                summary_state = "done" if ticker in self._backtest_signals else "pending"
+                options.append(("execution_summary", "  核心执行摘要", summary_state))
         title = {
             "analysts": "📊 分析团队",
             "research": "📖 研究",
             "risk": "⚠️ 风险",
             "decision": "🎯 决策",
         }.get(group, "选择章节")
-        self.app.push_screen(SectionPickerModal(title, options), self._on_section_picked)
+        self.section_picker_ids.clear()
+        picker = self.query_one("#section_picker_list", ListView)
+        picker.clear()
+        for section_id, label, state in options:
+            icon = {"pending": "○", "running": "▒", "done": "✓", "failed": "✗"}.get(state, "○")
+            picker.append(ListItem(Label(f"{icon} {label}"), id=self.section_picker_ids.register(section_id)))
+        self.query_one("#section_picker_title", Static).update(title)
+        popover = self.query_one("#ra_section_picker")
+        popover.remove_class("hidden-widget")
+        popover.remove_class("picker-analysts", "picker-research", "picker-risk", "picker-decision")
+        popover.add_class(f"picker-{group}")
+        self._picker_open_group = group
+        if options:
+            picker.index = 0
+        picker.focus()
+
+    def _hide_section_picker(self) -> None:
+        self._picker_open_group = None
+        self.section_picker_ids.clear()
+        try:
+            self.query_one("#section_picker_list", ListView).clear()
+            self.query_one("#ra_section_picker").add_class("hidden-widget")
+        except Exception:
+            pass
 
     def _on_section_picked(self, section_id: str | None) -> None:
         if not section_id:
             return
         self.current_section = section_id
         self._set_active_column(section_id)
+        self._hide_section_picker()
         self._refresh_board()
         self._refresh_body()
 
@@ -1131,12 +1161,19 @@ class AnalysisRunScreen(Screen):
 
     def _config_summary(self) -> str:
         cfg = self._analysis_config
-        depth = _depth_option_label(cfg.depth_name)
+        depth_req = RESEARCH_DEPTH_REQUIREMENTS.get(cfg.depth_name, {})
+        debate_rounds = depth_req.get("debate_rounds", "?")
+        risk_rounds = depth_req.get("risk_rounds", "?")
+        quick = _short_model_label(str(cfg.quick_model or "default"))
+        deep = _short_model_label(str(cfg.deep_model or "default"))
+        if len(quick) > 14:
+            quick = f"{quick[:13]}…"
+        if len(deep) > 14:
+            deep = f"{deep[:13]}…"
         return (
-            f"日期：{cfg.analysis_date or 'today'}\n"
-            f"深度：{depth}\n"
-            f"提供商：{cfg.llm_provider}\n"
-            f"模型：{cfg.quick_model or 'default'} / {cfg.deep_model or 'default'}"
+            f"日: {cfg.analysis_date or 'today'}\n"
+            f"模: {quick}/{deep}\n"
+            f"深: {cfg.depth_name} {debate_rounds}×{risk_rounds}"
         )
 
     def _cancel_analysis(self) -> None:
@@ -1183,7 +1220,8 @@ class AnalysisRunScreen(Screen):
             self.query_one("#ra_etf_price", Static).update(components["price_text"])
             self.query_one("#ra_etf_metrics", Static).update(components["metrics_text"])
             self.query_one("#ra_etf_holdings", Static).update(components["holdings_bars"])
-            self._refresh_execution_summary()
+            if self.current_section == "execution_summary":
+                self._refresh_body()
         except Exception:
             pass
         # Also update hidden legacy widget
@@ -1276,7 +1314,6 @@ class AnalysisRunScreen(Screen):
         self._set_active_column(event.section_id)
         self._refresh_board()
         self._refresh_body()
-        self._refresh_execution_summary()
 
     def _handle_debate_progress(self, event: DebateProgress) -> None:
         self._debate_rounds[(event.ticker, event.section_id)] = (
@@ -1358,7 +1395,7 @@ class AnalysisRunScreen(Screen):
             self._active_column = "rtab-research"
         elif section_id in ("trader", "risk_debate"):
             self._active_column = "rtab-risk"
-        elif section_id == "portfolio_manager":
+        elif section_id in ("portfolio_manager", "execution_summary"):
             self._active_column = "rtab-decision"
 
     def _refresh_board(self) -> None:
@@ -1392,30 +1429,24 @@ class AnalysisRunScreen(Screen):
             except Exception:
                 pass
 
-        self._refresh_execution_summary()
-
     # --- Body refresh ---
 
-    def _refresh_execution_summary(self) -> None:
-        if not self.current_ticker:
-            return
-        signal = self._backtest_signals.get(self.current_ticker)
-        detail = self._etf_details.get(self.current_ticker)
-        try:
-            self.query_one("#ra_execution_summary", Static).update(
-                _format_execution_summary(signal, detail)
-            )
-        except Exception:
-            pass
-
     def _refresh_body(self) -> None:
-        self._refresh_execution_summary()
         if not self.current_ticker:
             self.query_one("#ra_body", Markdown).update("请选择一个 ticker。")
             return
         if self.current_section is None:
             self.query_one("#ra_body_title", Static).update("整体进度")
             self.query_one("#ra_body", Markdown).update(self._progress_markdown())
+            return
+
+        if self.current_section == "execution_summary":
+            self.query_one("#ra_body_title", Static).update("核心执行摘要")
+            summary_text = _format_execution_summary(
+                self._backtest_signals.get(self.current_ticker),
+                self._etf_details.get(self.current_ticker),
+            )
+            self.query_one("#ra_body", Markdown).update(str(summary_text))
             return
 
         # risk_debate — show actual risk debate content

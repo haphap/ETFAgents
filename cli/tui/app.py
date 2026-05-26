@@ -668,27 +668,38 @@ class ETFAgentsTuiApp(App):
         text-style: bold;
     }
 
-    .execution-summary {
-        height: auto;
-        min-height: 4;
-        max-height: 10;
-        margin-bottom: 1;
-        padding: 0 1;
-        border: solid $panel;
-        color: $text;
-        background: transparent;
-    }
-
-    .section-picker {
-        width: 48;
+    .section-picker-popover {
+        width: 36;
         height: auto;
         max-height: 18;
+        margin-top: -1;
+        margin-bottom: 1;
+        padding: 0 1;
+        border: solid $accent;
+        background: $surface;
+    }
+
+    .section-picker-title {
+        height: 1;
+        color: $accent;
+        text-style: bold;
+    }
+
+    .picker-analysts { margin-left: 0; }
+    .picker-research { margin-left: 28; }
+    .picker-risk { margin-left: 56; }
+    .picker-decision { margin-left: 76; }
+
+    .section-picker-popover ListView {
+        height: auto;
+        max-height: 10;
+        border: none;
     }
 
     #section_picker_list {
         height: auto;
         max-height: 12;
-        border: solid $surface;
+        border: none;
     }
 
     .stats-bar {
