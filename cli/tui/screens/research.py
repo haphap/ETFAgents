@@ -1232,7 +1232,10 @@ class AnalysisRunScreen(Screen):
         picker = self.query_one("#section_picker_list", ListView)
         picker.clear()
         for section_id, label, state in options:
-            icon = {"pending": "○", "running": "▒", "done": "✓", "failed": "✗"}.get(state, "○")
+            if section_id == "execution_summary":
+                icon = "⭐"
+            else:
+                icon = {"pending": "○", "running": "▒", "done": "✓", "failed": "✗"}.get(state, "○")
             picker.append(ListItem(Label(f"{icon} {label}"), id=self.section_picker_ids.register(section_id)))
         self.query_one("#section_picker_title", Static).update(title)
         popover = self.query_one("#ra_section_picker")
