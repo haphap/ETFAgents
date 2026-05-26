@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import textwrap
 import threading
 import time
 from datetime import datetime
@@ -379,60 +380,48 @@ def _weight_bar(pct: float | None, max_pct: float = 50.0, bar_width: int = 10) -
 
 
 def _price_ruler(stop: float, current: float, target: float, width: int = 36) -> str:
-    """Draw a text ruler showing current price position between stop and target.
+    """Draw a text ruler with labels ordered by their numeric price.
 
     Returns empty string when the range is degenerate.
     """
-    span = target - stop
+    values = [
+        ("止损价", stop),
+        ("现价", current),
+        ("目标价", target),
+    ]
+    ordered = sorted(values, key=lambda item: item[1])
+    grouped: list[tuple[float, list[str]]] = []
+    for label, value in ordered:
+        if grouped and value == grouped[-1][0]:
+            grouped[-1][1].append(label)
+        else:
+            grouped.append((value, [label]))
+
+    span = grouped[-1][0] - grouped[0][0]
     if span <= 0:
         return ""
-    pos = (current - stop) / span
-    pos = max(0.0, min(1.0, pos))
-    marker_col = round(pos * (width - 1))
 
-    left = "─" * marker_col
-    right = "━" * (width - 1 - marker_col)
-    ruler_line = f"{left}╋{right}"
+    labels = [
+        f"{'╋ ' if '现价' in label_group else ''}{'/'.join(label_group)} {_signal_number(value)}"
+        for value, label_group in grouped
+    ]
+    connectors: list[str] = []
+    connector_budget = max(width, 6)
+    for index in range(len(grouped) - 1):
+        distance = grouped[index + 1][0] - grouped[index][0]
+        length = max(3, round(distance / span * connector_budget))
+        connectors.append("─" * length)
 
-    stop_str = _signal_number(stop)
-    current_str = _signal_number(current)
-    target_str = _signal_number(target)
-
-    label_line = [" "] * (width + 1)
-    for i, ch in enumerate(stop_str):
-        if i < len(label_line):
-            label_line[i] = ch
-    cur_start = max(len(stop_str) + 1, marker_col - len(current_str) // 2)
-    for i, ch in enumerate(current_str):
-        idx = cur_start + i
-        if 0 <= idx < len(label_line):
-            label_line[idx] = ch
-    tgt_start = max(cur_start + len(current_str) + 1, width + 1 - len(target_str))
-    while len(label_line) < tgt_start + len(target_str):
-        label_line.append(" ")
-    for i, ch in enumerate(target_str):
-        label_line[tgt_start + i] = ch
-
-    tag_line = [" "] * len(label_line)
-    for i, ch in enumerate("止损"):
-        if i < len(tag_line):
-            tag_line[i] = ch
-    cur_tag_start = max(3, marker_col - 1)
-    for i, ch in enumerate("现价"):
-        idx = cur_tag_start + i
-        if 0 <= idx < len(tag_line):
-            tag_line[idx] = ch
-    tgt_tag_start = max(cur_tag_start + 3, tgt_start)
-    while len(tag_line) < tgt_tag_start + 2:
-        tag_line.append(" ")
-    for i, ch in enumerate("目标"):
-        tag_line[tgt_tag_start + i] = ch
+    parts: list[str] = []
+    for index, label in enumerate(labels):
+        if index:
+            parts.append(connectors[index - 1])
+        parts.append(label)
+    ruler_line = " ".join(parts)
 
     return (
         f"```\n"
-        f"  {ruler_line}\n"
-        f"  {''.join(label_line)}\n"
-        f"  {''.join(tag_line)}\n"
+        f"{ruler_line}\n"
         f"```"
     )
 
@@ -459,6 +448,18 @@ def _truncate_condition(text: str, limit: int = 50) -> str:
     return text[:limit] + "…"
 
 
+def _format_summary_note(label: str, text: str, width: int = 46) -> list[str]:
+    if not text:
+        return []
+    wrapped = textwrap.wrap(
+        text,
+        width=width,
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return [f"**{label}：**", *(wrapped or [text])]
+
+
 def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, Any] | None = None) -> str:
     """Build a Markdown execution summary from a backtest signal."""
     if not signal:
@@ -470,9 +471,9 @@ def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, A
     weight_min = signal.get("target_weight_min_pct")
     weight_max = signal.get("target_weight_max_pct")
     execution_delay = signal.get("execution_delay") or "--"
-    add_line = _truncate_condition(_first_rule_line(signal, ("add_triggers", "add_conditions")))
-    reduce_line = _truncate_condition(_first_rule_line(signal, ("reduce_triggers", "reduce_conditions", "exit_triggers", "exit_conditions")))
-    risk_line = _truncate_condition(_first_rule_line(signal, ("risk_rules", "risk_controls")))
+    add_line = _first_rule_line(signal, ("add_triggers", "add_conditions"))
+    reduce_line = _first_rule_line(signal, ("reduce_triggers", "reduce_conditions", "exit_triggers", "exit_conditions"))
+    risk_line = _first_rule_line(signal, ("risk_rules", "risk_controls"))
     current = detail.get("close") if detail else None
 
     target_price = _extract_price_rule(signal, ("add_triggers", "rebalance_triggers"), ("add", "buy", "rebalance"))
@@ -512,12 +513,12 @@ def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, A
 
     lines.append("")
     lines.append(f"执行延迟：{execution_delay}")
-    if add_line:
-        lines.append(f"加仓依据：{add_line}")
-    if reduce_line:
-        lines.append(f"减仓依据：{reduce_line}")
-    if risk_line:
-        lines.append(f"风控规则：{risk_line}")
+    for note_line in _format_summary_note("加仓依据", add_line):
+        lines.append(note_line)
+    for note_line in _format_summary_note("减仓依据", reduce_line):
+        lines.append(note_line)
+    for note_line in _format_summary_note("风控规则", risk_line):
+        lines.append(note_line)
     return "\n".join(lines)
 
 
@@ -1121,6 +1122,7 @@ class AnalysisRunScreen(Screen):
         self._last_stats: dict[str, Any] = {}
         self._backtest_signals: dict[str, dict[str, Any]] = {}
         self._etf_details: dict[str, dict[str, Any]] = {}
+        self._ticker_run_state: dict[str, str] = {}
         self.section_picker_ids = IdRegistry("pick")
         self._picker_open_group: str | None = None
 
@@ -1143,7 +1145,7 @@ class AnalysisRunScreen(Screen):
                         yield Static(self._config_summary(), id="ra_run_config")
                     yield Button("⏹ 取消分析", id="btn_ra_cancel", classes="cancel-btn warning-text", disabled=True)
                     yield Static("🧠 研究队列", classes="pane-title")
-                    yield Static("⏳分析中  ✓完成  ✗失败  ⊘取消", classes="queue-legend")
+                    yield Static("状态: ⚪ 0/0 排期中", id="ra_queue_status", classes="queue-status")
                     yield ListView(id="ra_queue")
                 with Vertical(classes="right-pane"):
                     # Team tabs (right-top)
@@ -1219,7 +1221,7 @@ class AnalysisRunScreen(Screen):
             ))
             if group == "decision" and defn.section_id == "portfolio_manager":
                 summary_state = "done" if ticker in self._backtest_signals else "pending"
-                options.append(("execution_summary", "  核心执行摘要", summary_state))
+                options.append(("execution_summary", "核心执行摘要", summary_state))
         title = {
             "analysts": "📊 分析团队",
             "research": "📖 研究",
@@ -1230,7 +1232,10 @@ class AnalysisRunScreen(Screen):
         picker = self.query_one("#section_picker_list", ListView)
         picker.clear()
         for section_id, label, state in options:
-            icon = {"pending": "○", "running": "▒", "done": "✓", "failed": "✗"}.get(state, "○")
+            if section_id == "execution_summary":
+                icon = "⭐"
+            else:
+                icon = {"pending": "○", "running": "▒", "done": "✓", "failed": "✗"}.get(state, "○")
             picker.append(ListItem(Label(f"{icon} {label}"), id=self.section_picker_ids.register(section_id)))
         self.query_one("#section_picker_title", Static).update(title)
         popover = self.query_one("#ra_section_picker")
@@ -1272,6 +1277,7 @@ class AnalysisRunScreen(Screen):
         self._debate_rounds.clear()
         self._backtest_signals.clear()
         self._etf_details.clear()
+        self._ticker_run_state = {ticker: "pending" for ticker in self.tickers}
         self._active_column = ""
         self.ticker_ids.clear()
         self.progress_lines.clear()
@@ -1281,12 +1287,16 @@ class AnalysisRunScreen(Screen):
 
         queue = self.query_one("#ra_queue", ListView)
         queue.clear()
+        for ticker in self.tickers:
+            ticker_id = self.ticker_ids.register(ticker)
+            queue.append(ListItem(Label(self._queue_item_label(ticker)), id=ticker_id))
 
         runner = self.runner or self._build_runner()
         self._active_runner = runner
         self.query_one("#btn_ra_cancel", Button).disabled = False
         self._append_progress(f"开始分析 {', '.join(self.tickers)}")
         self._refresh_board()
+        self._refresh_queue_panel()
         self._refresh_stats_bar()
         self._analysis_thread = threading.Thread(
             target=self._run_analysis,
@@ -1422,15 +1432,69 @@ class AnalysisRunScreen(Screen):
             self._handle_ticker_cancelled(event)
         self._refresh_stats_bar()
 
+    def _queue_item_label(self, ticker: str, suffix: str = "") -> str:
+        status_label = {
+            "pending": "排期中",
+            "running": "分析中",
+            "done": "已完成",
+            "failed": "失败",
+            "cancelled": "已取消",
+        }.get(self._ticker_run_state.get(ticker, "pending"), "排期中")
+        index = self.tickers.index(ticker) + 1 if ticker in self.tickers else len(self.tickers) + 1
+        short_ticker = ticker.split(".", 1)[0]
+        return f"> {index}. {short_ticker} ({status_label}{suffix})"
+
+    def _sync_queue_item(self, ticker: str, suffix: str = "") -> None:
+        ticker_id = self.ticker_ids.register(ticker)
+        try:
+            item = self.query_one(f"#{ticker_id}", ListItem)
+        except Exception:
+            try:
+                self.query_one("#ra_queue", ListView).append(
+                    ListItem(Label(self._queue_item_label(ticker, suffix)), id=ticker_id)
+                )
+            except Exception:
+                pass
+            return
+        try:
+            item.query_one(Label).update(self._queue_item_label(ticker, suffix))
+        except Exception:
+            pass
+
+    def _refresh_queue_panel(self) -> None:
+        ticker = self.current_ticker
+        queue_defs = self._section_group_defs()["analysts"]
+        total = len(queue_defs)
+        completed = 0
+        if ticker:
+            completed = sum(
+                1 for defn in queue_defs
+                if self._board_state.get((ticker, defn.section_id)) == "done"
+            )
+        if any(state == "running" for state in self._ticker_run_state.values()):
+            state_icon, state_text = "🟢", "运行中"
+        elif any(state == "failed" for state in self._ticker_run_state.values()):
+            state_icon, state_text = "🔴", "有失败"
+        elif self._ticker_run_state and all(state == "done" for state in self._ticker_run_state.values()):
+            state_icon, state_text = "✅", "已完成"
+        else:
+            state_icon, state_text = "⚪", "排期中"
+        try:
+            self.query_one("#ra_queue_status", Static).update(
+                f"状态: {state_icon} {completed}/{total} {state_text}"
+            )
+        except Exception:
+            pass
+
     def _handle_ticker_started(self, event: TickerStarted) -> None:
-        ticker_id = self.ticker_ids.register(event.ticker)
-        queue = self.query_one("#ra_queue", ListView)
-        queue.append(ListItem(Label(f"⏳ {event.ticker}"), id=ticker_id))
+        self._ticker_run_state[event.ticker] = "running"
+        self._sync_queue_item(event.ticker)
         self._append_progress(f"{event.ticker}: 开始运行，共 {event.total_sections} 个团队章节")
         if self.current_ticker is None:
             self.current_ticker = event.ticker
         if self.current_ticker == event.ticker:
             self._load_etf_detail(event.ticker)
+        self._refresh_queue_panel()
 
     def _handle_section_done(self, event: SectionDone) -> None:
         self.section_contents[(event.ticker, event.section_id)] = event.content
@@ -1450,6 +1514,7 @@ class AnalysisRunScreen(Screen):
         self._append_progress(f"{event.ticker}: {title} 已更新 ({event.completed}/{event.total})")
         self._set_active_column(event.section_id)
         self._refresh_board()
+        self._refresh_queue_panel()
         self._refresh_body()
 
     def _handle_debate_progress(self, event: DebateProgress) -> None:
@@ -1467,16 +1532,12 @@ class AnalysisRunScreen(Screen):
                 self._board_state[key] = "running"
 
         self._refresh_board()
+        self._refresh_queue_panel()
 
     def _handle_ticker_done(self, event: TickerDone) -> None:
-        ticker_id = self.ticker_ids.register(event.ticker)
         rating_str = f" {event.rating}" if event.rating else ""
-        try:
-            item = self.query_one(f"#{ticker_id}", ListItem)
-            label = item.query_one(Label)
-            label.update(f"✓ {event.ticker}{rating_str}")
-        except Exception:
-            pass
+        self._ticker_run_state[event.ticker] = "done"
+        self._sync_queue_item(event.ticker, suffix=rating_str)
 
         # Mark all sections as done for this ticker
         for defn in self._section_definitions():
@@ -1485,6 +1546,7 @@ class AnalysisRunScreen(Screen):
         self.repository.invalidate()
         self._append_progress(f"{event.ticker}: 分析完成{rating_str}")
         self._refresh_board()
+        self._refresh_queue_panel()
 
         # Show AI summary from portfolio manager content
         pm_content = self.section_contents.get((event.ticker, "portfolio_manager"), "")
@@ -1496,13 +1558,8 @@ class AnalysisRunScreen(Screen):
                 pass
 
     def _handle_ticker_failed(self, event: TickerFailed) -> None:
-        ticker_id = self.ticker_ids.register(event.ticker)
-        try:
-            item = self.query_one(f"#{ticker_id}", ListItem)
-            label = item.query_one(Label)
-            label.update(f"✗ {event.ticker}")
-        except Exception:
-            pass
+        self._ticker_run_state[event.ticker] = "failed"
+        self._sync_queue_item(event.ticker)
 
         # Mark all unfinished sections as failed
         for defn in self._section_definitions():
@@ -1512,16 +1569,13 @@ class AnalysisRunScreen(Screen):
 
         self._append_progress(f"{event.ticker}: 分析失败 - {event.error}")
         self._refresh_board()
+        self._refresh_queue_panel()
 
     def _handle_ticker_cancelled(self, event: TickerCancelled) -> None:
-        ticker_id = self.ticker_ids.register(event.ticker)
-        try:
-            item = self.query_one(f"#{ticker_id}", ListItem)
-            label = item.query_one(Label)
-            label.update(f"⊘ {event.ticker}")
-        except Exception:
-            pass
+        self._ticker_run_state[event.ticker] = "cancelled"
+        self._sync_queue_item(event.ticker)
         self._append_progress(f"{event.ticker}: 已取消")
+        self._refresh_queue_panel()
 
     # --- Board refresh ---
 

@@ -22,6 +22,7 @@ def _series(points):
 class MacroDataToolsTests(unittest.TestCase):
     def setUp(self):
         etf_data_tools._load_tushare_futures_contract_catalog.cache_clear()
+        etf_data_tools._load_tushare_futures_continuous_frame.cache_clear()
         etf_data_tools._load_tushare_futures_daily_exchange_frame.cache_clear()
         etf_data_tools._load_tushare_futures_main_frame.cache_clear()
         etf_data_tools._load_tushare_warehouse_exchange_frame.cache_clear()
@@ -130,6 +131,54 @@ class MacroDataToolsTests(unittest.TestCase):
         self.assertIn("cn_schedule", snapshot)
 
     @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_tushare_futures_main_frame_prefers_main_continuous_contract(self, mock_query_pro):
+        mock_query_pro.return_value = pd.DataFrame(
+            {
+                "ts_code": ["RB.SHF", "RB.SHF"],
+                "trade_date": ["20260401", "20260525"],
+                "close": [3120.0, 3218.0],
+                "settle": [3127.0, 3213.0],
+                "vol": [426930.0, 1184446.0],
+                "oi": [870166.0, 1792405.0],
+            }
+        )
+
+        frame = _load_tushare_futures_main_frame.__wrapped__("RB", "SHFE", "2026-05-26", 120)
+
+        self.assertEqual(list(frame["ts_code"]), ["RB.SHF", "RB.SHF"])
+        self.assertEqual(list(frame["trade_date"].dt.strftime("%Y%m%d")), ["20260401", "20260525"])
+        self.assertEqual(mock_query_pro.call_count, 1)
+        self.assertEqual(mock_query_pro.call_args.args[0], "fut_daily")
+        self.assertEqual(mock_query_pro.call_args.kwargs["ts_code"], "RB.SHF")
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
+    def test_tushare_futures_main_frame_maps_zhengzhou_and_guangzhou_continuous_suffixes(self, mock_query_pro):
+        mock_query_pro.return_value = pd.DataFrame(
+            {
+                "ts_code": ["TA.ZCE"],
+                "trade_date": ["20260525"],
+                "close": [4800.0],
+            }
+        )
+
+        _load_tushare_futures_main_frame.__wrapped__("TA", "CZCE", "2026-05-26", 120)
+
+        self.assertEqual(mock_query_pro.call_args.kwargs["ts_code"], "TA.ZCE")
+
+        etf_data_tools._load_tushare_futures_continuous_frame.cache_clear()
+        mock_query_pro.return_value = pd.DataFrame(
+            {
+                "ts_code": ["LC.GFE"],
+                "trade_date": ["20260525"],
+                "close": [75000.0],
+            }
+        )
+
+        _load_tushare_futures_main_frame.__wrapped__("LC", "GFEX", "2026-05-26", 120)
+
+        self.assertEqual(mock_query_pro.call_args.kwargs["ts_code"], "LC.GFE")
+
+    @patch("etfagents.agents.utils.etf_data_tools._query_pro")
     def test_tushare_futures_main_frame_returns_empty_when_trade_date_missing(self, mock_query_pro):
         def _query(api_name, **kwargs):
             if api_name == "fut_basic":
@@ -149,6 +198,7 @@ class MacroDataToolsTests(unittest.TestCase):
     @patch("etfagents.agents.utils.etf_data_tools._query_pro")
     def test_tushare_futures_main_frame_keeps_trade_date_after_main_contract_selection(self, mock_query_pro):
         mock_query_pro.side_effect = [
+            pd.DataFrame(),
             pd.DataFrame(
                 {
                     "ts_code": ["AU2406.SHF", "AU2408.SHF"],
@@ -176,6 +226,7 @@ class MacroDataToolsTests(unittest.TestCase):
     @patch("etfagents.agents.utils.etf_data_tools._query_pro")
     def test_tushare_futures_main_frame_reuses_exchange_level_batches(self, mock_query_pro):
         mock_query_pro.side_effect = [
+            pd.DataFrame(),
             pd.DataFrame(
                 {
                     "ts_code": ["AU2406.SHF", "CU2406.SHF"],
@@ -193,6 +244,7 @@ class MacroDataToolsTests(unittest.TestCase):
                     "vol": [150.0, 260.0],
                 }
             ),
+            pd.DataFrame(),
         ]
 
         au_frame = _load_tushare_futures_main_frame.__wrapped__("AU", "SHFE", "2024-04-30", 120)
@@ -200,15 +252,19 @@ class MacroDataToolsTests(unittest.TestCase):
 
         self.assertEqual(list(au_frame["ts_code"]), ["AU2406.SHF"])
         self.assertEqual(list(cu_frame["ts_code"]), ["CU2406.SHF"])
-        self.assertEqual(mock_query_pro.call_count, 2)
-        self.assertEqual(mock_query_pro.call_args_list[0].kwargs["exchange"], "SHFE")
-        self.assertNotIn("fut_code", mock_query_pro.call_args_list[0].kwargs)
-        self.assertEqual(mock_query_pro.call_args_list[1].args[0], "fut_daily")
+        self.assertEqual(mock_query_pro.call_count, 4)
+        self.assertEqual(mock_query_pro.call_args_list[0].kwargs["ts_code"], "AU.SHF")
         self.assertEqual(mock_query_pro.call_args_list[1].kwargs["exchange"], "SHFE")
+        self.assertNotIn("fut_code", mock_query_pro.call_args_list[1].kwargs)
+        self.assertEqual(mock_query_pro.call_args_list[2].args[0], "fut_daily")
+        self.assertEqual(mock_query_pro.call_args_list[2].kwargs["exchange"], "SHFE")
+        self.assertEqual(mock_query_pro.call_args_list[3].kwargs["ts_code"], "CU.SHF")
 
     @patch("etfagents.agents.utils.etf_data_tools._query_pro")
     def test_tushare_futures_main_frame_fills_missing_contracts_from_partial_batch(self, mock_query_pro):
         def _query(api_name, **kwargs):
+            if api_name == "fut_daily" and kwargs.get("ts_code") == "AU.SHF":
+                return pd.DataFrame()
             if api_name == "fut_basic":
                 return pd.DataFrame(
                     {
@@ -245,7 +301,7 @@ class MacroDataToolsTests(unittest.TestCase):
         frame = _load_tushare_futures_main_frame.__wrapped__("AU", "SHFE", "2024-04-30", 120)
 
         self.assertEqual(list(frame["ts_code"]), ["AU2408.SHF"])
-        self.assertEqual(mock_query_pro.call_count, 3)
+        self.assertEqual(mock_query_pro.call_count, 4)
         self.assertEqual(mock_query_pro.call_args_list[-1].kwargs["ts_code"], "AU2408.SHF")
 
     @patch("etfagents.agents.utils.etf_data_tools._query_pro")
@@ -387,7 +443,7 @@ class MacroDataToolsTests(unittest.TestCase):
 
         snapshot = _build_commodity_snapshot("2026-01-31", 120)
 
-        self.assertIn("Data sources: Tushare futures daily data stitched across the most active contracts", snapshot)
+        self.assertIn("Data sources: Tushare futures main continuous contracts", snapshot)
         self.assertIn("沪金主力", snapshot)
         self.assertIn("碳酸锂主力", snapshot)
         self.assertIn("沪铝主力", snapshot)

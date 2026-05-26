@@ -634,11 +634,23 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("╋", rendered)
         self.assertIn("1.85", rendered)
         self.assertIn("2.058", rendered)
-        self.assertIn("止损", rendered)
-        self.assertIn("目标", rendered)
+        self.assertLess(rendered.index("止损价"), rendered.index("现价"))
+        self.assertLess(rendered.index("现价"), rendered.index("目标价"))
+
+    def test_price_ruler_orders_current_after_target_when_price_exceeds_target(self):
+        rendered = _price_ruler(1.756, 1.99, 1.834)
+
+        self.assertLess(rendered.index("止损价"), rendered.index("目标价"))
+        self.assertLess(rendered.index("目标价"), rendered.index("现价"))
+
+    def test_price_ruler_groups_equal_stop_and_target_prices(self):
+        rendered = _price_ruler(2.0, 1.5, 2.0)
+
+        self.assertIn("止损价/目标价 2", rendered)
+        self.assertLess(rendered.index("现价"), rendered.index("止损价/目标价"))
 
     def test_price_ruler_degenerate_range_returns_empty(self):
-        self.assertEqual(_price_ruler(2.0, 1.5, 2.0), "")
+        self.assertEqual(_price_ruler(2.0, 2.0, 2.0), "")
 
     def test_extract_price_from_text_finds_stop(self):
         signal = {
@@ -724,6 +736,24 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("2.11", result)
         self.assertIn("2.025", result)
         self.assertIn("╋", result)  # price ruler should appear
+
+    def test_format_execution_summary_wraps_long_notes_without_truncating_signal(self):
+        result = _format_execution_summary(
+            {
+                "rating": "HOLD",
+                "target_weight_pct": 10.0,
+                "execution_delay": "next_open",
+                "risk_controls": [
+                    "DIF与DEA形成死叉且成交量连续放大，若价格跌破1.756元止损位则立即降低敞口",
+                ],
+            },
+            {"close": 1.834},
+        )
+
+        self.assertIn("**风控规则：**", result)
+        self.assertIn("DIF与DEA形成死叉", result)
+        self.assertIn("立即降低敞口", result)
+        self.assertNotIn("DIF与…", result)
 
     async def test_analysis_run_renders_execution_summary_from_signal(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -817,7 +847,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(analyst_ids, ["market_flow"])
 
     async def test_analysis_run_ticker_status_updates(self):
-        """Verify ticker status changes from ⏳ → ✓/✗ when events fire."""
+        """Verify ticker queue uses numbered Chinese status rows."""
         with tempfile.TemporaryDirectory() as tmp:
             app = self._app(tmp)
             async with app.run_test(size=(140, 40)) as pilot:
@@ -831,8 +861,6 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screen = app.screen
                 self.assertIsInstance(screen, AnalysisRunScreen)
                 queue = screen.query_one("#ra_queue", ListView)
-                queue.clear()
-                screen.ticker_ids.clear()
 
                 # Simulate ticker started
                 screen._handle_ticker_started(TickerStarted(ticker="510300.SH", total_sections=9))
@@ -851,8 +879,11 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 item = queue.children[0]
                 label = item.query_one(Label)
                 rendered = str(label.render())
-                self.assertIn("✓", rendered)
+                self.assertIn("> 1. 510300", rendered)
+                self.assertIn("已完成", rendered)
                 self.assertIn("BUY", rendered)
+                status = str(screen.query_one("#ra_queue_status", Static).render())
+                self.assertIn("状态:", status)
 
     async def test_analysis_run_ticker_selection(self):
         """Verify selecting a ticker in queue changes current_ticker."""
@@ -869,8 +900,6 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 screen = app.screen
                 self.assertIsInstance(screen, AnalysisRunScreen)
                 queue = screen.query_one("#ra_queue", ListView)
-                queue.clear()
-                screen.ticker_ids.clear()
                 screen.current_ticker = None
 
                 # Start two tickers
@@ -994,7 +1023,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
 
                 labels = _list_view_labels(screen.query_one("#section_picker_list", ListView))
-                self.assertEqual(labels[:2], ["✓ 投资组合经理", "✓   核心执行摘要"])
+                self.assertEqual(labels[:2], ["✓ 投资组合经理", "⭐ 核心执行摘要"])
 
     # --- Board state updates ---
 
