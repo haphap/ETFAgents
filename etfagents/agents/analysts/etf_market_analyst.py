@@ -41,6 +41,7 @@ _REPORT_SPEC = AnalystReportSpec(
     required_top_sections=("一", "二", "三", "四"),
     required_indicator_tokens=("MACD", "RSI"),
     required_tail_tokens=("综合结论和指标总览",),
+    require_tail_table=True,
     custom_rules_markdown=(
         "### 内容覆盖\n"
         "- 是否包含四个一级章节：一、市场结构与量价诊断；二、交易确认与执行计划；三、关键价位与条件情景推演；四、综合结论和指标总览？\n"
@@ -68,8 +69,8 @@ _ETF_MARKET_INDICATORS = {
     "atr": "volatility and stop-distance calibration",
     "vwma": "price-volume confirmation",
 }
-# The fast acceptance gate intentionally requires only the three analysis sections.
-# The fourth combined tail section is enforced by the report spec and normalizer.
+# The acceptance gate requires the three analysis sections plus an indicator table.
+# The fourth combined tail heading is enforced by the report spec and normalizer.
 _MARKET_FLOW_REQUIRED_TOP_SECTIONS = {"一", "二", "三"}
 _MARKET_FLOW_COMBINED_TAIL_HEADING = "四、综合结论和指标总览"
 _MARKET_FLOW_TABLE_SEPARATOR_RE = re.compile(r"^\|(?:\s*:?-{3,}:?\s*\|)+\s*$")
@@ -101,6 +102,10 @@ def _looks_like_complete_market_flow_report(report: str) -> bool:
 
     section_marks = collect_top_section_marks(content)
     if not _MARKET_FLOW_REQUIRED_TOP_SECTIONS.issubset(section_marks):
+        return False
+
+    # Section 四 must contain an indicator overview table
+    if not any(_MARKET_FLOW_TABLE_SEPARATOR_RE.match(line.strip()) for line in content.splitlines()):
         return False
 
     return True

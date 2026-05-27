@@ -68,6 +68,9 @@ class AnalystReportSpec:
     lead_required_top_sections: tuple[str, ...] = ()
     """Subset of required top-level section markers that must include a prose lead."""
 
+    require_tail_table: bool = False
+    """Whether a Markdown table (``| --- |`` separator) must exist in the tail."""
+
     custom_rules_markdown: str = ""
     """Free-form rules forwarded verbatim to the LLM judge prompt."""
 
@@ -245,6 +248,11 @@ def static_validate(report: str, spec: AnalystReportSpec) -> StaticVerdict:
         for tail in spec.required_tail_tokens:
             if tail not in tail_window:
                 missing.append(f"末尾缺少元素『{tail}』")
+
+    if spec.require_tail_table:
+        tail_window = report[-2000:] if len(report) > 2000 else report
+        if not re.search(r"^\|(?:\s*:?-{3,}:?\s*\|)+\s*$", tail_window, re.MULTILINE):
+            missing.append("末尾章节缺少指标总览 Markdown 表格")
 
     if contains_qa_label_artifacts(report):
         issues.append("出现『判断：』『证据：』『结论：』等标签式结构")
