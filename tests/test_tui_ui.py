@@ -622,6 +622,23 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("`price 1.23`", text)
         self.assertIn("stop 1.850", text)
 
+    def test_highlight_report_numbers_preserves_links_and_urls(self):
+        text = _highlight_report_numbers(
+            "[来源](https://example.com/report/20260526?price=2.05)\n"
+            "详情见 https://data.org/api/v3/quote/1234 了解更多\n"
+            "[5月26日报告](https://example.com/20260526)\n"
+            "涨幅 5.2%，量 1234万手"
+        )
+        # Link destinations and raw URLs must be untouched
+        self.assertIn("](https://example.com/report/20260526?price=2.05)", text)
+        self.assertIn("https://data.org/api/v3/quote/1234", text)
+        self.assertNotIn("**20260526**", text)
+        self.assertNotIn("**2.05**)", text)
+        self.assertNotIn("**1234**", text.split("\n")[1])
+        # Prose numbers still bolded
+        self.assertIn("**5.2%**", text)
+        self.assertIn("**1234万手**", text)
+
     def test_weight_bar_renders_blocks(self):
         rendered = _weight_bar(25.0)
         self.assertIn("█", rendered)

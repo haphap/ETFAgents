@@ -687,10 +687,23 @@ def _highlight_report_numbers(markdown: str) -> str:
             highlighted.append(line)
             continue
 
-        parts = re.split(r"(`[^`]*`)", line)
+        # Split on code spans, Markdown link destinations, and raw URLs
+        # so that numbers inside them are never bolded.
+        parts = re.split(
+            r"(`[^`]*`"                      # code spans
+            r"|\]\([^\)]*\)"                 # Markdown link destination ](…)
+            r"|https?://[^\s\)\]>]+"         # raw URLs
+            r")",
+            line,
+        )
         rendered_parts: list[str] = []
         for part in parts:
-            if part.startswith("`") and part.endswith("`"):
+            if (
+                (part.startswith("`") and part.endswith("`"))
+                or part.startswith("](")
+                or part.startswith("http://")
+                or part.startswith("https://")
+            ):
                 rendered_parts.append(part)
             else:
                 rendered_parts.append(_NUMERIC_TOKEN_RE.sub(r"**\1**", part))
