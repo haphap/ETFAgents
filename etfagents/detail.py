@@ -102,6 +102,7 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
         "fund_share": None,
         "share_change_pct": None,
         "holdings": None,
+        "price_history": None,
         "fund_type": None,
         "establish_date": None,
         "manager": None,
@@ -133,6 +134,13 @@ def get_etf_detail(ticker: str, curr_date: str | None = None) -> dict:
                         (result["volume"] - prev_volume) / prev_volume * 100,
                         2,
                     )
+            # Extract recent price history for trend chart
+            history_rows = rows[-25:] if len(rows) > 25 else rows
+            result["price_history"] = [
+                {"date": r.get("trade_date", ""), "close": _safe_float(r.get("close"))}
+                for r in history_rows
+                if _safe_float(r.get("close")) is not None
+            ]
     except Exception as exc:
         logger.warning("get_etf_price_data failed for %s: %s", ticker, exc)
 

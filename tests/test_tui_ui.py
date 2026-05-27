@@ -15,6 +15,7 @@ if Static is None:
 
 from cli.tui.app import (
     AnalysisConfigModal,
+    ErrorDetailModal,
     ETFAgentsTuiApp,
     HomeScreen,
     LLM_PROVIDER_OPTIONS,
@@ -36,6 +37,7 @@ from cli.tui.screens.research import (
     _format_execution_summary,
     _highlight_report_numbers,
     _price_ruler,
+    _price_trend_chart,
     _truncate_condition,
     _weight_bar,
 )
@@ -549,7 +551,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
             "pct_chg": 1.25,
             "volume": 123450000,
             "volume_change_pct": 23.45,
-            "fund_share": 12_530_000_000,
+            "fund_share": 1_250_000,
             "share_change_pct": -1.2,
             "holdings": [
                 {"name": "贵州茅台", "weight_pct": 5.23},
@@ -572,7 +574,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
             "volume": 123450000,
             "volume_change_pct": 23.45,
             "turnover_rate": 3.5,
-            "fund_share": 12_530_000_000,
+            "fund_share": 1_250_000,
             "share_change_pct": -1.2,
             "holdings": [
                 {"name": "中国石油", "weight_pct": 5.23},
@@ -620,6 +622,23 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("`price 1.23`", text)
         self.assertIn("stop 1.850", text)
 
+    def test_highlight_report_numbers_preserves_links_and_urls(self):
+        text = _highlight_report_numbers(
+            "[来源](https://example.com/report/20260526?price=2.05)\n"
+            "详情见 https://data.org/api/v3/quote/1234 了解更多\n"
+            "[5月26日报告](https://example.com/20260526)\n"
+            "涨幅 5.2%，量 1234万手"
+        )
+        # Link destinations and raw URLs must be untouched
+        self.assertIn("](https://example.com/report/20260526?price=2.05)", text)
+        self.assertIn("https://data.org/api/v3/quote/1234", text)
+        self.assertNotIn("**20260526**", text)
+        self.assertNotIn("**2.05**)", text)
+        self.assertNotIn("**1234**", text.split("\n")[1])
+        # Prose numbers still bolded
+        self.assertIn("**5.2%**", text)
+        self.assertIn("**1234万手**", text)
+
     def test_weight_bar_renders_blocks(self):
         rendered = _weight_bar(25.0)
         self.assertIn("█", rendered)
@@ -651,6 +670,78 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
 
     def test_price_ruler_degenerate_range_returns_empty(self):
         self.assertEqual(_price_ruler(2.0, 2.0, 2.0), "")
+
+    # -- _price_trend_chart tests --
+
+    def test_price_trend_chart_empty_data(self):
+        self.assertEqual(_price_trend_chart([]), "")
+
+    def test_price_trend_chart_single_point(self):
+        self.assertEqual(_price_trend_chart([4.12]), "")
+
+    def test_price_trend_chart_basic_structure(self):
+        prices = [1.8, 1.85, 1.9, 1.88, 1.92, 1.95, 1.93, 1.97, 1.99, 2.0]
+        result = _price_trend_chart(prices)
+        self.assertTrue(result.startswith("```"))
+        self.assertTrue(result.endswith("```"))
+        self.assertIn("┤", result)
+        self.assertIn("└", result)
+        self.assertIn("●", result)
+
+    def test_price_trend_chart_current_marked(self):
+        prices = [1.0, 1.5, 2.0, 2.5, 3.0]
+        result = _price_trend_chart(prices)
+        # ● should appear (marks the last/current price)
+        self.assertIn("●", result)
+        # Only one ● in the chart
+        self.assertEqual(result.count("●"), 1)
+
+    def test_price_trend_chart_recent_marked(self):
+        prices = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0, 2.2, 2.4]
+        result = _price_trend_chart(prices)
+        self.assertIn("○", result)
+
+    def test_price_trend_chart_flat_prices(self):
+        prices = [4.12] * 10
+        result = _price_trend_chart(prices)
+        # Should not crash and should produce valid output
+        self.assertIn("●", result)
+        self.assertIn("```", result)
+
+    def test_price_trend_chart_with_reference_lines(self):
+        prices = [1.8, 1.85, 1.9, 1.88, 1.92, 1.95, 1.93, 1.97, 1.99, 2.0]
+        result = _price_trend_chart(prices, stop_price=1.82, target_price=1.98)
+        self.assertIn("╌", result)
+
+    def test_price_trend_chart_25_days(self):
+        # Simulate 25 trading days with realistic price movement
+        import math
+        prices = [2.0 + 0.1 * math.sin(i * 0.3) + i * 0.005 for i in range(25)]
+        result = _price_trend_chart(prices)
+        self.assertIn("●", result)
+        self.assertIn("┤", result)
+        self.assertIn("└", result)
+        lines = result.strip().split("\n")
+        self.assertGreater(len(lines), 3)  # at least header row + some data + footer
+
+    def test_price_trend_chart_ascending(self):
+        prices = [float(i) for i in range(1, 11)]
+        result = _price_trend_chart(prices)
+        # ● should be on the top row (highest price = last)
+        content_lines = result.strip("` \n").split("\n")
+        top_line = content_lines[0]
+        self.assertIn("●", top_line)
+
+    def test_price_trend_chart_width_within_bounds(self):
+        prices = [1.9 + i * 0.01 for i in range(25)]
+        width = 38
+        result = _price_trend_chart(prices, width=width)
+        for line in result.split("\n"):
+            if line.strip() == "```":
+                continue
+            # CJK chars count as 2, but reference labels are at the end
+            # Just verify no line is egregiously long
+            self.assertLessEqual(len(line), width + 10)
 
     def test_extract_price_from_text_finds_stop(self):
         signal = {
@@ -689,6 +780,10 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("等待", rendered)
 
     def test_format_execution_summary_rating_and_visuals(self):
+        price_history = [
+            {"date": f"202605{i:02d}", "close": 1.9 + i * 0.005}
+            for i in range(1, 21)
+        ]
         result = _format_execution_summary(
             {
                 "rating": "OVERWEIGHT",
@@ -698,7 +793,7 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 "add_triggers": [{"metric": "close", "op": ">", "threshold": 2.058, "action": "add"}],
                 "risk_rules": [{"metric": "close", "op": "<", "threshold": 1.85, "action": "stop"}],
             },
-            {"close": 1.966},
+            {"close": 1.966, "price_history": price_history},
         )
         self.assertIsInstance(result, str)
         # Rating
@@ -715,6 +810,9 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
         # Target/stop with emoji
         self.assertIn("🎯", result)
         self.assertIn("🛡", result)
+        # Price trend chart
+        self.assertIn("●", result)
+        self.assertIn("📉", result)
 
     def test_format_execution_summary_extracts_prices_from_condition_text(self):
         """When structured triggers are empty, prices should be extracted from conditions."""
@@ -768,7 +866,14 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
                 screen = app.screen
                 screen.current_ticker = "510300.SH"
-                screen._etf_details["510300.SH"] = {"ticker": "510300.SH", "close": 1.966}
+                screen._etf_details["510300.SH"] = {
+                    "ticker": "510300.SH",
+                    "close": 1.966,
+                    "price_history": [
+                        {"date": f"202605{i:02d}", "close": 1.9 + i * 0.005}
+                        for i in range(1, 21)
+                    ],
+                }
 
                 screen._handle_section_done(SectionDone(
                     ticker="510300.SH",
@@ -790,11 +895,13 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
 
                 screen._on_section_picked("execution_summary")
                 await pilot.pause()
-                rendered = screen.query_one("#ra_body")._markdown
-                self.assertIn("增持", rendered)
-                self.assertIn("2.0%", rendered)
-                self.assertIn("2.058", rendered)
-                self.assertIn("1.85", rendered)
+                # Execution summary uses dedicated widgets, not Markdown
+                rating_text = str(screen.query_one("#exec_rating", Static).render())
+                self.assertIn("增持", rating_text)
+                params_text = str(screen.query_one("#exec_params", Static).render())
+                self.assertIn("2.0%", params_text)
+                self.assertIn("2.058", params_text)
+                self.assertIn("1.85", params_text)
 
     async def test_analysis_run_exec_summary_toggles_back_to_report(self):
         """Switching from execution summary to a report section shows the report."""
@@ -822,7 +929,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
 
                 screen._on_section_picked("execution_summary")
                 await pilot.pause()
-                self.assertIn("持有", screen.query_one("#ra_body")._markdown)
+                rating_text = str(screen.query_one("#exec_rating", Static).render())
+                self.assertIn("持有", rating_text)
 
                 screen._on_section_picked("portfolio_manager")
                 await pilot.pause()
@@ -1167,11 +1275,52 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
                     error="boom",
                 ))
                 await pilot.pause()
+                # Dismiss the error modal that pops up
+                self.assertIsInstance(app.screen, ErrorDetailModal)
+                app.screen.dismiss(None)
+                await pilot.pause()
 
                 screen._open_section_picker("analysts")
                 await pilot.pause()
                 labels = _list_view_labels(screen.app.screen.query_one("#section_picker_list", ListView))
                 self.assertTrue(any("✗ 市场与资金流" in label for label in labels))
+
+    async def test_analysis_run_failed_ticker_shows_error_modal_with_traceback(self):
+        """TickerFailed should pop up ErrorDetailModal with traceback."""
+        with tempfile.TemporaryDirectory() as tmp:
+            app = self._app(tmp)
+            async with app.run_test(size=(140, 40)) as pilot:
+                app.push_screen(AnalysisRunScreen(
+                    ["510300.SH"],
+                    AnalysisConfig(),
+                    runner=_NoopAnalysisRunner(),
+                    repository=ReportRepository(tmp),
+                ))
+                await pilot.pause()
+                screen = app.screen
+                screen.current_ticker = "510300.SH"
+
+                screen._handle_ticker_failed(TickerFailed(
+                    ticker="510300.SH",
+                    error="LLM provider returned 500",
+                    traceback="Traceback (most recent call last):\n  File \"graph.py\", line 42\nRuntimeError: LLM provider returned 500",
+                ))
+                await pilot.pause()
+
+                modal = app.screen
+                self.assertIsInstance(modal, ErrorDetailModal)
+                title = str(modal.query_one(".err-title", Static).render())
+                self.assertIn("分析中断", title)
+                desc = str(modal.query_one(".err-desc", Static).render())
+                self.assertIn("510300.SH", desc)
+                summary = str(modal.query_one(".err-summary", Static).render())
+                self.assertIn("LLM provider returned 500", summary)
+                tb = str(modal.query_one(".err-tb", Static).render())
+                self.assertIn("Traceback", tb)
+
+                app.screen.dismiss(None)
+                await pilot.pause()
+                self.assertIsInstance(app.screen, AnalysisRunScreen)
 
     # --- Stats bar ---
 

@@ -26,6 +26,7 @@ from textual.widgets import (
     ListView,
     Markdown,
     Select,
+    Sparkline,
     Static,
 )
 
@@ -161,7 +162,7 @@ def _format_detail_text(detail: dict) -> str:
         sc_str = "--"
         if sc is not None:
             sc_str = f"{sc:+.1f}%"
-        lines.append(f"份额：{share / 1e8:.0f}亿份 ({sc_str})")
+        lines.append(f"份额：{share / 1e4:.0f}亿份 ({sc_str})")
 
     holdings = detail.get("holdings") or []
     if holdings:
@@ -245,7 +246,7 @@ def _format_detail_rich(detail: dict) -> dict[str, Any]:
     if share is not None:
         sc = detail.get("share_change_pct")
         sc_str = f"{sc:+.1f}%" if sc is not None else "--"
-        parts.append(f"份额: {share / 1e8:.0f}亿份 ({sc_str})")
+        parts.append(f"份额: {share / 1e4:.0f}亿份 ({sc_str})")
     metrics_text = "\n".join(parts) if parts else ""
 
     holdings_bars = Text("持仓占比 TOP5:\n", style="bold")
@@ -426,6 +427,131 @@ def _price_ruler(stop: float, current: float, target: float, width: int = 36) ->
     )
 
 
+def _price_trend_chart(
+    prices: list[float],
+    *,
+    height: int = 6,
+    width: int = 38,
+    stop_price: float | None = None,
+    target_price: float | None = None,
+) -> str:
+    """Render a multi-line ASCII price trend chart inside Markdown code fences.
+
+    Args:
+        prices: Chronological close prices (oldest first).
+        height: Number of Y-axis rows.
+        width: Maximum character width including Y-axis labels.
+        stop_price: Optional stop-loss reference line.
+        target_price: Optional target reference line.
+
+    Returns:
+        Markdown code-fenced chart string, or "" if data is insufficient.
+    """
+    if len(prices) < 2:
+        return ""
+
+    lo, hi = min(prices), max(prices)
+    # Extend range to include reference prices if within 20% of range
+    span = hi - lo if hi != lo else abs(hi) * 0.1 or 0.1
+    margin = span * 0.2
+    for ref in (stop_price, target_price):
+        if ref is not None:
+            if lo - margin <= ref <= hi + margin:
+                lo = min(lo, ref)
+                hi = max(hi, ref)
+
+    if hi == lo:
+        # Flat prices — render a simple single-row line
+        label = f"{hi:.2f}" if hi < 100 else f"{hi:.1f}"
+        label_w = len(label) + 2  # "label ┤"
+        plot_w = max(width - label_w - 1, len(prices))
+        dots = "·" * (len(prices) - 1) + "●"
+        if len(dots) > plot_w:
+            dots = dots[:plot_w]
+        return f"```\n{label:>{label_w - 2}} ┤{dots}\n{'':>{label_w - 2}} └{'─' * len(dots)}\n```"
+
+    # Y-axis label formatting
+    decimals = 2 if hi < 100 else 1
+    fmt = f".{decimals}f"
+    levels = [hi - i * (hi - lo) / (height - 1) for i in range(height)]
+    labels = [f"{lv:{fmt}}" for lv in levels]
+    label_w = max(len(lb) for lb in labels) + 1  # +1 for space before ┤
+
+    # Available plot width
+    plot_w = width - label_w - 1  # subtract ┤
+    if plot_w < 4:
+        plot_w = 4
+
+    # Downsample if needed (preserve first and last)
+    if len(prices) > plot_w:
+        indices = [round(i * (len(prices) - 1) / (plot_w - 1)) for i in range(plot_w)]
+        sampled = [prices[idx] for idx in indices]
+    else:
+        sampled = list(prices)
+
+    n = len(sampled)
+
+    # Determine reference line rows
+    def _row_for_price(p: float) -> int | None:
+        if p < lo or p > hi:
+            return None
+        return round((hi - p) / (hi - lo) * (height - 1))
+
+    stop_row = _row_for_price(stop_price) if stop_price is not None else None
+    target_row = _row_for_price(target_price) if target_price is not None else None
+
+    # Build grid
+    chart_lines: list[str] = []
+    for row in range(height):
+        level = levels[row]
+        half_step = (hi - lo) / (height - 1) / 2
+        cells: list[str] = []
+        for col in range(n):
+            val = sampled[col]
+            if abs(val - level) <= half_step:
+                if col == n - 1:
+                    cells.append("●")
+                elif col >= n - 3:
+                    cells.append("○")
+                else:
+                    cells.append("·")
+            else:
+                cells.append(" ")
+        plot = "".join(cells)
+
+        # Add reference line dashes in empty positions
+        ref_label = ""
+        is_ref_row = False
+        if stop_row == row and target_row == row:
+            ref_label = "止/标"
+            is_ref_row = True
+        elif stop_row == row:
+            ref_label = "止"
+            is_ref_row = True
+        elif target_row == row:
+            ref_label = "标"
+            is_ref_row = True
+
+        if is_ref_row:
+            plot_chars = list(plot)
+            for i in range(len(plot_chars)):
+                if plot_chars[i] == " ":
+                    plot_chars[i] = "╌"
+            plot = "".join(plot_chars)
+
+        label = labels[row]
+        line = f"{label:>{label_w}}┤{plot}"
+        if ref_label:
+            line += f" {ref_label}"
+        chart_lines.append(line)
+
+    # X-axis
+    x_axis = f"{'':>{label_w}}└{'─' * n}"
+    chart_lines.append(x_axis)
+
+    return "```\n" + "\n".join(chart_lines) + "\n```"
+
+
 _RATING_EMOJI = {
     "BUY": "🟢",
     "OVERWEIGHT": "🟢",
@@ -511,6 +637,21 @@ def _format_execution_summary(signal: dict[str, Any] | None, detail: dict[str, A
             lines.append("")
             lines.append(ruler)
 
+    # Price trend chart
+    price_history = detail.get("price_history") if detail else None
+    if price_history:
+        close_prices = [p["close"] for p in price_history if p.get("close") is not None]
+        if close_prices:
+            chart = _price_trend_chart(
+                close_prices,
+                stop_price=stop_price,
+                target_price=target_price,
+            )
+            if chart:
+                lines.append("")
+                lines.append("📉 价格趋势")
+                lines.append(chart)
+
     lines.append("")
     lines.append(f"执行延迟：{execution_delay}")
     for note_line in _format_summary_note("加仓依据", add_line):
@@ -526,7 +667,7 @@ _NUMERIC_TOKEN_RE = re.compile(
     r"(?<![\w`*])("
     r"\d{4}-\d{2}-\d{2}|"
     r"[+-]?\d+(?:\.\d+)?\s*(?:%|％|倍|万手|亿份|元|日|天|周|月)?"
-    r")(?![\w`*])"
+    r")(?![\w`*]|\.\s)"
 )
 
 
@@ -546,10 +687,23 @@ def _highlight_report_numbers(markdown: str) -> str:
             highlighted.append(line)
             continue
 
-        parts = re.split(r"(`[^`]*`)", line)
+        # Split on code spans, Markdown link destinations, and raw URLs
+        # so that numbers inside them are never bolded.
+        parts = re.split(
+            r"(`[^`]*`"                      # code spans
+            r"|\]\([^\)]*\)"                 # Markdown link destination ](…)
+            r"|https?://[^\s\)\]>]+"         # raw URLs
+            r")",
+            line,
+        )
         rendered_parts: list[str] = []
         for part in parts:
-            if part.startswith("`") and part.endswith("`"):
+            if (
+                (part.startswith("`") and part.endswith("`"))
+                or part.startswith("](")
+                or part.startswith("http://")
+                or part.startswith("https://")
+            ):
                 rendered_parts.append(part)
             else:
                 rendered_parts.append(_NUMERIC_TOKEN_RE.sub(r"**\1**", part))
@@ -834,6 +988,83 @@ class AnalysisConfigModal(ModalScreen[AnalysisConfig | None]):
             return self.query_one(f"#{widget_id}", Checkbox).value
         except Exception:
             return False
+
+
+# ---------------------------------------------------------------------------
+# ErrorDetailModal
+# ---------------------------------------------------------------------------
+
+class ErrorDetailModal(ModalScreen[None]):
+    """Modal showing fatal analysis error with traceback."""
+
+    DEFAULT_CSS = """
+    ErrorDetailModal { align: center middle; }
+    #err_container {
+        width: 80; height: auto; max-height: 38;
+        border: double $error; background: $surface; padding: 1 2;
+    }
+    #err_container .err-title {
+        color: $error; text-style: bold; height: 1; margin-bottom: 1;
+    }
+    #err_container .err-desc {
+        color: $text; height: auto; margin-bottom: 1;
+    }
+    #err_container .err-summary-box {
+        height: auto; max-height: 6;
+        border: solid $warning; padding: 0 1; margin-bottom: 1;
+    }
+    #err_container .err-summary {
+        color: $warning; height: auto;
+    }
+    #err_container .err-tb-scroll {
+        height: auto; max-height: 14;
+        border: solid $panel; background: $surface-darken-1;
+        padding: 0 1; scrollbar-size: 1 1;
+    }
+    #err_container .err-tb {
+        color: $text-muted; height: auto;
+    }
+    #err_container .err-actions {
+        height: 3; margin-top: 1; align-horizontal: center;
+    }
+    #err_container .err-close {
+        width: 18; height: 3;
+        border: solid $error; background: transparent;
+        color: $error; content-align: center middle; text-style: bold;
+    }
+    """
+
+    def __init__(self, ticker: str, error: str, traceback_text: str = "") -> None:
+        super().__init__()
+        self._ticker = ticker
+        self._error = error
+        self._traceback_text = traceback_text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="err_container"):
+            yield Static("✕  分析中断 — 致命错误", classes="err-title")
+            yield Static(
+                f"agents 运行过程中发生不可恢复的错误，{self._ticker} 分析已终止。",
+                classes="err-desc",
+            )
+            summary_box = Vertical(classes="err-summary-box")
+            summary_box.border_title = "错误摘要"
+            with summary_box:
+                yield Static(self._error, classes="err-summary")
+            if self._traceback_text:
+                tb_box = ScrollableContainer(classes="err-tb-scroll")
+                tb_box.border_title = "完整 Traceback"
+                with tb_box:
+                    yield Static(self._traceback_text, classes="err-tb")
+            with Horizontal(classes="err-actions"):
+                yield Button("关闭  Esc", id="btn_err_close", classes="err-close")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "btn_err_close":
+            self.dismiss(None)
+
+    def key_escape(self) -> None:
+        self.dismiss(None)
 
 
 # ---------------------------------------------------------------------------
@@ -1162,6 +1393,21 @@ class AnalysisRunScreen(Screen):
                         yield Static("整体进度", id="ra_body_title", classes="pane-title")
                         with ScrollableContainer(id="ra_body_scroll"):
                             yield Markdown("准备开始分析。", id="ra_body")
+                            with Vertical(id="ra_exec_summary", classes="hidden-widget"):
+                                yield Static("", id="exec_rating", classes="exec-rating")
+                                chart_box = Vertical(id="exec_chart_box", classes="exec-section-box exec-chart-box")
+                                chart_box.border_title = "价格趋势"
+                                with chart_box:
+                                    yield Sparkline([], id="exec_sparkline", classes="exec-sparkline")
+                                    yield Static("", id="exec_price_labels", classes="exec-price-labels")
+                                params_box = Vertical(id="exec_params_box", classes="exec-section-box")
+                                params_box.border_title = "执行参数"
+                                with params_box:
+                                    yield Static("", id="exec_params", classes="exec-params")
+                                conds_box = Vertical(id="exec_conds_box", classes="exec-section-box")
+                                conds_box.border_title = "操作条件"
+                                with conds_box:
+                                    yield Static("", id="exec_conditions", classes="exec-conditions")
             with Horizontal(classes="stats-bar"):
                 yield Static(self._stats_progress_text(), id="stats_progress", classes="stats-seg-accent")
                 yield Static(self._stats_resources_text(), id="stats_resources", classes="stats-seg-panel")
@@ -1571,6 +1817,13 @@ class AnalysisRunScreen(Screen):
         self._refresh_board()
         self._refresh_queue_panel()
 
+        # Show error modal with traceback
+        self.app.push_screen(ErrorDetailModal(
+            ticker=event.ticker,
+            error=event.error,
+            traceback_text=event.traceback,
+        ))
+
     def _handle_ticker_cancelled(self, event: TickerCancelled) -> None:
         self._ticker_run_state[event.ticker] = "cancelled"
         self._sync_queue_item(event.ticker)
@@ -1622,23 +1875,154 @@ class AnalysisRunScreen(Screen):
 
     # --- Body refresh ---
 
+    def _show_exec_summary(self, show: bool) -> None:
+        """Toggle between Markdown body and execution summary widgets."""
+        try:
+            md = self.query_one("#ra_body", Markdown)
+            es = self.query_one("#ra_exec_summary")
+            if show:
+                md.add_class("hidden-widget")
+                es.remove_class("hidden-widget")
+            else:
+                es.add_class("hidden-widget")
+                md.remove_class("hidden-widget")
+        except Exception:
+            pass
+
+    def _populate_exec_summary(self, signal: dict[str, Any], detail: dict[str, Any] | None) -> None:
+        """Fill execution summary widgets from structured signal data."""
+        rating = str(signal.get("rating") or "HOLD").upper()
+        rating_label = _RATING_LABELS.get(rating, rating)
+        emoji = _RATING_EMOJI.get(rating, "🟡")
+        target_weight = signal.get("target_weight_pct")
+        weight_min = signal.get("target_weight_min_pct")
+        weight_max = signal.get("target_weight_max_pct")
+        current = detail.get("close") if detail else None
+
+        target_price = _extract_price_rule(signal, ("add_triggers", "rebalance_triggers"), ("add", "buy", "rebalance"))
+        if target_price is None:
+            target_price = _extract_price_from_text(
+                signal, ("add_conditions",), ("突破", "加仓", "目标", "上方", "上行"),
+            )
+        stop_price = _extract_price_rule(signal, ("risk_rules", "reduce_triggers", "exit_triggers"), ("reduce", "exit", "sell", "stop"))
+        if stop_price is None:
+            stop_price = _extract_price_from_text(
+                signal, ("risk_controls", "reduce_conditions"), ("止损", "跌破", "防守", "下方", "stop"),
+            )
+
+        # --- Rating ---
+        rating_text = Text()
+        rating_text.append(f"{emoji} 研报结论：", style="bold")
+        rating_style = "bold green" if rating in ("BUY", "OVERWEIGHT") else ("bold red" if rating in ("SELL", "UNDERWEIGHT") else "bold yellow")
+        rating_text.append(rating_label, style=rating_style)
+        self.query_one("#exec_rating", Static).update(rating_text)
+
+        # --- Sparkline chart ---
+        price_history = detail.get("price_history") if detail else None
+        chart_box = self.query_one("#exec_chart_box")
+        if price_history:
+            close_prices = [p["close"] for p in price_history if p.get("close") is not None]
+            if len(close_prices) >= 2:
+                sparkline = self.query_one("#exec_sparkline", Sparkline)
+                sparkline.data = close_prices
+                # Price labels below chart
+                price_label = Text()
+                lo, hi = min(close_prices), max(close_prices)
+                price_label.append(f"▾ {lo:.3f}", style="red")
+                price_label.append("  ")
+                price_label.append(f"▴ {hi:.3f}", style="green")
+                if current is not None:
+                    price_label.append(f"  现价 {current:.3f}", style="bold")
+                if stop_price is not None:
+                    price_label.append(f"  止损 {_signal_number(stop_price)}", style="red")
+                if target_price is not None:
+                    price_label.append(f"  目标 {_signal_number(target_price)}", style="green")
+                self.query_one("#exec_price_labels", Static).update(price_label)
+                chart_box.remove_class("hidden-widget")
+            else:
+                chart_box.add_class("hidden-widget")
+        else:
+            chart_box.add_class("hidden-widget")
+
+        # --- Execution params ---
+        params = Text()
+        # Weight bar
+        if target_weight is not None:
+            filled = round(target_weight / 50.0 * 12)
+            filled = max(0, min(filled, 12))
+            params.append("推荐仓位  ", style="dim")
+            params.append("█" * filled, style="bold cyan")
+            params.append("░" * (12 - filled), style="dim")
+            params.append(f"  {target_weight:.1f}%", style="bold")
+            if weight_min is not None or weight_max is not None:
+                params.append(f"  (区间 {_signal_number(weight_min, '%')}-{_signal_number(weight_max, '%')})", style="dim")
+            params.append("\n")
+        if target_price is not None:
+            params.append("目标价格  ", style="dim")
+            params.append(f"{_signal_number(target_price)} 🎯\n", style="bold green")
+        if stop_price is not None:
+            params.append("止损价格  ", style="dim")
+            params.append(f"{_signal_number(stop_price)} 🛡️\n", style="bold red")
+        if current is not None:
+            params.append("现价位置  ", style="dim")
+            params.append(f"{_signal_number(current)}\n", style="bold")
+        execution_delay = signal.get("execution_delay") or "--"
+        params.append("执行延迟  ", style="dim")
+        params.append(str(execution_delay), style="bold")
+        self.query_one("#exec_params", Static).update(params)
+
+        # --- Conditions ---
+        add_line = _first_rule_line(signal, ("add_triggers", "add_conditions"))
+        reduce_line = _first_rule_line(signal, ("reduce_triggers", "reduce_conditions", "exit_triggers", "exit_conditions"))
+        risk_line = _first_rule_line(signal, ("risk_rules", "risk_controls"))
+
+        conds = Text()
+        if add_line:
+            conds.append("加仓依据  ", style="dim")
+            conds.append(f"{add_line}\n")
+        if reduce_line:
+            conds.append("减仓依据  ", style="dim")
+            conds.append(f"{reduce_line}\n")
+        if risk_line:
+            conds.append("风控规则  ", style="dim")
+            conds.append(risk_line)
+
+        conds_box = self.query_one("#exec_conds_box")
+        if add_line or reduce_line or risk_line:
+            self.query_one("#exec_conditions", Static).update(conds)
+            conds_box.remove_class("hidden-widget")
+        else:
+            conds_box.add_class("hidden-widget")
+
     def _refresh_body(self) -> None:
         if not self.current_ticker:
+            self._show_exec_summary(False)
             self.query_one("#ra_body", Markdown).update("请选择一个 ticker。")
             return
         if self.current_section is None:
+            self._show_exec_summary(False)
             self.query_one("#ra_body_title", Static).update("整体进度")
             self.query_one("#ra_body", Markdown).update(self._progress_markdown())
             return
 
         if self.current_section == "execution_summary":
             self.query_one("#ra_body_title", Static).update("核心执行摘要")
-            summary_md = _format_execution_summary(
-                self._backtest_signals.get(self.current_ticker),
-                self._etf_details.get(self.current_ticker),
-            )
-            self.query_one("#ra_body", Markdown).update(summary_md)
+            signal = self._backtest_signals.get(self.current_ticker)
+            if signal:
+                self._show_exec_summary(True)
+                self._populate_exec_summary(
+                    signal,
+                    self._etf_details.get(self.current_ticker),
+                )
+            else:
+                self._show_exec_summary(False)
+                self.query_one("#ra_body", Markdown).update(
+                    "*等待组合经理生成结构化投资策略。*"
+                )
             return
+
+        # All remaining paths use the Markdown body
+        self._show_exec_summary(False)
 
         # risk_debate — show actual risk debate content
         if self.current_section == "risk_debate":

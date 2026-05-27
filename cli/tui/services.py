@@ -10,6 +10,7 @@ import csv
 import json
 import re
 import threading
+import traceback as _traceback_mod
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime
@@ -210,6 +211,7 @@ class TickerDone:
 class TickerFailed:
     ticker: str
     error: str
+    traceback: str = ""
 
 
 @dataclass(frozen=True)
@@ -962,7 +964,8 @@ class AnalysisRunner:
 
         except Exception as exc:
             self.states[ticker] = TickerState.FAILED
-            yield TickerFailed(ticker=ticker, error=str(exc))
+            tb = _traceback_mod.format_exc()
+            yield TickerFailed(ticker=ticker, error=str(exc), traceback=tb)
         finally:
             if graph:
                 graph.close_run()
