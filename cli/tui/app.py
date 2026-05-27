@@ -632,6 +632,47 @@ class ETFAgentsTuiApp(App):
         overflow-y: auto;
     }
 
+    /* Execution summary widget styles */
+    #ra_exec_summary {
+        height: auto;
+        padding: 0 1;
+    }
+    .exec-rating {
+        height: auto;
+        text-style: bold;
+        margin-bottom: 1;
+    }
+    .exec-section-box {
+        height: auto;
+        border: solid $panel;
+        padding: 0 1;
+        margin-bottom: 1;
+    }
+    .exec-chart-box {
+        border: solid $accent;
+    }
+    .exec-sparkline {
+        height: 4;
+        margin: 0;
+    }
+    Sparkline > .sparkline--max-color {
+        color: $success;
+    }
+    Sparkline > .sparkline--min-color {
+        color: $error;
+    }
+    .exec-price-labels {
+        height: auto;
+        color: $text-muted;
+        margin-top: 0;
+    }
+    .exec-params {
+        height: auto;
+    }
+    .exec-conditions {
+        height: auto;
+    }
+
     #lib_body_scroll {
         height: 1fr;
         scrollbar-size: 1 1;

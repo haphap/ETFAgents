@@ -26,6 +26,7 @@ from textual.widgets import (
     ListView,
     Markdown,
     Select,
+    Sparkline,
     Static,
 )
 
@@ -1379,6 +1380,21 @@ class AnalysisRunScreen(Screen):
                         yield Static("整体进度", id="ra_body_title", classes="pane-title")
                         with ScrollableContainer(id="ra_body_scroll"):
                             yield Markdown("准备开始分析。", id="ra_body")
+                            with Vertical(id="ra_exec_summary", classes="hidden-widget"):
+                                yield Static("", id="exec_rating", classes="exec-rating")
+                                chart_box = Vertical(id="exec_chart_box", classes="exec-section-box exec-chart-box")
+                                chart_box.border_title = "价格趋势"
+                                with chart_box:
+                                    yield Sparkline([], id="exec_sparkline", classes="exec-sparkline")
+                                    yield Static("", id="exec_price_labels", classes="exec-price-labels")
+                                params_box = Vertical(id="exec_params_box", classes="exec-section-box")
+                                params_box.border_title = "执行参数"
+                                with params_box:
+                                    yield Static("", id="exec_params", classes="exec-params")
+                                conds_box = Vertical(id="exec_conds_box", classes="exec-section-box")
+                                conds_box.border_title = "操作条件"
+                                with conds_box:
+                                    yield Static("", id="exec_conditions", classes="exec-conditions")
             with Horizontal(classes="stats-bar"):
                 yield Static(self._stats_progress_text(), id="stats_progress", classes="stats-seg-accent")
                 yield Static(self._stats_resources_text(), id="stats_resources", classes="stats-seg-panel")
@@ -1846,23 +1862,154 @@ class AnalysisRunScreen(Screen):
 
     # --- Body refresh ---
 
+    def _show_exec_summary(self, show: bool) -> None:
+        """Toggle between Markdown body and execution summary widgets."""
+        try:
+            md = self.query_one("#ra_body", Markdown)
+            es = self.query_one("#ra_exec_summary")
+            if show:
+                md.add_class("hidden-widget")
+                es.remove_class("hidden-widget")
+            else:
+                es.add_class("hidden-widget")
+                md.remove_class("hidden-widget")
+        except Exception:
+            pass
+
+    def _populate_exec_summary(self, signal: dict[str, Any], detail: dict[str, Any] | None) -> None:
+        """Fill execution summary widgets from structured signal data."""
+        rating = str(signal.get("rating") or "HOLD").upper()
+        rating_label = _RATING_LABELS.get(rating, rating)
+        emoji = _RATING_EMOJI.get(rating, "🟡")
+        target_weight = signal.get("target_weight_pct")
+        weight_min = signal.get("target_weight_min_pct")
+        weight_max = signal.get("target_weight_max_pct")
+        current = detail.get("close") if detail else None
+
+        target_price = _extract_price_rule(signal, ("add_triggers", "rebalance_triggers"), ("add", "buy", "rebalance"))
+        if target_price is None:
+            target_price = _extract_price_from_text(
+                signal, ("add_conditions",), ("突破", "加仓", "目标", "上方", "上行"),
+            )
+        stop_price = _extract_price_rule(signal, ("risk_rules", "reduce_triggers", "exit_triggers"), ("reduce", "exit", "sell", "stop"))
+        if stop_price is None:
+            stop_price = _extract_price_from_text(
+                signal, ("risk_controls", "reduce_conditions"), ("止损", "跌破", "防守", "下方", "stop"),
+            )
+
+        # --- Rating ---
+        rating_text = Text()
+        rating_text.append(f"{emoji} 研报结论：", style="bold")
+        rating_style = "bold green" if rating in ("BUY", "OVERWEIGHT") else ("bold red" if rating in ("SELL", "UNDERWEIGHT") else "bold yellow")
+        rating_text.append(rating_label, style=rating_style)
+        self.query_one("#exec_rating", Static).update(rating_text)
+
+        # --- Sparkline chart ---
+        price_history = detail.get("price_history") if detail else None
+        chart_box = self.query_one("#exec_chart_box")
+        if price_history:
+            close_prices = [p["close"] for p in price_history if p.get("close") is not None]
+            if len(close_prices) >= 2:
+                sparkline = self.query_one("#exec_sparkline", Sparkline)
+                sparkline.data = close_prices
+                # Price labels below chart
+                price_label = Text()
+                lo, hi = min(close_prices), max(close_prices)
+                price_label.append(f"▾ {lo:.3f}", style="red")
+                price_label.append("  ")
+                price_label.append(f"▴ {hi:.3f}", style="green")
+                if current is not None:
+                    price_label.append(f"  现价 {current:.3f}", style="bold")
+                if stop_price is not None:
+                    price_label.append(f"  止损 {_signal_number(stop_price)}", style="red")
+                if target_price is not None:
+                    price_label.append(f"  目标 {_signal_number(target_price)}", style="green")
+                self.query_one("#exec_price_labels", Static).update(price_label)
+                chart_box.remove_class("hidden-widget")
+            else:
+                chart_box.add_class("hidden-widget")
+        else:
+            chart_box.add_class("hidden-widget")
+
+        # --- Execution params ---
+        params = Text()
+        # Weight bar
+        if target_weight is not None:
+            filled = round(target_weight / 50.0 * 12)
+            filled = max(0, min(filled, 12))
+            params.append("推荐仓位  ", style="dim")
+            params.append("█" * filled, style="bold cyan")
+            params.append("░" * (12 - filled), style="dim")
+            params.append(f"  {target_weight:.1f}%", style="bold")
+            if weight_min is not None or weight_max is not None:
+                params.append(f"  (区间 {_signal_number(weight_min, '%')}-{_signal_number(weight_max, '%')})", style="dim")
+            params.append("\n")
+        if target_price is not None:
+            params.append("目标价格  ", style="dim")
+            params.append(f"{_signal_number(target_price)} 🎯\n", style="bold green")
+        if stop_price is not None:
+            params.append("止损价格  ", style="dim")
+            params.append(f"{_signal_number(stop_price)} 🛡️\n", style="bold red")
+        if current is not None:
+            params.append("现价位置  ", style="dim")
+            params.append(f"{_signal_number(current)}\n", style="bold")
+        execution_delay = signal.get("execution_delay") or "--"
+        params.append("执行延迟  ", style="dim")
+        params.append(str(execution_delay), style="bold")
+        self.query_one("#exec_params", Static).update(params)
+
+        # --- Conditions ---
+        add_line = _first_rule_line(signal, ("add_triggers", "add_conditions"))
+        reduce_line = _first_rule_line(signal, ("reduce_triggers", "reduce_conditions", "exit_triggers", "exit_conditions"))
+        risk_line = _first_rule_line(signal, ("risk_rules", "risk_controls"))
+
+        conds = Text()
+        if add_line:
+            conds.append("加仓依据  ", style="dim")
+            conds.append(f"{add_line}\n")
+        if reduce_line:
+            conds.append("减仓依据  ", style="dim")
+            conds.append(f"{reduce_line}\n")
+        if risk_line:
+            conds.append("风控规则  ", style="dim")
+            conds.append(risk_line)
+
+        conds_box = self.query_one("#exec_conds_box")
+        if add_line or reduce_line or risk_line:
+            self.query_one("#exec_conditions", Static).update(conds)
+            conds_box.remove_class("hidden-widget")
+        else:
+            conds_box.add_class("hidden-widget")
+
     def _refresh_body(self) -> None:
         if not self.current_ticker:
+            self._show_exec_summary(False)
             self.query_one("#ra_body", Markdown).update("请选择一个 ticker。")
             return
         if self.current_section is None:
+            self._show_exec_summary(False)
             self.query_one("#ra_body_title", Static).update("整体进度")
             self.query_one("#ra_body", Markdown).update(self._progress_markdown())
             return
 
         if self.current_section == "execution_summary":
             self.query_one("#ra_body_title", Static).update("核心执行摘要")
-            summary_md = _format_execution_summary(
-                self._backtest_signals.get(self.current_ticker),
-                self._etf_details.get(self.current_ticker),
-            )
-            self.query_one("#ra_body", Markdown).update(summary_md)
+            signal = self._backtest_signals.get(self.current_ticker)
+            if signal:
+                self._show_exec_summary(True)
+                self._populate_exec_summary(
+                    signal,
+                    self._etf_details.get(self.current_ticker),
+                )
+            else:
+                self._show_exec_summary(False)
+                self.query_one("#ra_body", Markdown).update(
+                    "*等待组合经理生成结构化投资策略。*"
+                )
             return
+
+        # All remaining paths use the Markdown body
+        self._show_exec_summary(False)
 
         # risk_debate — show actual risk debate content
         if self.current_section == "risk_debate":

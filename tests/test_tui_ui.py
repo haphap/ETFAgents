@@ -878,11 +878,13 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
 
                 screen._on_section_picked("execution_summary")
                 await pilot.pause()
-                rendered = screen.query_one("#ra_body")._markdown
-                self.assertIn("增持", rendered)
-                self.assertIn("2.0%", rendered)
-                self.assertIn("2.058", rendered)
-                self.assertIn("1.85", rendered)
+                # Execution summary uses dedicated widgets, not Markdown
+                rating_text = str(screen.query_one("#exec_rating", Static).render())
+                self.assertIn("增持", rating_text)
+                params_text = str(screen.query_one("#exec_params", Static).render())
+                self.assertIn("2.0%", params_text)
+                self.assertIn("2.058", params_text)
+                self.assertIn("1.85", params_text)
 
     async def test_analysis_run_exec_summary_toggles_back_to_report(self):
         """Switching from execution summary to a report section shows the report."""
@@ -910,7 +912,8 @@ class TuiPilotTests(unittest.IsolatedAsyncioTestCase):
 
                 screen._on_section_picked("execution_summary")
                 await pilot.pause()
-                self.assertIn("持有", screen.query_one("#ra_body")._markdown)
+                rating_text = str(screen.query_one("#exec_rating", Static).render())
+                self.assertIn("持有", rating_text)
 
                 screen._on_section_picked("portfolio_manager")
                 await pilot.pause()
