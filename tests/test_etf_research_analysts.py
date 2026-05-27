@@ -865,7 +865,8 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
         )
 
         self.assertTrue(_looks_like_complete_market_flow_report(valid_report))
-        self.assertTrue(
+        # Report missing section 四 and table is rejected
+        self.assertFalse(
             _looks_like_complete_market_flow_report(
                 "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
                 "一、市场结构与量价诊断\n趋势导语。\n\n"
@@ -902,7 +903,7 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
             )
         )
 
-    def test_market_flow_spec_marks_missing_tail_markers_without_failing_shape_gate(self):
+    def test_market_flow_spec_marks_missing_tail_markers_and_table(self):
         report = (
             "趋势和资金流同步改善，当前交易含义是等待回踩确认后分批加仓。\n\n"
             "一、市场结构与量价诊断\n趋势导语。\n\n"
@@ -912,9 +913,11 @@ class EtfMarketAnalystPromptTests(unittest.TestCase):
 
         verdict = static_validate(report, _REPORT_SPEC)
 
-        self.assertTrue(_looks_like_complete_market_flow_report(report))
+        # Report without section 四 and table is rejected by acceptance gate
+        self.assertFalse(_looks_like_complete_market_flow_report(report))
         self.assertTrue(any("缺少一级章节『四、…』" in item for item in verdict.missing_elements))
         self.assertTrue(any("综合结论和指标总览" in item for item in verdict.missing_elements))
+        self.assertTrue(any("指标总览 Markdown 表格" in item for item in verdict.missing_elements))
 
     def test_market_flow_tail_normalizer_inserts_missing_hard_headings(self):
         report = (
