@@ -67,6 +67,10 @@ For all commands and usage examples, see [docs/usage.md](docs/usage.md).
 python -m unittest discover -s tests -q
 ```
 
+The TypeScript front-end (CLI + future Ink TUI) lives under [`ts/`](ts/) and
+drives the Python codebase as a JSON-RPC sidecar. See [`ts/README.md`](ts/README.md)
+and [`docs/bridge.md`](docs/bridge.md).
+
 ## License
 
 Add a license file before publishing if you want the repository to have an explicit open-source license.

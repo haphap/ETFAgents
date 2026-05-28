@@ -1,0 +1,68 @@
+/**
+ * State annotation for the market_flow → trader spine (Phase 2 sub-step 1).
+ *
+ * Mirrors the canonical keys read/written along this slice of AgentState in
+ * ``etfagents/agents/utils/agent_states.py``. Legacy aliases (e.g. market_report,
+ * etf_flow_report) are NOT mirrored on the TS side — the bridge boundary uses
+ * canonical names only. If the TS state ever needs to round-trip with Python,
+ * apply ``with_state_aliases`` on the bridge boundary.
+ */
+
+import { Annotation, MessagesAnnotation } from "@langchain/langgraph";
+
+export const SpineState = Annotation.Root({
+  ...MessagesAnnotation.spec,
+
+  asset_of_interest: Annotation<string>(),
+  trade_date: Annotation<string>(),
+
+  // Reports written by analysts; downstream nodes read with empty-string
+  // defaults so missing reports do not break trader.
+  market_flow_report: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  catalyst_sentiment_report: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  macro_regime_report: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  meso_commodity_report: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  holdings_industry_report: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  top_holdings_report: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+
+  research_allocation_plan: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+
+  // Trader outputs
+  trader_allocation_plan: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  trader_backtest_signal: Annotation<Record<string, unknown>>({
+    reducer: (_prev, next) => next,
+    default: () => ({}),
+  }),
+
+  sender: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+});
+
+export type SpineStateType = typeof SpineState.State;
+export type SpineStateUpdate = typeof SpineState.Update;

@@ -13,3 +13,9 @@ AGENTS.md
 
 results/
 plan.md
+
+# TypeScript workspace
+ts/node_modules/
+ts/dist/
+ts/coverage/
+*.tsbuildinfo
