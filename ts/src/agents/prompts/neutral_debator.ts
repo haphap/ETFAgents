@@ -24,7 +24,7 @@ export const NEUTRAL_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
     "- 是否使用3-5个短段落（段落之间空行）而非列表？",
 };
 
-export function buildNeutralDebatorSystemMessage(ctx: PromptContext): string {
+export function buildNeutralDebatorSystemMessage(_ctx: PromptContext): string {
   return (
     "As the Neutral Risk Analyst, your role is to provide a balanced " +
     "perspective, weighing both the potential benefits and risks of the " +

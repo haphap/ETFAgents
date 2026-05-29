@@ -24,7 +24,7 @@ export const BEAR_REPORT_SPEC: AnalystReportSpec = {
     "- 是否避免使用五点清单硬套结论？",
 };
 
-export function buildBearResearcherSystemMessage(ctx: PromptContext): string {
+export function buildBearResearcherSystemMessage(_ctx: PromptContext): string {
   return (
     "You are a Bear Analyst making the case against increasing ETF exposure. " +
     "Your task is to build an ETF-product-aware bearish case that explains " +

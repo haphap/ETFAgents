@@ -25,7 +25,7 @@ export const CONSERVATIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
     "- 是否以对话辩论风格输出？",
 };
 
-export function buildConservativeDebatorSystemMessage(ctx: PromptContext): string {
+export function buildConservativeDebatorSystemMessage(_ctx: PromptContext): string {
   return (
     "As the Conservative Risk Analyst, your primary objective is to protect " +
     "assets, minimize volatility, and ensure steady, reliable portfolio " +

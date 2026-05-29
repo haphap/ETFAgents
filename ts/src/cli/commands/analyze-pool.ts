@@ -8,7 +8,6 @@
 import { HumanMessage } from "@langchain/core/messages";
 import type { Command } from "commander";
 import pc from "picocolors";
-import type { BacktestSignal } from "../../agents/helpers/backtest_signal.js";
 import { BridgeApi, BridgeClient, pickBridgeTools, RpcError } from "../../bridge/index.js";
 import { buildFullGraph } from "../../graph/full_graph.js";
 import { createLlmFromConfig } from "../../llm/factory.js";

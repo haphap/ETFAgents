@@ -43,7 +43,7 @@ export function splitSentences(text: string | undefined): string[] {
   const parts = content.split(SENTENCE_SPLIT_RE);
   const sentences: string[] = [];
   for (let i = 0; i < parts.length; i++) {
-    const frag = parts[i]!.trim();
+    const frag = parts[i]?.trim();
     if (!frag) continue;
     if (/^[。！？!?.]$/.test(frag) || frag === "\n") {
       // Attach punctuation to the previous sentence
@@ -549,7 +549,7 @@ export function stripLeadingSectionHeadings(
     .split(/\n+/)
     .map((l) => l.trim())
     .filter(Boolean);
-  while (lines.length > 0 && lineRe.test(lines[0]!)) {
+  while (lines.length > 0 && lineRe.test(lines[0] ?? "")) {
     lines.shift();
   }
   return lines.join("\n").trim();

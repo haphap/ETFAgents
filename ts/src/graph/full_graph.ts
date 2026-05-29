@@ -17,19 +17,11 @@ import type { AIMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
-import { createAggressiveDebatorNode } from "../agents/nodes/aggressive_debator.js";
-import { createBearResearcherNode } from "../agents/nodes/bear_researcher.js";
-import { createBullResearcherNode } from "../agents/nodes/bull_researcher.js";
 import { createCatalystSentimentNode } from "../agents/nodes/catalyst_sentiment.js";
-import { createConservativeDebatorNode } from "../agents/nodes/conservative_debator.js";
 import { createHoldingsIndustryNode } from "../agents/nodes/holdings_industry.js";
 import { createMacroRegimeNode } from "../agents/nodes/macro_regime.js";
-import type { AnalystNodeOptions } from "../agents/nodes/market_flow.js";
 import { createMarketFlowNode } from "../agents/nodes/market_flow.js";
 import { createMesoCommodityNode } from "../agents/nodes/meso_commodity.js";
-import { createNeutralDebatorNode } from "../agents/nodes/neutral_debator.js";
-import { createPortfolioManagerNode } from "../agents/nodes/portfolio_manager.js";
-import { createResearchManagerNode } from "../agents/nodes/research_manager.js";
 import { createTopHoldingsNode } from "../agents/nodes/top_holdings.js";
 import { createTraderNode } from "../agents/nodes/trader.js";
 import type { PromptContext } from "../agents/prompts/shared.js";
@@ -137,7 +129,7 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
 
 function routeToolsOrNext(
   toolsNode: string,
-  nextNode: string,
+  _nextNode: string,
 ): (state: SpineStateType) => typeof toolsNode | "continue" {
   return (state: SpineStateType) => {
     const last = state.messages[state.messages.length - 1] as AIMessage | undefined;

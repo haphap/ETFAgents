@@ -73,7 +73,8 @@ export function registerBacktest(program: Command): void {
           console.log(pc.cyan("\n=== Rankings ==="));
           const rankings = result.rankings as Array<{ ticker: string; score: number }>;
           for (let i = 0; i < rankings.length; i++) {
-            const r = rankings[i]!;
+            const r = rankings[i];
+            if (!r) continue;
             console.log(`  ${i + 1}. ${r.ticker}  score=${r.score.toFixed(4)}`);
           }
         }

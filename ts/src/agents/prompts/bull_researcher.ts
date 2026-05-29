@@ -24,7 +24,7 @@ export const BULL_REPORT_SPEC: AnalystReportSpec = {
     "- 是否避免使用五点清单硬套结论？",
 };
 
-export function buildBullResearcherSystemMessage(ctx: PromptContext): string {
+export function buildBullResearcherSystemMessage(_ctx: PromptContext): string {
   return (
     "You are a Bull Analyst advocating for increasing ETF exposure. " +
     "Your task is to build an ETF-product-aware bullish case that explains " +

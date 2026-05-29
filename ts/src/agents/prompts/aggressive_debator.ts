@@ -26,7 +26,7 @@ export const AGGRESSIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
     "- 是否以对话辩论风格输出？",
 };
 
-export function buildAggressiveDebatorSystemMessage(ctx: PromptContext): string {
+export function buildAggressiveDebatorSystemMessage(_ctx: PromptContext): string {
   return (
     "As the Aggressive Risk Analyst, your role is to actively champion " +
     "high-reward ETF allocation opportunities, emphasizing bold positioning, " +

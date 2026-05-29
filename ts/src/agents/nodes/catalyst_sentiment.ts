@@ -19,7 +19,7 @@ import {
   type CatalystSentimentData,
 } from "../prompts/catalyst_sentiment.js";
 import type { SpineStateType, SpineStateUpdate } from "../state.js";
-import { type AnalystNodeOptions, assembleSystemFrame } from "./market_flow.js";
+import type { AnalystNodeOptions } from "./market_flow.js";
 
 export function createCatalystSentimentNode(opts: AnalystNodeOptions) {
   return async function catalystSentimentNode(state: SpineStateType): Promise<SpineStateUpdate> {
