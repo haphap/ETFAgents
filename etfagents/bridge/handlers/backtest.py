@@ -28,6 +28,10 @@ class _PrecomputedSignalGraph:
     Provides exactly what ``run_candidate_pool_backtest`` reads:
       * ``analyze_candidate_pool(tickers, decision_date, force_refresh=False)``
       * ``_resolve_benchmark_ticker(ticker)`` (fallback only)
+
+    NOTE: If ``run_candidate_pool_backtest``'s interface changes (new required
+    methods or changed signatures), this shim breaks silently. Consider adding a
+    protocol-version RPC (e.g. ``bridge.protocol_version``) to the handshake.
     """
 
     def __init__(

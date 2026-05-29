@@ -1,6 +1,51 @@
 # CLI Usage Guide
 
-## Interactive Analysis (`etfagents analyze`)
+## TypeScript CLI (`pnpm dev`)
+
+The TypeScript front-end is the primary CLI. Start the Python sidecar first,
+then run commands from the `ts/` directory.
+
+```bash
+cd ts && pnpm install
+```
+
+| Command | Description |
+|---|---|
+| `pnpm dev analyze <ticker>` | Full 6-analyst pipeline → trader allocation plan |
+| `pnpm dev analyze-mini <ticker>` | Minimal 1-analyst (market_flow) pipeline |
+| `pnpm dev analyze-pool <ticker...>` | Multi-ticker sequential analysis with ranking |
+| `pnpm dev backtest <tickers...> --start-date X --end-date Y` | Candidate-pool backtest |
+| `pnpm dev detail <ticker>` | ETF info, NAV, holdings lookup |
+| `pnpm dev cache stats` | Cache statistics |
+| `pnpm dev cache cleanup --days 30` | Remove old cache entries |
+| `pnpm dev cache clear --type all --yes` | Clear all cache |
+| `pnpm dev paper register <user>` | Register paper trading account |
+| `pnpm dev paper account` | Show paper account summary |
+| `pnpm dev paper positions` | List paper positions |
+| `pnpm dev tui` | Launch Ink TUI |
+
+Options available on most commands:
+
+```bash
+--model <name>       # Override LLM model
+--provider <name>    # Override provider (openai, deepseek, ollama, etc.)
+--base-url <url>     # Override LLM base URL
+--max-tokens <n>     # Per-request token budget
+--date <yyyy-mm-dd>  # Trade date (default: today)
+```
+
+### Example session
+
+```bash
+# Terminal 1: start the Python sidecar (auto-launched by TS CLI)
+# Terminal 2:
+cd ts
+pnpm dev analyze 510300.SH --provider ollama --base-url http://localhost:11434/v1
+```
+
+## Python CLI (`etfagents`)
+
+The Python CLI is available for interactive analysis and watchlist management.
 
 ```bash
 etfagents analyze

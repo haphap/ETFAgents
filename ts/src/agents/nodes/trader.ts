@@ -13,6 +13,8 @@
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { buildTraderBacktestSignal } from "../helpers/backtest_signal.js";
+import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
 import { renderTraderProposal } from "../helpers/render.js";
 import { normalizeChineseManagerTerms } from "../helpers/role_terms.js";
 import { invokeStructuredOrFreetext } from "../helpers/structured_output.js";
@@ -61,10 +63,14 @@ export function createTraderNode(opts: TraderNodeOptions) {
 
     const systemMessage = buildTraderSystemMessage(ctx);
 
+    // Inject memory context (graceful no-op when memory is empty).
+    const memorySection = buildMemoryPromptSection(state, { role: "trader" }, ctx.language);
+    const enrichedSystem = injectMemoryPromptSection(systemMessage, memorySection);
+
     const { rendered, structured: _structured } = await invokeStructuredOrFreetext<TraderProposal>({
       llm: opts.llm,
       schema: TraderProposalSchema,
-      messages: [new SystemMessage(systemMessage), new HumanMessage(contextMessage)],
+      messages: [new SystemMessage(enrichedSystem), new HumanMessage(contextMessage)],
       render: (proposal: TraderProposal) =>
         renderTraderProposal(proposal, {
           language: ctx.language,
@@ -89,8 +95,12 @@ export function createTraderNode(opts: TraderNodeOptions) {
     return {
       messages: [new AIMessage(postProcessed)],
       trader_allocation_plan: postProcessed,
-      // TODO sub-step 2.6: build_trader_backtest_signal from `structured`
-      trader_backtest_signal: {},
+      trader_backtest_signal: buildTraderBacktestSignal(
+        ticker,
+        state.trade_date ?? "",
+        postProcessed,
+        _structured,
+      ) as unknown as Record<string, unknown>,
       sender: "Trader",
     };
   };

@@ -21,7 +21,9 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-PYTHON = str(PROJECT_ROOT / ".venv" / "bin" / "python")
+# Prefer ETFAGENTS_PYTHON env var (set by tsplan §1.3 contract),
+# fall back to the current interpreter (works in CI, venvs, and system Python).
+PYTHON = os.environ.get("ETFAGENTS_PYTHON") or sys.executable
 
 
 class BridgeProtocolTests(unittest.TestCase):

@@ -97,10 +97,10 @@ export function createLlmFromConfig(config: EtfAgentsConfig, options: LlmOptions
   }
 
   const model = options.model ?? pickModel(config, options.tier ?? "deep");
-  const baseUrl =
-    options.baseUrl ??
-    (config.backend_url as string | null | undefined) ??
-    DEFAULT_BASE_URL[provider];
+  const rawBackendUrl = config.backend_url;
+  const backendUrl =
+    typeof rawBackendUrl === "string" && rawBackendUrl.trim() ? rawBackendUrl.trim() : undefined;
+  const baseUrl = options.baseUrl ?? backendUrl ?? DEFAULT_BASE_URL[provider];
 
   const apiKey = pickApiKey(provider);
   const requiresKey = (API_KEY_ENV[provider] ?? []).length > 0;

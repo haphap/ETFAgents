@@ -3,13 +3,20 @@
 ## User Guide
 
 | Document | Description |
-|----------|-------------|
-| [usage.md](usage.md) | CLI command reference and Python API — analysis, backtest, cache, watchlist, detail, paper trading, memory, model recommendation, validation, checkpoint, LLM providers, configuration |
+|---|---|
+| [usage.md](usage.md) | CLI command reference — TypeScript CLI (analyze, backtest, paper, detail, cache, TUI) and Python CLI |
 
-## Developer Notes
+## Architecture & Development
 
 | Document | Description |
-|----------|-------------|
-| [bridge.md](bridge.md) | JSON-RPC sidecar protocol used by the TypeScript CLI to drive the Python codebase as a black box. Includes a 100-line client demo. |
-| [recent-backtesting-and-memory-notes.md](recent-backtesting-and-memory-notes.md) | Delivery summary of backtesting and memory system |
+|---|---|
+| [bridge.md](bridge.md) | JSON-RPC sidecar protocol — TypeScript ↔ Python communication |
+| [../tsplan.md](../tsplan.md) | Python → TypeScript migration plan with sub-step tracking |
+| [../ts/README.md](../ts/README.md) | TypeScript project layout, development commands, testing |
+
+## Design Notes
+
+| Document | Description |
+|---|---|
+| [recent-backtesting-and-memory-notes.md](recent-backtesting-and-memory-notes.md) | Backtesting and memory system design |
 | [plan_hk_etf_research_enhancement.md](plan_hk_etf_research_enhancement.md) | Hong Kong ETF research enhancement plan |

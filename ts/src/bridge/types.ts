@@ -189,6 +189,34 @@ export class BridgeApi {
     return this.client.call<PaperTrade[]>("paper.get_trades", opts);
   }
 
+  paperRegister(username: string, opts: { db_path?: string } = {}): Promise<unknown> {
+    return this.client.call("paper.register", { username, ...opts });
+  }
+
+  paperLogin(username: string, opts: { db_path?: string } = {}): Promise<unknown> {
+    return this.client.call("paper.login", { username, ...opts });
+  }
+
+  paperLogout(opts: { db_path?: string } = {}): Promise<unknown> {
+    return this.client.call("paper.logout", opts);
+  }
+
+  paperBuy(
+    ticker: string,
+    quantity: number,
+    opts: { user_id?: string; db_path?: string } = {},
+  ): Promise<unknown> {
+    return this.client.call("paper.buy", { ticker, quantity, ...opts });
+  }
+
+  paperSell(
+    ticker: string,
+    quantity: number,
+    opts: { user_id?: string; db_path?: string } = {},
+  ): Promise<unknown> {
+    return this.client.call("paper.sell", { ticker, quantity, ...opts });
+  }
+
   // backtest.*
   backtestRunCandidatePool(params: BacktestRunParams): Promise<BacktestResult> {
     return this.client.call<BacktestResult>("backtest.run_candidate_pool", params);
