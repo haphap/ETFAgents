@@ -9,6 +9,7 @@
   },
   "scripts": {
     "dev": "tsx src/cli/index.ts",
+    "tui": "tsx src/tui/index.tsx",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/cli/index.js",
     "test": "vitest run",

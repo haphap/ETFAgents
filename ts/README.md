@@ -20,7 +20,7 @@ pnpm dev paper account                   # paper trading
 ## TUI
 
 ```bash
-pnpm dev tui
+pnpm tui
 ```
 
 Interactive terminal UI with tab routing (Research / Results / Cache).
