@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * etfagents-ts TUI — Phase-based flow.
+ * etfagents-ts TUI — Dashboard-style analysis console.
  *
- * Flow: ticker input → config modal → analysis → results.
- * Flicker-free: uses flexGrow instead of fixed height, stable layout.
+ * Flow: ticker input → config modal → dashboard (analysis + results).
+ * Layout: [Banner] [Left sidebar 25ch | Right workspace] [Status bar]
  */
 
 import { Box, render, Text, useInput } from "ink";
@@ -55,8 +55,17 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
 // State
 // ===========================================================================
 
-type Phase = "ticker" | "config" | "analyzing" | "results" | "error";
+type Phase = "ticker" | "config" | "dashboard";
 type ConfigField = "date" | "provider" | "model";
+
+/** Pipeline stage counts for the dashboard status cards. */
+interface PipelineProgress {
+  analysts: { done: number; total: number };
+  research: { done: number; total: number };
+  risk: { done: number; total: number };
+  decision: { done: number; total: number };
+  total: number;
+}
 
 interface AppState {
   phase: Phase;
@@ -64,20 +73,17 @@ interface AppState {
   date: string;
   provider: string;
   model: string;
-  /** Config modal focus */
+  /** Config modal state */
   focus: ConfigField;
-  /** Which field's dropdown is open */
   selectOpen: ConfigField | null;
   selectIdx: number;
-  /** Analysis results */
+  /** Dashboard state */
+  status: "idle" | "running" | "done" | "error";
   result: string;
   errorMsg: string;
-  /**
-   * vllm dynamic models.
-   * null = not yet fetched (triggers discovery on next tick),
-   * []  = fetch failed or empty (shows free-text input),
-   * [...models] = fetched successfully (shows dropdown).
-   */
+  logs: string[];
+  progress: PipelineProgress;
+  /** vllm */
   vllmModels: string[] | null;
 }
 
@@ -94,6 +100,7 @@ type Action =
   | { type: "selectDown" }
   | { type: "selectPick" }
   | { type: "startAnalysis" }
+  | { type: "appendLog"; msg: string }
   | { type: "analysisDone"; result: string }
   | { type: "analysisError"; msg: string }
   | { type: "backToTicker" }
@@ -108,6 +115,14 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+const INIT_PROGRESS: PipelineProgress = {
+  analysts: { done: 0, total: 6 },
+  research: { done: 0, total: 2 },
+  risk: { done: 0, total: 2 },
+  decision: { done: 0, total: 1 },
+  total: 11,
+};
+
 function initState(): AppState {
   return {
     phase: "ticker",
@@ -118,8 +133,11 @@ function initState(): AppState {
     focus: "date",
     selectOpen: null,
     selectIdx: 0,
+    status: "idle",
     result: "",
     errorMsg: "",
+    logs: [],
+    progress: { ...INIT_PROGRESS },
     vllmModels: null,
   };
 }
@@ -175,8 +193,7 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, ticker: state.ticker + action.char };
     case "deleteTicker":
       return { ...state, ticker: state.ticker.slice(0, -1) };
-    case "openConfig": {
-      // Reset config state when entering config
+    case "openConfig":
       return {
         ...state,
         phase: "config",
@@ -185,8 +202,11 @@ function reducer(state: AppState, action: Action): AppState {
         selectIdx: 0,
         vllmModels: null,
         errorMsg: "",
+        status: "idle",
+        logs: [],
+        result: "",
+        progress: { ...INIT_PROGRESS },
       };
-    }
     case "setFocus":
       return {
         ...state,
@@ -197,13 +217,7 @@ function reducer(state: AppState, action: Action): AppState {
     case "appendChar": {
       if (state.selectOpen !== null) return state;
       const key = state.focus;
-      const next = focusValue(state) + action.char;
-      // Clear vllmModels when user types away from vllm provider
-      return {
-        ...state,
-        [key]: next,
-        ...(key === "provider" && next.toLowerCase() !== "vllm" ? { vllmModels: null } : {}),
-      };
+      return { ...state, [key]: focusValue(state) + action.char };
     }
     case "deleteChar": {
       if (state.selectOpen !== null) return state;
@@ -246,28 +260,36 @@ function reducer(state: AppState, action: Action): AppState {
         state.selectOpen === "provider" && newProvider.toLowerCase() !== "vllm"
           ? null
           : state.vllmModels;
-      return {
-        ...state,
-        [state.selectOpen]: value,
-        selectOpen: null,
-        selectIdx: 0,
-        vllmModels,
-      };
+      return { ...state, [state.selectOpen]: value, selectOpen: null, selectIdx: 0, vllmModels };
     }
     case "startAnalysis":
-      return { ...state, phase: "analyzing", result: "", errorMsg: "" };
-    case "analysisDone":
-      return { ...state, phase: "results", result: action.result };
-    case "analysisError":
-      return { ...state, phase: "error", errorMsg: action.msg };
-    case "backToTicker":
       return {
         ...state,
-        phase: "ticker",
+        phase: "dashboard",
+        status: "running",
+        result: "",
         errorMsg: "",
-        selectOpen: null,
-        selectIdx: 0,
+        logs: [],
       };
+    case "appendLog":
+      return { ...state, logs: [...state.logs, action.msg] };
+    case "analysisDone":
+      return {
+        ...state,
+        status: "done",
+        result: action.result,
+        progress: {
+          analysts: { done: 6, total: 6 },
+          research: { done: 2, total: 2 },
+          risk: { done: 2, total: 2 },
+          decision: { done: 1, total: 1 },
+          total: 11,
+        },
+      };
+    case "analysisError":
+      return { ...state, status: "error", errorMsg: action.msg };
+    case "backToTicker":
+      return { ...state, phase: "ticker", errorMsg: "", selectOpen: null, selectIdx: 0 };
     case "vllmModelsFetched":
       return { ...state, vllmModels: action.models };
     case "vllmModelsFailed":
@@ -304,12 +326,14 @@ async function fetchVllmModels(dispatch: (action: Action) => void) {
 // ===========================================================================
 
 async function runAnalysis(state: AppState, dispatch: (action: Action) => void) {
+  dispatch({ type: "appendLog", msg: `▶ 开始分析 ${state.ticker}` });
   try {
     const [{ HumanMessage }] = await Promise.all([import("@langchain/core/messages")]);
     const { BridgeApi, BridgeClient, pickBridgeTools } = await import("../bridge/index.js");
     const { buildMiniSpineGraph } = await import("../graph/mini_spine.js");
     const { createLlmFromConfig } = await import("../llm/factory.js");
 
+    dispatch({ type: "appendLog", msg: "  ── 连接 Bridge…" });
     const client = new BridgeClient();
     await client.start();
     try {
@@ -318,6 +342,11 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
       const llmOpts: LlmOptions = { tier: "deep" };
       if (state.provider) llmOpts.provider = state.provider;
       if (state.model) llmOpts.model = state.model;
+      dispatch({
+        type: "appendLog",
+        msg: `  ── LLM: ${llmOpts.provider ?? config.llm_provider}/${llmOpts.model ?? "default"}`,
+      });
+
       const llmHandle = createLlmFromConfig(config, llmOpts);
 
       const tools = await pickBridgeTools(api, [
@@ -326,6 +355,7 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
         "get_etf_share",
         "get_etf_nav",
       ]);
+      dispatch({ type: "appendLog", msg: `  ── 已加载 ${tools.length} 个数据工具` });
 
       const charLimit = Number(config.report_context_char_limit);
       const promptContext = {
@@ -335,6 +365,7 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
           : {}),
       };
 
+      dispatch({ type: "appendLog", msg: "  ── 启动 6-analyst pipeline…" });
       const graph = buildMiniSpineGraph({
         llm: llmHandle.llm,
         marketFlowTools: tools,
@@ -346,6 +377,7 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
         trade_date: state.date,
       });
 
+      dispatch({ type: "appendLog", msg: "  ✓ Pipeline 完成" });
       dispatch({
         type: "analysisDone",
         result: String(final.trader_allocation_plan ?? "(no plan)"),
@@ -354,8 +386,8 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
       await client.close();
     }
   } catch (err) {
-    console.error("Analysis failed:", err);
     const msg = (err as Error).message;
+    dispatch({ type: "appendLog", msg: `  ✗ 错误: ${msg.slice(0, 120)}` });
     dispatch({
       type: "analysisError",
       msg:
@@ -373,7 +405,7 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
 function App() {
   const [state, dispatch] = useReducer(reducer, undefined, initState);
 
-  // Refs to stabilize useInput callback — prevents flicker
+  // Refs to stabilize useInput callback
   const stateRef = useRef(state);
   stateRef.current = state;
   const dispatchRef = useRef(dispatch);
@@ -392,6 +424,26 @@ function App() {
     }
   }, [state.provider, state.vllmModels]);
 
+  // Elapsed timer for dashboard
+  const [elapsed, setElapsed] = useState(0);
+  const startTimeRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (state.phase === "dashboard" && state.status === "running") {
+      startTimeRef.current = Date.now();
+      const id = setInterval(() => {
+        if (startTimeRef.current)
+          setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+      }, 1000);
+      return () => clearInterval(id);
+    }
+    if (state.status === "done" || state.status === "error") {
+      startTimeRef.current = null;
+    }
+    startTimeRef.current = null;
+    setElapsed(0);
+    return undefined;
+  }, [state.phase, state.status]);
+
   useInput((input, key) => {
     const s = stateRef.current;
     const d = dispatchRef.current;
@@ -402,14 +454,14 @@ function App() {
         d({ type: "backToTicker" });
         return;
       }
-      if (s.phase === "error" || s.phase === "results") {
+      if (s.phase === "dashboard") {
         d({ type: "backToTicker" });
         return;
       }
       process.exit(0);
     }
 
-    // --- Ticker phase ---
+    // Ticker phase
     if (s.phase === "ticker") {
       if (key.return && s.ticker) {
         d({ type: "openConfig" });
@@ -425,9 +477,8 @@ function App() {
       return;
     }
 
-    // --- Config phase ---
+    // Config phase
     if (s.phase === "config") {
-      // Dropdown is open
       if (s.selectOpen !== null) {
         if (key.upArrow) {
           d({ type: "selectUp" });
@@ -447,64 +498,39 @@ function App() {
         }
         d({ type: "closeSelect" });
       }
-
       if (key.tab) {
         d({ type: "setFocus", focus: nextFocus(s.focus) });
         return;
       }
-
       if (key.return) {
         if (isSelectField(s, s.focus)) {
           d({ type: "openSelect" });
         } else {
-          // Enter on date field or when all config done: start analysis
           d({ type: "startAnalysis" });
           runAnalysis(s, d);
         }
         return;
       }
-
       if (key.downArrow && isSelectField(s, s.focus)) {
         d({ type: "openSelect" });
         return;
       }
-
       if (key.backspace || key.delete) {
         d({ type: "deleteChar" });
         return;
       }
-
       if (input.length === 1 && /[a-zA-Z0-9._\-\u4e00-\u9fff/:]/.test(input)) {
         d({ type: "appendChar", char: input });
       }
-      return;
     }
 
-    // --- Error phase ---
-    if (s.phase === "error" || s.phase === "results") {
-      if (key.return || key.escape) {
+    // Dashboard phase
+    if (s.phase === "dashboard") {
+      if (key.return && (s.status === "done" || s.status === "error")) {
         d({ type: "backToTicker" });
       }
     }
   });
-
-  // Spinner for analyzing phase
-  const [spinnerTick, setSpinnerTick] = useState(0);
-  const spinnerRef = useRef<NodeJS.Timeout | null>(null);
-  useEffect(() => {
-    if (state.phase === "analyzing") {
-      spinnerRef.current = setInterval(() => setSpinnerTick((t) => t + 1), 100);
-    } else {
-      if (spinnerRef.current) clearInterval(spinnerRef.current);
-      spinnerRef.current = null;
-      setSpinnerTick(0);
-    }
-    return () => {
-      if (spinnerRef.current) clearInterval(spinnerRef.current);
-    };
-  }, [state.phase]);
-  const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-  const spinner = spinnerFrames[spinnerTick % spinnerFrames.length] ?? " ";
 
   return (
     <Box flexDirection="column" padding={1} flexGrow={1}>
@@ -517,43 +543,35 @@ function App() {
         ))}
       </Box>
 
-      {/* Content — fills remaining space */}
-      <Box flexDirection="column" borderStyle="single" padding={1} flexGrow={1}>
+      {/* Content */}
+      <Box flexDirection="row" flexGrow={1} borderStyle="single">
         {state.phase === "ticker" && <TickerScreen state={state} />}
         {state.phase === "config" && <ConfigModal state={state} />}
-        {state.phase === "analyzing" && (
-          <Box flexDirection="column">
-            <Text bold>Analysis Running</Text>
-            <Box marginY={1}>
-              <Text color="cyan">
-                {spinner} Analyzing {state.ticker}…
-              </Text>
-            </Box>
-            <Text dimColor>Date: {state.date}</Text>
-            {state.provider ? <Text dimColor>Provider: {state.provider}</Text> : null}
-            {state.model ? <Text dimColor>Model: {state.model}</Text> : null}
-          </Box>
-        )}
-        {state.phase === "results" && <ResultsScreen state={state} />}
-        {state.phase === "error" && <ErrorScreen state={state} />}
+        {state.phase === "dashboard" && <Dashboard state={state} elapsed={elapsed} />}
       </Box>
 
       {/* Footer */}
       <Box marginTop={1}>
         <Text dimColor>
           {state.phase === "ticker"
-            ? "Enter ticker code and press Enter"
+            ? "Enter ticker → Enter  [Esc] quit"
             : state.phase === "config"
               ? "[Tab] next  [↑↓] pick  [Enter] select/run  [Esc] back"
-              : state.phase === "analyzing"
-                ? "Running analysis pipeline…"
-                : state.phase === "error"
-                  ? "Connection failed — press Enter to retry"
-                  : "Press Enter to analyze another ticker"}
+              : state.status === "running"
+                ? `◎ Agents ${state.progress.analysts.done}/${state.progress.analysts.total} · 分析中  |  LLM ···  Tools ···  Reports ${state.progress.total - state.progress.decision.done}/${state.progress.total}  ${fmtElapsed(elapsed)}`
+                : state.status === "error"
+                  ? `◎ Error  |  [Enter] back  [q] quit  ${fmtElapsed(elapsed)}`
+                  : `◎ Done  |  [Enter] new analysis  [q] quit  ${fmtElapsed(elapsed)}`}
         </Text>
       </Box>
     </Box>
   );
+}
+
+function fmtElapsed(s: number): string {
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
 // ===========================================================================
@@ -565,10 +583,8 @@ function TickerScreen({ state }: { state: AppState }) {
     <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
       <Text bold>Enter ETF Ticker</Text>
       <Box marginY={1}>
-        <Text>
-          <Text dimColor>{"> "}</Text>
-          <Text color="yellow">{state.ticker || "▌"}</Text>
-        </Text>
+        <Text dimColor>{"> "}</Text>
+        <Text color="yellow">{state.ticker || "▌"}</Text>
       </Box>
       <Text dimColor>e.g. 510300.SH, 159915.SZ</Text>
       <Box marginTop={1}>
@@ -594,7 +610,6 @@ function ConfigModal({ state }: { state: AppState }) {
           <Text bold>Research Configuration</Text>
           <Text dimColor> — {state.ticker}</Text>
         </Box>
-
         <FieldRow label="Date" value={state.date} focused={focus("date")} hint="YYYY-MM-DD" />
         <SelectFieldRow
           label="Provider"
@@ -634,13 +649,8 @@ function ConfigModal({ state }: { state: AppState }) {
             }
           />
         )}
-
         <Box marginTop={1} justifyContent="center">
-          <Text color="green">
-            {state.focus === "model" && !isSelectField(state, "model")
-              ? "Press Enter to run"
-              : "Fill config, press Enter on Date to run"}
-          </Text>
+          <Text color="green">Press Enter on Date to run analysis</Text>
         </Box>
       </Box>
     </Box>
@@ -720,34 +730,190 @@ function SelectFieldRow({
 }
 
 // ===========================================================================
-// Results / Error
+// Dashboard: left sidebar + right workspace
 // ===========================================================================
 
-function ResultsScreen({ state }: { state: AppState }) {
-  const lines = state.result.split("\n").slice(0, 40);
+function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
+  const p = state.progress;
+
   return (
-    <Box flexDirection="column">
-      <Text bold>Results — {state.ticker}</Text>
-      <Box marginY={1} flexDirection="column">
-        {lines.map((line, i) => (
-          /* biome-ignore lint/suspicious/noArrayIndexKey: static snapshot */
-          <Text key={i}>{line.slice(0, 120)}</Text>
-        ))}
+    <Box flexDirection="row" flexGrow={1}>
+      {/* Left sidebar — 26 chars */}
+      <Box flexDirection="column" width={26} borderStyle="single" paddingX={1}>
+        {/* Basic info */}
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold>📊 基本信息</Text>
+          <Text>{state.ticker || "—"}</Text>
+          <Text dimColor>{state.date}</Text>
+          {state.status === "error" ? (
+            <Text color="red">分析失败</Text>
+          ) : state.status === "done" ? (
+            <Text color="green">分析完成</Text>
+          ) : (
+            <Text color="yellow">分析中…</Text>
+          )}
+        </Box>
+
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold>📋 分析参数</Text>
+          <Text dimColor>日期: {state.date}</Text>
+          <Text dimColor>提供商: {state.provider || "—"}</Text>
+          <Text dimColor>模型: {state.model || "—"}</Text>
+        </Box>
+
+        {/* Cancel button */}
+        <Box marginBottom={1}>
+          {state.status === "running" ? (
+            <Text dimColor>[ 取消分析 ]</Text>
+          ) : (
+            <Text dimColor>[ 分析已结束 ]</Text>
+          )}
+        </Box>
+
+        {/* Research queue */}
+        <Box flexDirection="column" flexGrow={1}>
+          <Text bold>🧠 研究队列</Text>
+          <Text dimColor>
+            状态: {state.status === "error" ? "🔴" : state.status === "done" ? "🟢" : "🟡"}{" "}
+            {p.analysts.done}/{p.analysts.total}
+            {state.status === "error"
+              ? " 有失败"
+              : state.status === "done"
+                ? " 已全部完成"
+                : " 进行中"}
+          </Text>
+          <Box flexDirection="column" marginTop={1}>
+            <QueueItem
+              label="分析师团队"
+              done={p.analysts.done}
+              total={p.analysts.total}
+              status={state.status}
+            />
+            <QueueItem
+              label="研究方向"
+              done={p.research.done}
+              total={p.research.total}
+              status={state.status}
+            />
+            <QueueItem
+              label="风险评估"
+              done={p.risk.done}
+              total={p.risk.total}
+              status={state.status}
+            />
+            <QueueItem
+              label="最终决策"
+              done={p.decision.done}
+              total={p.decision.total}
+              status={state.status}
+            />
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Right workspace */}
+      <Box flexDirection="column" flexGrow={1} padding={1}>
+        {/* Status cards */}
+        <Box marginBottom={1}>
+          <StatusCard label="📊 分析团队" done={p.analysts.done} total={p.analysts.total} />
+          <Text> </Text>
+          <StatusCard label="📖 研究" done={p.research.done} total={p.research.total} />
+          <Text> </Text>
+          <StatusCard label="⚠ 风险" done={p.risk.done} total={p.risk.total} />
+          <Text> </Text>
+          <StatusCard label="🎯 决策" done={p.decision.done} total={p.decision.total} />
+        </Box>
+
+        {/* Main content: logs + results */}
+        <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1}>
+          <Text bold>整体进度</Text>
+          <Box flexDirection="column" marginTop={1}>
+            {state.logs.length > 0 ? (
+              state.logs.map((log, i) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
+                <Text key={`${i}`} dimColor={log.startsWith("  ──") || log.startsWith("  ✓")}>
+                  {log}
+                </Text>
+              ))
+            ) : (
+              <Text dimColor>等待分析启动…</Text>
+            )}
+            {/* Results when done */}
+            {state.status === "done" && state.result ? (
+              <Box flexDirection="column" marginTop={1}>
+                <Box>
+                  <Text bold color="green">
+                    ── 分析结果 ──
+                  </Text>
+                </Box>
+                {state.result
+                  .split("\n")
+                  .slice(0, 30)
+                  .map((line, i) => (
+                    /* biome-ignore lint/suspicious/noArrayIndexKey: static snapshot */
+                    <Text key={`r${i}`}>{line.slice(0, 120)}</Text>
+                  ))}
+              </Box>
+            ) : null}
+            {/* Error */}
+            {state.status === "error" && (
+              <Box marginTop={1}>
+                <Text color="red">{state.errorMsg.slice(0, 120)}</Text>
+              </Box>
+            )}
+          </Box>
+        </Box>
+
+        {/* Footer hint */}
+        <Box marginTop={1}>
+          <Text dimColor>
+            {state.status === "running"
+              ? `${fmtElapsed(elapsed)}  [?]帮助 [s]设置 [q]退出`
+              : state.status === "error"
+                ? `${fmtElapsed(elapsed)}  [Enter]重新分析 [?]帮助 [q]退出`
+                : `${fmtElapsed(elapsed)}  [Enter]新分析 [?]帮助 [q]退出`}
+          </Text>
+        </Box>
       </Box>
     </Box>
   );
 }
 
-function ErrorScreen({ state }: { state: AppState }) {
+function QueueItem({
+  label,
+  done,
+  total,
+  status,
+}: {
+  label: string;
+  done: number;
+  total: number;
+  status: string;
+}) {
+  const icon = status === "done" ? "✓" : status === "error" ? "✗" : "○";
+  const color = status === "done" ? "green" : status === "error" ? "red" : "yellow";
   return (
-    <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
-      <Text bold color="red">
-        Error
+    <Text>
+      <Text color={color}>
+        {icon} {label}
       </Text>
-      <Box marginY={1}>
-        <Text>{state.errorMsg}</Text>
-      </Box>
-      <Text dimColor>Press Enter to go back</Text>
+      <Text dimColor>
+        {" "}
+        {done}/{total}
+      </Text>
+    </Text>
+  );
+}
+
+function StatusCard({ label, done, total }: { label: string; done: number; total: number }) {
+  const allDone = done === total && total > 0;
+  const color = allDone ? "green" : "yellow";
+  return (
+    <Box flexDirection="column" borderStyle="single" paddingX={1}>
+      <Text>{label}</Text>
+      <Text color={color}>
+        {done}/{total}
+      </Text>
     </Box>
   );
 }
