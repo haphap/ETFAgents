@@ -7,7 +7,7 @@
  */
 
 import { Box, render, Text, useInput, useStdout } from "ink";
-import { useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef } from "react";
 
 // ===========================================================================
 // Banner — standard FIGlet font for readability
@@ -72,6 +72,8 @@ interface AppState {
   selectOpen: ResearchField | null;
   /** Highlighted index in the open dropdown. */
   selectIdx: number;
+  /** Dynamically fetched vllm models (null = not fetched yet, [] = fetch failed). */
+  vllmModels: string[] | null;
 }
 
 type Action =
@@ -87,7 +89,9 @@ type Action =
   | { type: "closeSelect" }
   | { type: "selectUp" }
   | { type: "selectDown" }
-  | { type: "selectPick" };
+  | { type: "selectPick" }
+  | { type: "vllmModelsFetched"; models: string[] }
+  | { type: "vllmModelsFailed" };
 
 // ===========================================================================
 // Helpers
@@ -111,6 +115,7 @@ function initState(): AppState {
     cacheOutput: "",
     selectOpen: null,
     selectIdx: 0,
+    vllmModels: null,
   };
 }
 
@@ -131,20 +136,24 @@ function selectOptions(state: AppState): string[] {
   if (state.selectOpen === "provider") return [...PROVIDERS];
   if (state.selectOpen === "model") {
     const p = state.provider.toLowerCase();
+    if (p === "vllm") return state.vllmModels ?? [];
     return MODELS_BY_PROVIDER[p] ?? [];
   }
   return [];
 }
 
-/** Whether the model field has predefined options (not free-text). */
-function modelHasOptions(provider: string): boolean {
-  return (MODELS_BY_PROVIDER[provider.toLowerCase()]?.length ?? 0) > 0;
+/** Whether the model field has options (including dynamically fetched vllm). */
+function modelHasOptions(state: AppState): boolean {
+  if (!state.provider) return false;
+  const p = state.provider.toLowerCase();
+  if (p === "vllm") return (state.vllmModels?.length ?? 0) > 0;
+  return (MODELS_BY_PROVIDER[p]?.length ?? 0) > 0;
 }
 
 /** Whether a field is a select field (has dropdown). Model is only select when it has options. */
 function isSelectField(state: AppState, field: ResearchField): boolean {
   if (field === "provider") return true;
-  if (field === "model") return state.provider ? modelHasOptions(state.provider) : false;
+  if (field === "model") return modelHasOptions(state);
   return false;
 }
 
@@ -214,6 +223,9 @@ function reducer(state: AppState, action: Action): AppState {
       // When provider changes, clear model so user re-picks
       const provider = state.selectOpen === "provider" ? value : state.provider;
       const model = state.selectOpen === "model" ? value : state.model;
+      // Reset vllm models when switching away from vllm
+      const vllmModels =
+        state.selectOpen === "provider" && value.toLowerCase() !== "vllm" ? null : state.vllmModels;
       return {
         ...state,
         [state.selectOpen]: value,
@@ -221,6 +233,7 @@ function reducer(state: AppState, action: Action): AppState {
         model,
         selectOpen: null,
         selectIdx: 0,
+        vllmModels,
       };
     }
     case "startAnalysis":
@@ -231,7 +244,35 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, status: "error", errorMsg: action.msg };
     case "cacheResult":
       return { ...state, cacheOutput: action.output };
+    case "vllmModelsFetched":
+      return { ...state, vllmModels: action.models };
+    case "vllmModelsFailed":
+      return { ...state, vllmModels: [] };
   }
+}
+
+// ===========================================================================
+// vllm model discovery
+// ===========================================================================
+
+const VLLM_URLS = ["http://127.0.0.1:8020/v1/models", "http://localhost:8000/v1/models"];
+
+async function fetchVllmModels(dispatch: (action: Action) => void) {
+  for (const url of VLLM_URLS) {
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) continue;
+      const data = (await res.json()) as { data?: { id: string }[] };
+      const models = (data.data ?? []).map((m) => m.id);
+      if (models.length > 0) {
+        dispatch({ type: "vllmModelsFetched", models });
+        return;
+      }
+    } catch {
+      // try next URL
+    }
+  }
+  dispatch({ type: "vllmModelsFailed" });
 }
 
 // ===========================================================================
@@ -248,6 +289,22 @@ function App() {
   stateRef.current = state;
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
+
+  // Fetch vllm models from API when provider changes to vllm
+  const vllmFetchedRef = useRef(false);
+  useEffect(() => {
+    if (state.provider.toLowerCase() === "vllm" && state.vllmModels === null) {
+      if (vllmFetchedRef.current) return;
+      vllmFetchedRef.current = true;
+      const fetchModels = async () => {
+        await fetchVllmModels(dispatch);
+      };
+      fetchModels();
+    }
+    if (state.provider.toLowerCase() !== "vllm") {
+      vllmFetchedRef.current = false;
+    }
+  }, [state.provider, state.vllmModels]);
 
   useInput((input, key) => {
     const s = stateRef.current;
@@ -390,7 +447,8 @@ function App() {
 // ===========================================================================
 
 function ResearchScreen({ state }: { state: AppState }) {
-  const showModelSelect = state.provider ? modelHasOptions(state.provider) : false;
+  const showModelSelect = modelHasOptions(state);
+  const vllmPending = state.provider?.toLowerCase() === "vllm" && state.vllmModels === null;
 
   return (
     <Box flexDirection="column">
@@ -425,10 +483,19 @@ function ResearchScreen({ state }: { state: AppState }) {
             value={state.model}
             focused={state.focus === "model"}
             open={state.selectOpen === "model"}
-            options={MODELS_BY_PROVIDER[state.provider.toLowerCase()] ?? []}
+            options={
+              state.provider.toLowerCase() === "vllm"
+                ? (state.vllmModels ?? [])
+                : (MODELS_BY_PROVIDER[state.provider.toLowerCase()] ?? [])
+            }
             selectedIdx={state.selectIdx}
             hint="Choose model"
           />
+        ) : vllmPending ? (
+          <Box>
+            <Text dimColor>{"Model".padEnd(10)}</Text>
+            <Text color="yellow">Fetching models from vllm…</Text>
+          </Box>
         ) : (
           <FieldRow
             label="Model"
