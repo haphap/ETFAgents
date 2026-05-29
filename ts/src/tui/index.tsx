@@ -113,6 +113,14 @@ interface AppState {
   sectionDone: Set<string>;
   /** Stats from analysis runner */
   stats: { llm_calls: number; tool_calls: number; tokens: number };
+  /** ETF detail loaded from bridge (basic info card) */
+  etfDetail: {
+    name?: string;
+    close?: number;
+    pctChg?: number;
+    loading: boolean;
+    error?: string;
+  } | null;
   /** vllm */
   vllmModels: string[] | null;
 }
@@ -135,6 +143,9 @@ type Action =
   | { type: "analysisDone"; result: string }
   | { type: "analysisError"; msg: string }
   | { type: "backToTicker" }
+  | { type: "etfDetailLoading" }
+  | { type: "etfDetailLoaded"; name?: string; close?: number; pctChg?: number }
+  | { type: "etfDetailError"; error: string }
   | { type: "vllmModelsFetched"; models: string[] }
   | { type: "vllmModelsFailed" };
 
@@ -162,6 +173,7 @@ function initState(): AppState {
     logs: [],
     sectionDone: new Set(),
     stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
+    etfDetail: null,
     vllmModels: null,
   };
 }
@@ -307,6 +319,20 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, status: "error", errorMsg: action.msg };
     case "backToTicker":
       return { ...state, phase: "ticker", errorMsg: "", selectOpen: null, selectIdx: 0 };
+    case "etfDetailLoading":
+      return { ...state, etfDetail: { loading: true } };
+    case "etfDetailLoaded":
+      return {
+        ...state,
+        etfDetail: {
+          loading: false,
+          ...(action.name !== undefined ? { name: action.name } : {}),
+          ...(action.close !== undefined ? { close: action.close } : {}),
+          ...(action.pctChg !== undefined ? { pctChg: action.pctChg } : {}),
+        },
+      };
+    case "etfDetailError":
+      return { ...state, etfDetail: { loading: false, error: action.error } };
     case "vllmModelsFetched":
       return { ...state, vllmModels: action.models };
     case "vllmModelsFailed":
@@ -417,6 +443,43 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
 }
 
 // ===========================================================================
+// ETF detail loading
+// ===========================================================================
+
+async function loadEtfDetail(ticker: string, date: string, dispatch: (action: Action) => void) {
+  try {
+    const { BridgeApi, BridgeClient } = await import("../bridge/index.js");
+    const client = new BridgeClient();
+    await client.start();
+    try {
+      const api = new BridgeApi(client);
+      const result = await api.toolsCall("get_etf_price_data", {
+        ticker,
+        start_date: date,
+        end_date: date,
+      });
+      const raw = JSON.parse(result.text) as { rows?: Array<Record<string, unknown>> };
+      const rows = raw?.rows ?? [];
+      const last = rows[rows.length - 1];
+      if (last) {
+        dispatch({
+          type: "etfDetailLoaded",
+          ...(typeof last.name === "string" ? { name: last.name } : {}),
+          ...(typeof last.close === "number" ? { close: last.close } : {}),
+          ...(typeof last.pct_chg === "number" ? { pctChg: last.pct_chg } : {}),
+        });
+      } else {
+        dispatch({ type: "etfDetailLoaded", name: ticker });
+      }
+    } finally {
+      await client.close();
+    }
+  } catch (err) {
+    dispatch({ type: "etfDetailError", error: (err as Error).message });
+  }
+}
+
+// ===========================================================================
 // App
 // ===========================================================================
 
@@ -456,6 +519,19 @@ function App() {
     setElapsed(0);
     return undefined;
   }, [state.phase, state.status]);
+
+  // Load ETF detail when dashboard starts
+  const detailLoadedRef = useRef(false);
+  useEffect(() => {
+    if (state.phase === "dashboard" && state.ticker && !detailLoadedRef.current) {
+      detailLoadedRef.current = true;
+      dispatch({ type: "etfDetailLoading" });
+      loadEtfDetail(state.ticker, state.date, dispatch);
+    }
+    if (state.phase !== "dashboard") {
+      detailLoadedRef.current = false;
+    }
+  }, [state.phase, state.ticker, state.date]);
 
   useInput((input, key) => {
     const s = stateRef.current;
@@ -741,8 +817,34 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
           {/* ETF card */}
           <Box flexDirection="column" marginBottom={1}>
             <Text bold>📊 基本信息</Text>
-            <Text>{state.ticker}</Text>
-            <Text dimColor>{state.date}</Text>
+            {state.etfDetail?.loading ? (
+              <Text dimColor>加载中…</Text>
+            ) : state.etfDetail?.error ? (
+              <Text color="red">{state.etfDetail.error.slice(0, 18)}</Text>
+            ) : (
+              <>
+                <Text>{state.etfDetail?.name || state.ticker}</Text>
+                {state.etfDetail?.close !== undefined && (
+                  <Text>
+                    现价: <Text bold>{state.etfDetail.close.toFixed(3)}</Text>
+                    {state.etfDetail.pctChg !== undefined && (
+                      <Text
+                        {...(state.etfDetail.pctChg > 0
+                          ? { color: "red" as const }
+                          : state.etfDetail.pctChg < 0
+                            ? { color: "green" as const }
+                            : {})}
+                      >
+                        {" "}
+                        {state.etfDetail.pctChg > 0 ? "+" : ""}
+                        {state.etfDetail.pctChg.toFixed(2)}%
+                      </Text>
+                    )}
+                  </Text>
+                )}
+                <Text dimColor>{state.date}</Text>
+              </>
+            )}
             {state.status === "running" ? (
               <Text color="yellow">分析中…</Text>
             ) : state.status === "done" ? (
@@ -771,7 +873,7 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
             )}
           </Box>
 
-          {/* Queue */}
+          {/* Queue — shows tickers being analyzed */}
           <Box flexDirection="column" flexGrow={1}>
             <Text bold>🧠 研究队列</Text>
             <Text dimColor>
@@ -783,7 +885,7 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
                   : state.status === "running"
                     ? "🟡"
                     : "⚪"}{" "}
-              {agentsDone}/{agentsTotal}
+              1/1
               {state.status === "error"
                 ? " 有失败"
                 : state.status === "done"
@@ -793,19 +895,31 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
                     : " 等待中"}
             </Text>
             <Box flexDirection="column" marginTop={1}>
-              {state.status === "running" || state.status === "done" ? (
-                DEFAULT_SECTIONS.map((s) => {
-                  const isDone = done.has(s.id);
-                  const icon = isDone ? "✓" : "○";
-                  const color = isDone ? "green" : "yellow";
-                  return (
-                    <Text key={s.id}>
-                      <Text color={color}>
-                        {icon} {s.title.length > 10 ? s.title.slice(0, 10) + "…" : s.title}
-                      </Text>
-                    </Text>
-                  );
-                })
+              {state.status === "running" || state.status === "done" || state.status === "error" ? (
+                <Text>
+                  <Text
+                    color={
+                      state.status === "done"
+                        ? "green"
+                        : state.status === "error"
+                          ? "red"
+                          : "yellow"
+                    }
+                  >
+                    {"> "}
+                    {state.ticker.split(".")[0] ?? state.ticker}
+                  </Text>
+                  <Text dimColor>
+                    {" "}
+                    (
+                    {state.status === "done"
+                      ? "已完成"
+                      : state.status === "error"
+                        ? "失败"
+                        : "分析中"}
+                    )
+                  </Text>
+                </Text>
               ) : (
                 <Text dimColor>等待分析启动…</Text>
               )}
