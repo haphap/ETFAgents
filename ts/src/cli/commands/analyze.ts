@@ -10,24 +10,7 @@ import pc from "picocolors";
 import { BridgeApi, BridgeClient, pickBridgeTools, RpcError } from "../../bridge/index.js";
 import { buildFullGraph } from "../../graph/full_graph.js";
 import { createLlmFromConfig } from "../../llm/factory.js";
-
-// Tool sets for each analyst (matching tsplan §7.1).
-const ANALYST_TOOLS = {
-  marketFlow: ["get_etf_price_data", "get_etf_indicators", "get_etf_share", "get_etf_nav"],
-  macroRegime: [
-    "get_etf_info",
-    "get_etf_holdings",
-    "get_macro_regime_data",
-    "get_global_news",
-    "get_news",
-  ],
-  mesoCommodity: ["get_commodity_cluster_data"],
-  catalystSentiment: [] as string[],
-  holdingsIndustry: ["get_etf_holdings", "get_etf_industry_research"],
-  topHoldings: ["get_etf_holdings", "get_etf_top_holdings_research"],
-  bullBear: [] as string[],
-  riskDebate: [] as string[],
-} as const;
+import { ANALYST_TOOLS } from "./shared_tools.js";
 
 interface AnalyzeOptions {
   date?: string;

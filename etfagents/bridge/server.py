@@ -120,11 +120,11 @@ def run_stdio_server() -> None:
     """Main entry. Blocks until stdin closes."""
     _configure_logging()
     _load_handlers()
-    logger.info("ETFAgents bridge ready (methods: %d)", len(_handler_count()))
+    logger.info("ETFAgents bridge ready (methods: %d)", len(_handler_names()))
     _serve_streams(sys.stdin, sys.stdout)
 
 
-def _handler_count() -> list[str]:
+def _handler_names() -> list[str]:
     from .registry import all_methods
 
     return all_methods()

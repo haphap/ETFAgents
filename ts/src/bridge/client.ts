@@ -221,11 +221,12 @@ export class BridgeClient {
     }
     const id = response.id;
     if (typeof id !== "number") {
-      // Parse-error responses from the server may carry id=null. We can't
-      // correlate those to a pending call, so fail everything pending.
+      // Server responses with id=null (parse errors, notifications) can't be
+      // correlated to a pending call. Log and continue rather than failing all
+      // in-flight requests.
       if (isErrorEnvelope(response)) {
-        this.failPending(
-          new BridgeTransportError(`Bridge protocol error (no id): ${response.error.message}`),
+        console.warn(
+          `[bridge] received non-correlatable error (id=${String(id)}): ${response.error.message}`,
         );
       }
       return;
