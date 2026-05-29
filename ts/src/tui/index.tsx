@@ -10,32 +10,45 @@ import { Box, render, Text, useInput, useStdout } from "ink";
 import { useReducer } from "react";
 
 // ===========================================================================
-// Banner
+// Banner — standard FIGlet font for readability
 // ===========================================================================
 
 const BANNER = [
   "╔══════════════════════════════════════════════╗",
   "║                                              ║",
-  "║     ███████╗████████╗███████╗                ║",
-  "║     ██╔════╝╚══██╔══╝██╔════╝                ║",
-  "║     █████╗     ██║   █████╗                  ║",
-  "║     ██╔══╝     ██║   ██╔══╝                  ║",
-  "║     ██║        ██║   ██║                     ║",
-  "║     ██║        ██║   ███████╗                ║",
-  "║     ╚═╝        ╚═╝   ╚══════╝                ║",
-  "║                                              ║",
-  "║    █████╗  ██████╗ ███████╗███╗   ██╗███████╗║",
-  "║   ██╔══██╗██╔════╝ ██╔════╝████╗  ██║██╔════╝║",
-  "║   ███████║██║  ███╗█████╗  ██╔██╗ ██║███████╗║",
-  "║   ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║╚════██║║",
-  "║   ██║  ██║╚██████╔╝███████╗██║ ╚████║███████║║",
-  "║   ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝╚══════╝║",
+  "║   _____ _____ _____ _                    _   ║",
+  "║  | ____|_   _|  ___/ \\   __ _  ___ _ __ | |_ ║",
+  "║  |  _|   | | | |_ / _ \\ / _` |/ _ \\ '_ \\| __|║",
+  "║  | |___  | | |  _/ ___ \\ (_| |  __/ | | | |_ ║",
+  "║  |_____| |_| |_|/_/   \\_\\__, |\\___|_| |_|\\__|║",
+  "║                         |___/                 ║",
   "║                                              ║",
   "║      Multi-Agent ETF Investment Framework     ║",
   "║               TypeScript Edition              ║",
   "║                                              ║",
   "╚══════════════════════════════════════════════╝",
 ];
+
+// ===========================================================================
+// Provider / Model catalog
+// ===========================================================================
+
+const PROVIDERS = ["openai", "deepseek", "ollama", "xai", "openrouter", "minimax", "vllm"] as const;
+
+const MODELS_BY_PROVIDER: Record<string, string[]> = {
+  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4.1", "o3", "o4-mini"],
+  deepseek: ["deepseek-chat", "deepseek-reasoner", "deepseek-v4-pro"],
+  ollama: ["llama3.2", "qwen2.5", "mistral", "gemma3"],
+  xai: ["grok-3-beta", "grok-3-mini"],
+  openrouter: [
+    "openai/gpt-4o",
+    "anthropic/claude-sonnet-4",
+    "google/gemini-2.5-pro",
+    "deepseek/deepseek-chat",
+  ],
+  minimax: ["abab6.5s-chat", "abab7-chat"],
+  vllm: [],
+};
 
 // ===========================================================================
 // State
@@ -55,6 +68,10 @@ interface AppState {
   result: string;
   errorMsg: string;
   cacheOutput: string;
+  /** Which field's dropdown is open (null = no dropdown visible). */
+  selectOpen: ResearchField | null;
+  /** Highlighted index in the open dropdown. */
+  selectIdx: number;
 }
 
 type Action =
@@ -65,7 +82,16 @@ type Action =
   | { type: "startAnalysis" }
   | { type: "analysisDone"; result: string }
   | { type: "analysisError"; msg: string }
-  | { type: "cacheResult"; output: string };
+  | { type: "cacheResult"; output: string }
+  | { type: "openSelect" }
+  | { type: "closeSelect" }
+  | { type: "selectUp" }
+  | { type: "selectDown" }
+  | { type: "selectPick" };
+
+// ===========================================================================
+// Helpers
+// ===========================================================================
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -83,6 +109,8 @@ function initState(): AppState {
     result: "",
     errorMsg: "",
     cacheOutput: "",
+    selectOpen: null,
+    selectIdx: 0,
   };
 }
 
@@ -99,20 +127,93 @@ function focusValue(state: AppState): string {
   }
 }
 
+function selectOptions(state: AppState): string[] {
+  if (state.selectOpen === "provider") return [...PROVIDERS];
+  if (state.selectOpen === "model") {
+    const p = state.provider.toLowerCase();
+    return MODELS_BY_PROVIDER[p] ?? [];
+  }
+  return [];
+}
+
+const FOCUS_ORDER: ResearchField[] = ["ticker", "date", "provider", "model"];
+
+function nextFocus(current: ResearchField): ResearchField {
+  const i = FOCUS_ORDER.indexOf(current);
+  return FOCUS_ORDER[i + 1] ?? FOCUS_ORDER[0] ?? "ticker";
+}
+
+function isSelectField(f: ResearchField): boolean {
+  return f === "provider" || f === "model";
+}
+
+// ===========================================================================
+// Reducer
+// ===========================================================================
+
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "setScreen":
       return { ...state, screen: action.screen };
     case "setFocus":
-      return { ...state, focus: action.focus };
+      return {
+        ...state,
+        focus: action.focus,
+        selectOpen: isSelectField(action.focus) ? action.focus : null,
+        selectIdx: 0,
+      };
     case "appendChar": {
+      if (state.selectOpen !== null) return state;
       const key = state.focus;
       return { ...state, [key]: focusValue(state) + action.char };
     }
     case "deleteChar": {
+      if (state.selectOpen !== null) return state;
       const key = state.focus;
       const val = focusValue(state);
       return { ...state, [key]: val.slice(0, -1) };
+    }
+    case "openSelect": {
+      if (!isSelectField(state.focus)) return state;
+      const idx = selectOptions({ ...state, selectOpen: state.focus }).indexOf(focusValue(state));
+      return { ...state, selectOpen: state.focus, selectIdx: idx >= 0 ? idx : 0 };
+    }
+    case "closeSelect":
+      return { ...state, selectOpen: null, selectIdx: 0 };
+    case "selectUp": {
+      if (state.selectOpen === null) return state;
+      const opts = selectOptions(state);
+      if (opts.length === 0) return state;
+      return {
+        ...state,
+        selectIdx: state.selectIdx > 0 ? state.selectIdx - 1 : opts.length - 1,
+      };
+    }
+    case "selectDown": {
+      if (state.selectOpen === null) return state;
+      const opts = selectOptions(state);
+      if (opts.length === 0) return state;
+      return {
+        ...state,
+        selectIdx: state.selectIdx < opts.length - 1 ? state.selectIdx + 1 : 0,
+      };
+    }
+    case "selectPick": {
+      if (state.selectOpen === null) return state;
+      const opts = selectOptions(state);
+      const value = opts[state.selectIdx];
+      if (value === undefined) return { ...state, selectOpen: null, selectIdx: 0 };
+      // When provider changes, clear model so user re-picks
+      const provider = state.selectOpen === "provider" ? value : state.provider;
+      const model = state.selectOpen === "model" ? value : state.model;
+      return {
+        ...state,
+        [state.selectOpen]: value,
+        provider,
+        model,
+        selectOpen: null,
+        selectIdx: 0,
+      };
     }
     case "startAnalysis":
       return { ...state, status: "running", result: "", errorMsg: "" };
@@ -123,17 +224,6 @@ function reducer(state: AppState, action: Action): AppState {
     case "cacheResult":
       return { ...state, cacheOutput: action.output };
   }
-}
-
-// ===========================================================================
-// Focus cycling
-// ===========================================================================
-
-const FOCUS_ORDER: ResearchField[] = ["ticker", "date", "provider", "model"];
-
-function nextFocus(current: ResearchField): ResearchField {
-  const i = FOCUS_ORDER.indexOf(current);
-  return FOCUS_ORDER[i + 1] ?? FOCUS_ORDER[0] ?? "ticker";
 }
 
 // ===========================================================================
@@ -153,19 +243,58 @@ function App() {
     if (input === "3") dispatch({ type: "setScreen", screen: "cache" });
 
     if (state.screen === "research" && state.status !== "running") {
+      // Dropdown is open — navigate / pick / close
+      if (state.selectOpen !== null) {
+        if (key.upArrow) {
+          dispatch({ type: "selectUp" });
+          return;
+        }
+        if (key.downArrow) {
+          dispatch({ type: "selectDown" });
+          return;
+        }
+        if (key.return) {
+          dispatch({ type: "selectPick" });
+          return;
+        }
+        if (key.tab) {
+          dispatch({ type: "setFocus", focus: nextFocus(state.focus) });
+          return;
+        }
+        // Any other key closes the dropdown and falls through to typing
+        dispatch({ type: "closeSelect" });
+      }
+
+      // Tab cycles focus (auto-opens dropdown for select fields)
       if (key.tab) {
         dispatch({ type: "setFocus", focus: nextFocus(state.focus) });
         return;
       }
-      if (key.return && state.ticker) {
-        dispatch({ type: "startAnalysis" });
-        await runAnalysis(state, dispatch);
+
+      // Enter on non-select fields: run analysis
+      if (key.return) {
+        if (isSelectField(state.focus)) {
+          dispatch({ type: "openSelect" });
+        } else if (state.ticker) {
+          dispatch({ type: "startAnalysis" });
+          await runAnalysis(state, dispatch);
+        }
         return;
       }
+
+      // Arrow down on select field opens dropdown
+      if (key.downArrow && isSelectField(state.focus)) {
+        dispatch({ type: "openSelect" });
+        return;
+      }
+
+      // Backspace/delete
       if (key.backspace || key.delete) {
         dispatch({ type: "deleteChar" });
         return;
       }
+
+      // Printable chars
       if (input.length === 1 && /[a-zA-Z0-9._\-\u4e00-\u9fff]/.test(input)) {
         dispatch({ type: "appendChar", char: input });
       }
@@ -179,8 +308,8 @@ function App() {
     }
   });
 
-  // Content area height: terminal minus banner(5) - header(2) - tabs(1) - footer(1) - borders
-  const contentHeight = termHeight - 12;
+  // Content area height: terminal minus banner(12) - tabs(1) - footer(1) - padding
+  const contentHeight = termHeight - 16;
 
   return (
     <Box flexDirection="column" padding={1} height={termHeight}>
@@ -191,29 +320,24 @@ function App() {
             {line}
           </Text>
         ))}
-        <Text dimColor>Multi-Agent ETF Investment Framework — TypeScript TUI</Text>
       </Box>
 
       {/* Header + Tabs */}
       <Box justifyContent="space-between" marginBottom={1}>
         <Box>
-          {state.screen === "research" ? (
-            <Text backgroundColor="blue"> Research </Text>
-          ) : (
-            <Text> Research </Text>
-          )}
-          <Text> </Text>
-          {state.screen === "results" ? (
-            <Text backgroundColor="blue"> Results </Text>
-          ) : (
-            <Text> Results </Text>
-          )}
-          <Text> </Text>
-          {state.screen === "cache" ? (
-            <Text backgroundColor="blue"> Cache </Text>
-          ) : (
-            <Text> Cache </Text>
-          )}
+          {(["research", "results", "cache"] as const).map((s) => {
+            const label = s.charAt(0).toUpperCase() + s.slice(1);
+            return (
+              <Text key={s}>
+                {" "}
+                {state.screen === s ? (
+                  <Text backgroundColor="blue"> {label} </Text>
+                ) : (
+                  <Text> {label} </Text>
+                )}
+              </Text>
+            );
+          })}
         </Box>
         <Text dimColor>[1/2/3] Switch [Esc] Quit</Text>
       </Box>
@@ -235,7 +359,7 @@ function App() {
               : state.status === "error"
                 ? `Error: ${state.errorMsg.slice(0, 80)}`
                 : state.screen === "research"
-                  ? "[Tab] next  [Enter] run  [Backspace] delete"
+                  ? "[Tab] next  [Enter] run/select  [↓] open picker  [Esc] quit"
                   : "Ready"}
         </Text>
       </Box>
@@ -248,32 +372,41 @@ function App() {
 // ===========================================================================
 
 function ResearchScreen({ state }: { state: AppState }) {
-  const focus = (f: ResearchField) => state.focus === f;
-
   return (
     <Box flexDirection="column">
       <Text bold>Research Configuration</Text>
-      <Text dimColor>Fill fields, Tab to move, Enter to run analysis.</Text>
+      <Text dimColor>Tab to move, ↑↓ to pick, Enter to run analysis.</Text>
 
       <Box marginY={1} flexDirection="column">
         <FieldRow
           label="Ticker"
           value={state.ticker}
-          focused={focus("ticker")}
+          focused={state.focus === "ticker"}
           hint="e.g. 510300.SH"
         />
-        <FieldRow label="Date" value={state.date} focused={focus("date")} hint="YYYY-MM-DD" />
         <FieldRow
+          label="Date"
+          value={state.date}
+          focused={state.focus === "date"}
+          hint="YYYY-MM-DD"
+        />
+        <SelectFieldRow
           label="Provider"
           value={state.provider}
-          focused={focus("provider")}
-          hint="openai, deepseek, ollama..."
+          focused={state.focus === "provider"}
+          open={state.selectOpen === "provider"}
+          options={PROVIDERS as unknown as string[]}
+          selectedIdx={state.selectIdx}
+          hint="Choose LLM provider"
         />
-        <FieldRow
+        <SelectFieldRow
           label="Model"
           value={state.model}
-          focused={focus("model")}
-          hint="default from config"
+          focused={state.focus === "model"}
+          open={state.selectOpen === "model"}
+          options={state.provider ? (MODELS_BY_PROVIDER[state.provider.toLowerCase()] ?? []) : []}
+          selectedIdx={state.selectIdx}
+          hint={state.provider ? "Choose model" : "Select provider first"}
         />
       </Box>
 
@@ -298,6 +431,65 @@ function FieldRow({
     <Box>
       <Text dimColor>{label.padEnd(10)}</Text>
       {focused ? <Text color="yellow">{value || "▌"}</Text> : <Text>{value || hint}</Text>}
+    </Box>
+  );
+}
+
+function SelectFieldRow({
+  label,
+  value,
+  focused,
+  open,
+  options,
+  selectedIdx,
+  hint,
+}: {
+  label: string;
+  value: string;
+  focused: boolean;
+  open: boolean;
+  options: string[];
+  selectedIdx: number;
+  hint: string;
+}) {
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Text dimColor>{label.padEnd(10)}</Text>
+        {focused ? (
+          <Text color="yellow">
+            {value || (open ? "▾" : "▸")}{" "}
+            <Text dimColor>{open ? "(↑↓ pick, Enter)" : "(Enter to open)"}</Text>
+          </Text>
+        ) : (
+          <Text>{value || hint}</Text>
+        )}
+      </Box>
+      {/* Dropdown overlay */}
+      {open && options.length > 0 && (
+        <Box flexDirection="column" marginLeft={2}>
+          {options.map((opt, i) => {
+            const color = i === selectedIdx ? "cyan" : undefined;
+            return (
+              <Text key={opt} {...(color ? { color } : {})}>
+                {i === selectedIdx ? "▶ " : "  "}
+                {opt === value ? (
+                  <Text bold color="green">
+                    {opt}
+                  </Text>
+                ) : (
+                  <Text>{opt}</Text>
+                )}
+              </Text>
+            );
+          })}
+        </Box>
+      )}
+      {open && options.length === 0 && (
+        <Box marginLeft={2}>
+          <Text dimColor>No options available</Text>
+        </Box>
+      )}
     </Box>
   );
 }
