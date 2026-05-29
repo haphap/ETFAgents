@@ -3,11 +3,23 @@
  * etfagents-ts TUI — Phase 3.7 Ink screens + state machine.
  *
  * Screens: Research (configure + run) / Results / Cache.
- * Press 1/2/3 to switch, Tab to move between fields, Enter to run.
+ * Full-screen layout with ASCII banner header.
  */
 
-import { Box, render, Text, useInput } from "ink";
+import { Box, render, Text, useInput, useStdout } from "ink";
 import { useReducer } from "react";
+
+// ===========================================================================
+// Banner
+// ===========================================================================
+
+const BANNER = [
+  "   _________________                __",
+  "  / __/_  __/ __/ _ |___ ____ ___  / /____",
+  " / _/  / / / _// __ / _ `/ -_) _ \\/ __(_-<",
+  "/___/ /_/ /_/ /_/ |_\\_, /\\__/_//_/\\__/___/",
+  "                   /___/",
+];
 
 // ===========================================================================
 // State
@@ -18,7 +30,6 @@ type ResearchField = "ticker" | "date" | "provider" | "model";
 
 interface AppState {
   screen: Screen;
-  /** Which field is focused on the research screen. */
   focus: ResearchField;
   ticker: string;
   date: string;
@@ -106,7 +117,7 @@ const FOCUS_ORDER: ResearchField[] = ["ticker", "date", "provider", "model"];
 
 function nextFocus(current: ResearchField): ResearchField {
   const i = FOCUS_ORDER.indexOf(current);
-  return FOCUS_ORDER[(i + 1) % FOCUS_ORDER.length]!;
+  return FOCUS_ORDER[i + 1] ?? FOCUS_ORDER[0] ?? "ticker";
 }
 
 // ===========================================================================
@@ -115,63 +126,84 @@ function nextFocus(current: ResearchField): ResearchField {
 
 function App() {
   const [state, dispatch] = useReducer(reducer, undefined, initState);
+  const { stdout } = useStdout();
+  const termHeight = stdout?.rows ?? 30;
 
   useInput(async (input, key) => {
     if (key.escape) process.exit(0);
 
-    // Screen switching
     if (input === "1") dispatch({ type: "setScreen", screen: "research" });
     if (input === "2") dispatch({ type: "setScreen", screen: "results" });
     if (input === "3") dispatch({ type: "setScreen", screen: "cache" });
 
     if (state.screen === "research" && state.status !== "running") {
-      // Tab: cycle focus
       if (key.tab) {
         dispatch({ type: "setFocus", focus: nextFocus(state.focus) });
         return;
       }
-      // Enter: run analysis
       if (key.return && state.ticker) {
         dispatch({ type: "startAnalysis" });
         await runAnalysis(state, dispatch);
         return;
       }
-      // Backspace / Delete
       if (key.backspace || key.delete) {
         dispatch({ type: "deleteChar" });
         return;
       }
-      // Printable characters
       if (input.length === 1 && /[a-zA-Z0-9._\-\u4e00-\u9fff]/.test(input)) {
         dispatch({ type: "appendChar", char: input });
       }
     }
 
     if (state.screen === "cache" && key.return) {
-      const output = "Cache stats would appear here.\nBridge RPC: cache.stats";
-      dispatch({ type: "cacheResult", output });
+      dispatch({
+        type: "cacheResult",
+        output: "Cache stats would appear here.\nBridge RPC: cache.stats",
+      });
     }
   });
 
+  // Content area height: terminal minus banner(5) - header(2) - tabs(1) - footer(1) - borders
+  const contentHeight = termHeight - 12;
+
   return (
-    <Box flexDirection="column" padding={1}>
-      {/* Header */}
-      <Box marginBottom={1}>
-        <Text bold color="cyan">ETFAgents TUI</Text>
-        <Text dimColor>  [1]Research  [2]Results  [3]Cache  [Esc]Quit</Text>
+    <Box flexDirection="column" padding={1} height={termHeight}>
+      {/* Banner */}
+      <Box flexDirection="column" alignItems="center" marginBottom={1}>
+        {BANNER.map((line) => (
+          <Text key={line} bold color="cyan">
+            {line}
+          </Text>
+        ))}
+        <Text dimColor>Multi-Agent ETF Investment Framework — TypeScript TUI</Text>
       </Box>
 
-      {/* Tab bar */}
-      <Box marginBottom={1}>
-        {state.screen === "research" ? <Text backgroundColor="blue"> Research </Text> : <Text> Research </Text>}
-        <Text> </Text>
-        {state.screen === "results" ? <Text backgroundColor="blue"> Results </Text> : <Text> Results </Text>}
-        <Text> </Text>
-        {state.screen === "cache" ? <Text backgroundColor="blue"> Cache </Text> : <Text> Cache </Text>}
+      {/* Header + Tabs */}
+      <Box justifyContent="space-between" marginBottom={1}>
+        <Box>
+          {state.screen === "research" ? (
+            <Text backgroundColor="blue"> Research </Text>
+          ) : (
+            <Text> Research </Text>
+          )}
+          <Text> </Text>
+          {state.screen === "results" ? (
+            <Text backgroundColor="blue"> Results </Text>
+          ) : (
+            <Text> Results </Text>
+          )}
+          <Text> </Text>
+          {state.screen === "cache" ? (
+            <Text backgroundColor="blue"> Cache </Text>
+          ) : (
+            <Text> Cache </Text>
+          )}
+        </Box>
+        <Text dimColor>[1/2/3] Switch [Esc] Quit</Text>
       </Box>
 
       {/* Content */}
-      <Box flexDirection="column" borderStyle="single" padding={1} height={22}>
+      <Box flexDirection="column" borderStyle="single" padding={1} height={contentHeight}>
         {state.screen === "research" && <ResearchScreen state={state} />}
         {state.screen === "results" && <ResultsScreen state={state} />}
         {state.screen === "cache" && <CacheScreen state={state} />}
@@ -183,11 +215,11 @@ function App() {
           {state.status === "running"
             ? "Analyzing..."
             : state.status === "done"
-              ? "Analysis complete"
+              ? "Analysis complete — switch to Results [2]"
               : state.status === "error"
                 ? `Error: ${state.errorMsg.slice(0, 80)}`
                 : state.screen === "research"
-                  ? "[Tab] next field  [Enter] run  [Backspace] delete"
+                  ? "[Tab] next  [Enter] run  [Backspace] delete"
                   : "Ready"}
         </Text>
       </Box>
@@ -214,12 +246,7 @@ function ResearchScreen({ state }: { state: AppState }) {
           focused={focus("ticker")}
           hint="e.g. 510300.SH"
         />
-        <FieldRow
-          label="Date"
-          value={state.date}
-          focused={focus("date")}
-          hint="YYYY-MM-DD"
-        />
+        <FieldRow label="Date" value={state.date} focused={focus("date")} hint="YYYY-MM-DD" />
         <FieldRow
           label="Provider"
           value={state.provider}
@@ -234,12 +261,8 @@ function ResearchScreen({ state }: { state: AppState }) {
         />
       </Box>
 
-      {state.status === "running" && (
-        <Text color="cyan">Running 6-analyst pipeline...</Text>
-      )}
-      {state.status === "error" && (
-        <Text color="red">{state.errorMsg}</Text>
-      )}
+      {state.status === "running" && <Text color="cyan">Running 6-analyst pipeline...</Text>}
+      {state.status === "error" && <Text color="red">{state.errorMsg}</Text>}
     </Box>
   );
 }
@@ -258,11 +281,7 @@ function FieldRow({
   return (
     <Box>
       <Text dimColor>{label.padEnd(10)}</Text>
-      {focused ? (
-        <Text color="yellow">{value || "▌"}</Text>
-      ) : (
-        <Text>{value || hint}</Text>
-      )}
+      {focused ? <Text color="yellow">{value || "▌"}</Text> : <Text>{value || hint}</Text>}
     </Box>
   );
 }
@@ -271,12 +290,12 @@ function ResultsScreen({ state }: { state: AppState }) {
   if (!state.result) {
     return <Text dimColor>No results yet. Run Research first.</Text>;
   }
-  const lines = state.result.split("\n").slice(0, 20);
+  const lines = state.result.split("\n").slice(0, 40);
   return (
     <Box flexDirection="column">
       {lines.map((line, i) => (
         /* biome-ignore lint/suspicious/noArrayIndexKey: static snapshot */
-        <Text key={i}>{line.slice(0, 100)}</Text>
+        <Text key={i}>{line.slice(0, 120)}</Text>
       ))}
     </Box>
   );
@@ -317,30 +336,41 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
     try {
       const config = await new BridgeApi(client).configGet();
       const api = new BridgeApi(client);
-
       const llmOpts: Record<string, unknown> = { tier: "deep" };
       if (state.provider) llmOpts.provider = state.provider;
       if (state.model) llmOpts.model = state.model;
       const llmHandle = createLlmFromConfig(config, llmOpts);
 
       const tools = await pickBridgeTools(api, [
-        "get_etf_price_data", "get_etf_indicators", "get_etf_share", "get_etf_nav",
+        "get_etf_price_data",
+        "get_etf_indicators",
+        "get_etf_share",
+        "get_etf_nav",
       ]);
 
       const charLimit = Number(config.report_context_char_limit);
       const promptContext = {
         language: String(config.output_language ?? "Chinese"),
-        ...(Number.isFinite(charLimit) && charLimit > 0 ? { reportContextCharLimit: charLimit } : {}),
+        ...(Number.isFinite(charLimit) && charLimit > 0
+          ? { reportContextCharLimit: charLimit }
+          : {}),
       };
 
-      const graph = buildMiniSpineGraph({ llm: llmHandle.llm, marketFlowTools: tools, promptContext });
+      const graph = buildMiniSpineGraph({
+        llm: llmHandle.llm,
+        marketFlowTools: tools,
+        promptContext,
+      });
       const final = await graph.invoke({
         messages: [new HumanMessage(state.ticker)],
         asset_of_interest: state.ticker,
         trade_date: state.date,
       });
 
-      dispatch({ type: "analysisDone", result: String(final.trader_allocation_plan ?? "(no plan)") });
+      dispatch({
+        type: "analysisDone",
+        result: String(final.trader_allocation_plan ?? "(no plan)"),
+      });
     } finally {
       await client.close();
     }
