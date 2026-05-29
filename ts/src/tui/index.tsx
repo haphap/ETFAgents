@@ -72,7 +72,12 @@ interface AppState {
   /** Analysis results */
   result: string;
   errorMsg: string;
-  /** vllm dynamic models */
+  /**
+   * vllm dynamic models.
+   * null = not yet fetched (triggers discovery on next tick),
+   * []  = fetch failed or empty (shows free-text input),
+   * [...models] = fetched successfully (shows dropdown).
+   */
   vllmModels: string[] | null;
 }
 
@@ -192,7 +197,13 @@ function reducer(state: AppState, action: Action): AppState {
     case "appendChar": {
       if (state.selectOpen !== null) return state;
       const key = state.focus;
-      return { ...state, [key]: focusValue(state) + action.char };
+      const next = focusValue(state) + action.char;
+      // Clear vllmModels when user types away from vllm provider
+      return {
+        ...state,
+        [key]: next,
+        ...(key === "provider" && next.toLowerCase() !== "vllm" ? { vllmModels: null } : {}),
+      };
     }
     case "deleteChar": {
       if (state.selectOpen !== null) return state;
@@ -343,6 +354,7 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
       await client.close();
     }
   } catch (err) {
+    console.error("Analysis failed:", err);
     const msg = (err as Error).message;
     dispatch({
       type: "analysisError",
