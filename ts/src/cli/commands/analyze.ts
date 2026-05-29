@@ -46,27 +46,12 @@ export function registerAnalyze(program: Command): void {
 
         // Pick tools for each analyst.
         const toolSets = {
-          marketFlow: await pickBridgeTools(
-            api,
-            ANALYST_TOOLS.marketFlow as unknown as readonly string[],
-          ),
-          macroRegime: await pickBridgeTools(
-            api,
-            ANALYST_TOOLS.macroRegime as unknown as readonly string[],
-          ),
-          mesoCommodity: await pickBridgeTools(
-            api,
-            ANALYST_TOOLS.mesoCommodity as unknown as readonly string[],
-          ),
+          marketFlow: await pickBridgeTools(api, ANALYST_TOOLS.marketFlow),
+          macroRegime: await pickBridgeTools(api, ANALYST_TOOLS.macroRegime),
+          mesoCommodity: await pickBridgeTools(api, ANALYST_TOOLS.mesoCommodity),
           catalystSentiment: [],
-          holdingsIndustry: await pickBridgeTools(
-            api,
-            ANALYST_TOOLS.holdingsIndustry as unknown as readonly string[],
-          ),
-          topHoldings: await pickBridgeTools(
-            api,
-            ANALYST_TOOLS.topHoldings as unknown as readonly string[],
-          ),
+          holdingsIndustry: await pickBridgeTools(api, ANALYST_TOOLS.holdingsIndustry),
+          topHoldings: await pickBridgeTools(api, ANALYST_TOOLS.topHoldings),
           bullBear: [],
           riskDebate: [],
         };

@@ -84,14 +84,9 @@ export function registerPaper(program: Command): void {
   paperCmd
     .command("buy <ticker> <quantity>")
     .description("Place a paper buy order")
-    .option("--price <n>", "Limit price")
-    .action(async (ticker: string, quantity: string, opts: { price?: string }) => {
+    .action(async (ticker: string, quantity: string) => {
       await withBridge(async (api) => {
-        const result = await api.paperBuy(
-          ticker,
-          Number(quantity),
-          opts.price ? Number(opts.price) : undefined,
-        );
+        const result = await api.paperBuy(ticker, Number(quantity));
         console.log(pc.green(JSON.stringify(result)));
       });
     });
@@ -99,14 +94,9 @@ export function registerPaper(program: Command): void {
   paperCmd
     .command("sell <ticker> <quantity>")
     .description("Place a paper sell order")
-    .option("--price <n>", "Limit price")
-    .action(async (ticker: string, quantity: string, opts: { price?: string }) => {
+    .action(async (ticker: string, quantity: string) => {
       await withBridge(async (api) => {
-        const result = await api.paperSell(
-          ticker,
-          Number(quantity),
-          opts.price ? Number(opts.price) : undefined,
-        );
+        const result = await api.paperSell(ticker, Number(quantity));
         console.log(pc.green(JSON.stringify(result)));
       });
     });

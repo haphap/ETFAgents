@@ -204,29 +204,17 @@ export class BridgeApi {
   paperBuy(
     ticker: string,
     quantity: number,
-    price?: number,
     opts: { user_id?: string; db_path?: string } = {},
   ): Promise<unknown> {
-    return this.client.call("paper.buy", {
-      ticker,
-      quantity,
-      ...(price ? { price } : {}),
-      ...opts,
-    });
+    return this.client.call("paper.buy", { ticker, quantity, ...opts });
   }
 
   paperSell(
     ticker: string,
     quantity: number,
-    price?: number,
     opts: { user_id?: string; db_path?: string } = {},
   ): Promise<unknown> {
-    return this.client.call("paper.sell", {
-      ticker,
-      quantity,
-      ...(price ? { price } : {}),
-      ...opts,
-    });
+    return this.client.call("paper.sell", { ticker, quantity, ...opts });
   }
 
   // backtest.*

@@ -187,9 +187,17 @@ export class BridgeClient {
     }
     this.child.stdin.end();
     try {
-      await once(this.child, "exit");
+      await Promise.race([
+        once(this.child, "exit"),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Bridge process did not exit within 5s")), 5_000),
+        ),
+      ]);
     } catch {
-      // exit handler already ran
+      // Timeout or exit handler already ran — kill the process.
+    }
+    if (!this.child.killed && this.child.exitCode === null) {
+      this.child.kill("SIGKILL");
     }
     if (this.stdoutReader) {
       this.stdoutReader.close();

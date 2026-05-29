@@ -177,8 +177,9 @@ function ResultsScreen({ state }: { state: AppState }) {
   const lines = state.result.split("\n").slice(0, 18);
   return (
     <Box flexDirection="column">
-      {lines.map((line) => (
-        <Text key={line.slice(0, 40)}>{line.slice(0, 100)}</Text>
+      {lines.map((line, i) => (
+        /* biome-ignore lint/suspicious/noArrayIndexKey: lines are static snapshots */
+        <Text key={i}>{line.slice(0, 100)}</Text>
       ))}
     </Box>
   );
@@ -191,8 +192,9 @@ function CacheScreen({ state }: { state: AppState }) {
       <Text dimColor>Press Enter to refresh stats</Text>
       {state.cacheOutput ? (
         <Box marginTop={1} flexDirection="column">
-          {state.cacheOutput.split("\n").map((line) => (
-            <Text key={line.slice(0, 40)}>{line}</Text>
+          {state.cacheOutput.split("\n").map((line, i) => (
+            /* biome-ignore lint/suspicious/noArrayIndexKey: static snapshot */
+            <Text key={i}>{line}</Text>
           ))}
         </Box>
       ) : (
