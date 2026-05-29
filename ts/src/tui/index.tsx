@@ -285,11 +285,20 @@ function reducer(state: AppState, action: Action): AppState {
       const value = opts[state.selectIdx];
       if (value === undefined) return { ...state, selectOpen: null, selectIdx: 0 };
       const newProvider = state.selectOpen === "provider" ? value : state.provider;
+      const newModel = state.selectOpen === "provider" ? "" : state.model;
       const vllmModels =
         state.selectOpen === "provider" && newProvider.toLowerCase() !== "vllm"
           ? null
           : state.vllmModels;
-      return { ...state, [state.selectOpen]: value, selectOpen: null, selectIdx: 0, vllmModels };
+      return {
+        ...state,
+        provider: newProvider,
+        model: newModel,
+        [state.selectOpen]: value,
+        selectOpen: null,
+        selectIdx: 0,
+        vllmModels,
+      };
     }
     case "startAnalysis":
       return {
@@ -407,6 +416,30 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
           : {}),
       };
 
+          // Load ETF detail via the same bridge connection
+      try {
+        const detailResult = await api.toolsCall("get_etf_price_data", {
+          ticker: state.ticker,
+          start_date: state.date,
+          end_date: state.date,
+        });
+        const raw = JSON.parse(detailResult.text) as { rows?: Array<Record<string, unknown>> };
+        const rows = raw?.rows ?? [];
+        const last = rows[rows.length - 1];
+        if (last) {
+          dispatch({
+            type: "etfDetailLoaded",
+            ...(typeof last.name === "string" ? { name: last.name } : {}),
+            ...(typeof last.close === "number" ? { close: last.close } : {}),
+            ...(typeof last.pct_chg === "number" ? { pctChg: last.pct_chg } : {}),
+          });
+        } else {
+          dispatch({ type: "etfDetailLoaded", name: state.ticker });
+        }
+      } catch (e) {
+        dispatch({ type: "etfDetailError", error: (e as Error).message });
+      }
+
       dispatch({ type: "appendLog", msg: "── 启动 6-analyst pipeline…" });
       dispatch({ type: "sectionDone", sectionId: "market_flow" });
 
@@ -439,43 +472,6 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
           ? "Bridge 未运行。请先启动 Python bridge。"
           : msg,
     });
-  }
-}
-
-// ===========================================================================
-// ETF detail loading
-// ===========================================================================
-
-async function loadEtfDetail(ticker: string, date: string, dispatch: (action: Action) => void) {
-  try {
-    const { BridgeApi, BridgeClient } = await import("../bridge/index.js");
-    const client = new BridgeClient();
-    await client.start();
-    try {
-      const api = new BridgeApi(client);
-      const result = await api.toolsCall("get_etf_price_data", {
-        ticker,
-        start_date: date,
-        end_date: date,
-      });
-      const raw = JSON.parse(result.text) as { rows?: Array<Record<string, unknown>> };
-      const rows = raw?.rows ?? [];
-      const last = rows[rows.length - 1];
-      if (last) {
-        dispatch({
-          type: "etfDetailLoaded",
-          ...(typeof last.name === "string" ? { name: last.name } : {}),
-          ...(typeof last.close === "number" ? { close: last.close } : {}),
-          ...(typeof last.pct_chg === "number" ? { pctChg: last.pct_chg } : {}),
-        });
-      } else {
-        dispatch({ type: "etfDetailLoaded", name: ticker });
-      }
-    } finally {
-      await client.close();
-    }
-  } catch (err) {
-    dispatch({ type: "etfDetailError", error: (err as Error).message });
   }
 }
 
@@ -514,24 +510,20 @@ function App() {
       }, 1000);
       return () => clearInterval(id);
     }
-    if (state.status === "done" || state.status === "error") startTimeRef.current = null;
-    startTimeRef.current = null;
+    if (state.status === "done" || state.status === "error") {
+      // Freeze the timer — keep the last elapsed value visible.
+      if (startTimeRef.current !== null) {
+        setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+        startTimeRef.current = null;
+      }
+      return undefined;
+    }
     setElapsed(0);
+    startTimeRef.current = null;
     return undefined;
   }, [state.phase, state.status]);
 
-  // Load ETF detail when dashboard starts
-  const detailLoadedRef = useRef(false);
-  useEffect(() => {
-    if (state.phase === "dashboard" && state.ticker && !detailLoadedRef.current) {
-      detailLoadedRef.current = true;
-      dispatch({ type: "etfDetailLoading" });
-      loadEtfDetail(state.ticker, state.date, dispatch);
-    }
-    if (state.phase !== "dashboard") {
-      detailLoadedRef.current = false;
-    }
-  }, [state.phase, state.ticker, state.date]);
+
 
   useInput((input, key) => {
     const s = stateRef.current;
