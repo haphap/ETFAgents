@@ -7,7 +7,7 @@
  */
 
 import { Box, render, Text, useInput, useStdout } from "ink";
-import { useReducer } from "react";
+import { useReducer, useRef } from "react";
 
 // ===========================================================================
 // Banner — standard FIGlet font for readability
@@ -136,15 +136,23 @@ function selectOptions(state: AppState): string[] {
   return [];
 }
 
+/** Whether the model field has predefined options (not free-text). */
+function modelHasOptions(provider: string): boolean {
+  return (MODELS_BY_PROVIDER[provider.toLowerCase()]?.length ?? 0) > 0;
+}
+
+/** Whether a field is a select field (has dropdown). Model is only select when it has options. */
+function isSelectField(state: AppState, field: ResearchField): boolean {
+  if (field === "provider") return true;
+  if (field === "model") return state.provider ? modelHasOptions(state.provider) : false;
+  return false;
+}
+
 const FOCUS_ORDER: ResearchField[] = ["ticker", "date", "provider", "model"];
 
 function nextFocus(current: ResearchField): ResearchField {
   const i = FOCUS_ORDER.indexOf(current);
   return FOCUS_ORDER[i + 1] ?? FOCUS_ORDER[0] ?? "ticker";
-}
-
-function isSelectField(f: ResearchField): boolean {
-  return f === "provider" || f === "model";
 }
 
 // ===========================================================================
@@ -159,7 +167,7 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         focus: action.focus,
-        selectOpen: isSelectField(action.focus) ? action.focus : null,
+        selectOpen: isSelectField(state, action.focus) ? action.focus : null,
         selectIdx: 0,
       };
     case "appendChar": {
@@ -174,7 +182,7 @@ function reducer(state: AppState, action: Action): AppState {
       return { ...state, [key]: val.slice(0, -1) };
     }
     case "openSelect": {
-      if (!isSelectField(state.focus)) return state;
+      if (!isSelectField(state, state.focus)) return state;
       const idx = selectOptions({ ...state, selectOpen: state.focus }).indexOf(focusValue(state));
       return { ...state, selectOpen: state.focus, selectIdx: idx >= 0 ? idx : 0 };
     }
@@ -235,73 +243,83 @@ function App() {
   const { stdout } = useStdout();
   const termHeight = stdout?.rows ?? 30;
 
-  useInput(async (input, key) => {
+  // Refs to stabilize useInput callback — prevents flicker from handler re-registration
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const dispatchRef = useRef(dispatch);
+  dispatchRef.current = dispatch;
+
+  useInput((input, key) => {
+    const s = stateRef.current;
+    const d = dispatchRef.current;
+
     if (key.escape) process.exit(0);
 
-    if (input === "1") dispatch({ type: "setScreen", screen: "research" });
-    if (input === "2") dispatch({ type: "setScreen", screen: "results" });
-    if (input === "3") dispatch({ type: "setScreen", screen: "cache" });
+    if (input === "1") d({ type: "setScreen", screen: "research" });
+    if (input === "2") d({ type: "setScreen", screen: "results" });
+    if (input === "3") d({ type: "setScreen", screen: "cache" });
 
-    if (state.screen === "research" && state.status !== "running") {
+    if (s.screen === "research" && s.status !== "running") {
       // Dropdown is open — navigate / pick / close
-      if (state.selectOpen !== null) {
+      if (s.selectOpen !== null) {
         if (key.upArrow) {
-          dispatch({ type: "selectUp" });
+          d({ type: "selectUp" });
           return;
         }
         if (key.downArrow) {
-          dispatch({ type: "selectDown" });
+          d({ type: "selectDown" });
           return;
         }
         if (key.return) {
-          dispatch({ type: "selectPick" });
+          d({ type: "selectPick" });
           return;
         }
         if (key.tab) {
-          dispatch({ type: "setFocus", focus: nextFocus(state.focus) });
+          d({ type: "setFocus", focus: nextFocus(s.focus) });
           return;
         }
         // Any other key closes the dropdown and falls through to typing
-        dispatch({ type: "closeSelect" });
+        d({ type: "closeSelect" });
       }
 
       // Tab cycles focus (auto-opens dropdown for select fields)
       if (key.tab) {
-        dispatch({ type: "setFocus", focus: nextFocus(state.focus) });
+        d({ type: "setFocus", focus: nextFocus(s.focus) });
         return;
       }
 
-      // Enter on non-select fields: run analysis
+      // Enter: open dropdown for select fields, run analysis otherwise
       if (key.return) {
-        if (isSelectField(state.focus)) {
-          dispatch({ type: "openSelect" });
-        } else if (state.ticker) {
-          dispatch({ type: "startAnalysis" });
-          await runAnalysis(state, dispatch);
+        if (isSelectField(s, s.focus)) {
+          d({ type: "openSelect" });
+        } else if (s.ticker) {
+          d({ type: "startAnalysis" });
+          // Use the stable stateRef which has latest state
+          runAnalysis(s, d);
         }
         return;
       }
 
       // Arrow down on select field opens dropdown
-      if (key.downArrow && isSelectField(state.focus)) {
-        dispatch({ type: "openSelect" });
+      if (key.downArrow && isSelectField(s, s.focus)) {
+        d({ type: "openSelect" });
         return;
       }
 
-      // Backspace/delete
+      // Backspace/delete — works for all fields (text + free-text)
       if (key.backspace || key.delete) {
-        dispatch({ type: "deleteChar" });
+        d({ type: "deleteChar" });
         return;
       }
 
-      // Printable chars
-      if (input.length === 1 && /[a-zA-Z0-9._\-\u4e00-\u9fff]/.test(input)) {
-        dispatch({ type: "appendChar", char: input });
+      // Printable chars — works for all fields
+      if (input.length === 1 && /[a-zA-Z0-9._\-\u4e00-\u9fff/:]/.test(input)) {
+        d({ type: "appendChar", char: input });
       }
     }
 
-    if (state.screen === "cache" && key.return) {
-      dispatch({
+    if (s.screen === "cache" && key.return) {
+      d({
         type: "cacheResult",
         output: "Cache stats would appear here.\nBridge RPC: cache.stats",
       });
@@ -372,6 +390,8 @@ function App() {
 // ===========================================================================
 
 function ResearchScreen({ state }: { state: AppState }) {
+  const showModelSelect = state.provider ? modelHasOptions(state.provider) : false;
+
   return (
     <Box flexDirection="column">
       <Text bold>Research Configuration</Text>
@@ -399,15 +419,26 @@ function ResearchScreen({ state }: { state: AppState }) {
           selectedIdx={state.selectIdx}
           hint="Choose LLM provider"
         />
-        <SelectFieldRow
-          label="Model"
-          value={state.model}
-          focused={state.focus === "model"}
-          open={state.selectOpen === "model"}
-          options={state.provider ? (MODELS_BY_PROVIDER[state.provider.toLowerCase()] ?? []) : []}
-          selectedIdx={state.selectIdx}
-          hint={state.provider ? "Choose model" : "Select provider first"}
-        />
+        {showModelSelect ? (
+          <SelectFieldRow
+            label="Model"
+            value={state.model}
+            focused={state.focus === "model"}
+            open={state.selectOpen === "model"}
+            options={MODELS_BY_PROVIDER[state.provider.toLowerCase()] ?? []}
+            selectedIdx={state.selectIdx}
+            hint="Choose model"
+          />
+        ) : (
+          <FieldRow
+            label="Model"
+            value={state.model}
+            focused={state.focus === "model"}
+            hint={
+              state.provider ? "Type model name (e.g. Qwen/Qwen2.5-7B)" : "Select provider first"
+            }
+          />
+        )}
       </Box>
 
       {state.status === "running" && <Text color="cyan">Running 6-analyst pipeline...</Text>}
@@ -466,7 +497,7 @@ function SelectFieldRow({
         )}
       </Box>
       {/* Dropdown overlay */}
-      {open && options.length > 0 && (
+      {open && (
         <Box flexDirection="column" marginLeft={2}>
           {options.map((opt, i) => {
             const color = i === selectedIdx ? "cyan" : undefined;
@@ -483,11 +514,6 @@ function SelectFieldRow({
               </Text>
             );
           })}
-        </Box>
-      )}
-      {open && options.length === 0 && (
-        <Box marginLeft={2}>
-          <Text dimColor>No options available</Text>
         </Box>
       )}
     </Box>
