@@ -8,6 +8,7 @@
 
 import { Box, render, Text, useInput, useStdout } from "ink";
 import { useEffect, useReducer, useRef } from "react";
+import type { LlmOptions } from "../llm/factory.js";
 
 // ===========================================================================
 // Banner — standard FIGlet font for readability
@@ -19,8 +20,8 @@ const BANNER = [
   "║   _____ _____ _____ _                    _   ║",
   "║  | ____|_   _|  ___/ \\   __ _  ___ _ __ | |_ ║",
   "║  |  _|   | | | |_ / _ \\ / _` |/ _ \\ '_ \\| __|║",
-  "║  | |___  | | |  _/ ___ \\ (_| |  __/ | | | |_ ║",
-  "║  |_____| |_| |_|/_/   \\_\\__, |\\___|_| |_|\\__|║",
+  "║  | |___  | | |  _/ ___ \\ (_| |  __/ | | | |_\\__ \\ ║",
+  "║  |_____| |_| |_|/_/   \\_\\__, |\\___|_| |_|\\__|___/║",
   "║                         |___/                 ║",
   "║                                              ║",
   "║      Multi-Agent ETF Investment Framework     ║",
@@ -220,17 +221,15 @@ function reducer(state: AppState, action: Action): AppState {
       const opts = selectOptions(state);
       const value = opts[state.selectIdx];
       if (value === undefined) return { ...state, selectOpen: null, selectIdx: 0 };
-      // When provider changes, clear model so user re-picks
-      const provider = state.selectOpen === "provider" ? value : state.provider;
-      const model = state.selectOpen === "model" ? value : state.model;
       // Reset vllm models when switching away from vllm
+      const newProvider = state.selectOpen === "provider" ? value : state.provider;
       const vllmModels =
-        state.selectOpen === "provider" && value.toLowerCase() !== "vllm" ? null : state.vllmModels;
+        state.selectOpen === "provider" && newProvider.toLowerCase() !== "vllm"
+          ? null
+          : state.vllmModels;
       return {
         ...state,
         [state.selectOpen]: value,
-        provider,
-        model,
         selectOpen: null,
         selectIdx: 0,
         vllmModels,
@@ -400,12 +399,12 @@ function App() {
       {/* Header + Tabs */}
       <Box justifyContent="space-between" marginBottom={1}>
         <Box>
-          {(["research", "results", "cache"] as const).map((s) => {
-            const label = s.charAt(0).toUpperCase() + s.slice(1);
+          {(["research", "results", "cache"] as const).map((tab) => {
+            const label = tab.charAt(0).toUpperCase() + tab.slice(1);
             return (
-              <Text key={s}>
+              <Text key={tab}>
                 {" "}
-                {state.screen === s ? (
+                {state.screen === tab ? (
                   <Text backgroundColor="blue"> {label} </Text>
                 ) : (
                   <Text> {label} </Text>
@@ -473,7 +472,7 @@ function ResearchScreen({ state }: { state: AppState }) {
           value={state.provider}
           focused={state.focus === "provider"}
           open={state.selectOpen === "provider"}
-          options={PROVIDERS as unknown as string[]}
+          options={PROVIDERS}
           selectedIdx={state.selectIdx}
           hint="Choose LLM provider"
         />
@@ -546,7 +545,7 @@ function SelectFieldRow({
   value: string;
   focused: boolean;
   open: boolean;
-  options: string[];
+  options: readonly string[];
   selectedIdx: number;
   hint: string;
 }) {
@@ -637,7 +636,7 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
     try {
       const config = await new BridgeApi(client).configGet();
       const api = new BridgeApi(client);
-      const llmOpts: Record<string, unknown> = { tier: "deep" };
+      const llmOpts: LlmOptions = { tier: "deep" };
       if (state.provider) llmOpts.provider = state.provider;
       if (state.model) llmOpts.model = state.model;
       const llmHandle = createLlmFromConfig(config, llmOpts);
