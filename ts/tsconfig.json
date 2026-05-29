@@ -18,6 +18,7 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
+    "jsx": "react-jsx",
 
     "declaration": true,
     "declarationMap": true,

@@ -20,6 +20,7 @@ import {
   looksLikeCompleteMarketFlowReport,
   normalizeMarketFlowTailSections,
 } from "../helpers/market_flow_normalize.js";
+import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
 import { postJudgeClean, preJudgeClean } from "../helpers/report_leads.js";
 import { normalizeChineseRoleTerms } from "../helpers/role_terms.js";
 import {
@@ -81,13 +82,20 @@ export function createMarketFlowNode(opts: AnalystNodeOptions) {
       } else if (phase.kind === "recovery") {
         body = `${body}${buildRecoveryInstruction()}`;
       }
-      return assembleSystemFrame({
+      const baseFrame = assembleSystemFrame({
         ctx: opts.promptContext,
         currentDate: tradeDate,
         instrumentContext,
         toolNames,
         analystSystemMessage: body,
       });
+      // Inject memory context (graceful no-op when memory is empty).
+      const memorySection = buildMemoryPromptSection(
+        state,
+        { role: "etf_market_analyst" },
+        opts.promptContext.language,
+      );
+      return injectMemoryPromptSection(baseFrame, memorySection);
     };
 
     const baseMessages = state.messages as BaseMessage[];
@@ -147,7 +155,7 @@ export function createMarketFlowNode(opts: AnalystNodeOptions) {
   };
 }
 
-function assembleSystemFrame(args: {
+export function assembleSystemFrame(args: {
   ctx: PromptContext;
   currentDate: string;
   instrumentContext: string;

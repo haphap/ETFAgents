@@ -218,7 +218,7 @@ Python 的细致版本。
 
 **估算**：~250 LOC TS + ~12 测试。1 turn。
 
-### 6.10 Sub-step 2.6 — build_trader_backtest_signal ⏭ 待开始
+### 6.10 Sub-step 2.6 — build_trader_backtest_signal ✅
 **目标**：从 trader 输出（rendered prose + structured TraderProposal）抽取
 出 framework-agnostic 的 `BacktestSignal` dict，供 `backtest.run_candidate_pool`
 RPC 消费。
@@ -251,7 +251,7 @@ RPC 消费。
 **风险**：Python 的 prose 抽取依赖大量正则（每种 trigger metric 不同），
 直接照搬约 60+ 个 regex 常量。需要保持与 Python 行为一致以保证回测对账。
 
-### 6.11 Sub-step 2.7 — memory 注入 ⏭ 待开始
+### 6.11 Sub-step 2.7 — memory 注入 ✅
 **目标**：让 analyst / trader prompt 能注入 lesson / continuity / method
 context（现状是占位空段），与 Python 行为一致。
 
@@ -499,15 +499,19 @@ TS 端调 `paper.*` RPC，输出表格。仅 CLI（不进 TUI）。
 - Phase 0（21 RPC 方法 + 14 集成测试）
 - Phase 1（TS 工程 + Phase 1 Exit demo）
 - Phase 2 sub-step 1（minimal main spine）
-- Phase 2 sub-step 2.1 / 2.2 / 2.3 / 2.4 / 2.5a / 2.5b / 2.5c-1 / 2.5c-2 / 2.5c-3
+- Phase 2 sub-step 3.1 / 3.2 / 3.3 / 3.4 / 3.5（full analyst pipeline + debate + risk + graph）
+- Phase 4.1–4.3（backtest CLI + paper CLI + CI workflow + docs）
+- Phase 3.7（Ink TUI with research/results/cache screens + state machine）
+- 新增 2 测试文件（memory.test.ts, structured_output.test.ts）
 
-**TS 测试**：259/259 通过；**Python 回归**：14/14 通过。
+**TS 测试**：288/288 通过（18 文件）；**Python 回归**：14/14 通过。
+**TS 源文件**：75 + 1 .tsx TUI
+**CLI 命令**：8 个（analyze, analyze-mini, analyze-pool, backtest, paper, detail, cache, bridge-ping）
 
 **端到端验证**：单 ticker（510300.SH @ 2024-06-01）跑通，
 trader_allocation_plan 中文 4 段格式 + 真实 Tushare 价格数据。
 
-**接下来**：sub-step 2.6（build_trader_backtest_signal，最复杂的一段）→
-2.7（memory 注入读路径）→ 进入 sub-step 3（剩余 analyst + 辩论 + 决策）。
+**接下来**：进入 sub-step 3（剩余 analyst + 辩论 + 决策）。
 
 ---
 

@@ -62,6 +62,47 @@ export const SpineState = Annotation.Root({
     reducer: (_prev, next) => next,
     default: () => "",
   }),
+
+  // Researcher/Debator reports (Phase 2 sub-step 3.2-3.3)
+  bull_researcher_report: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  bear_researcher_report: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  aggressive_debator_response: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  conservative_debator_response: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  neutral_debator_response: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+  final_allocation_decision: Annotation<string>({
+    reducer: (_prev, next) => next,
+    default: () => "",
+  }),
+
+  // Memory context (populated by Python AnalysisMemoryStore in sub-step 4).
+  // Each dict is keyed by role name → context string.
+  continuity_context: Annotation<Record<string, string>>({
+    reducer: (_prev, next) => next,
+    default: () => ({}),
+  }),
+  lesson_context: Annotation<Record<string, string>>({
+    reducer: (_prev, next) => next,
+    default: () => ({}),
+  }),
+  method_context: Annotation<Record<string, string>>({
+    reducer: (_prev, next) => next,
+    default: () => ({}),
+  }),
 });
 
 export type SpineStateType = typeof SpineState.State;
