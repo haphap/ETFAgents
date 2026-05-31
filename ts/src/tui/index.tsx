@@ -23,8 +23,8 @@ const BANNER = [
   "║   _____ _____ _____ _                    _   ║",
   "║  | ____|_   _|  ___/ \\   __ _  ___ _ __ | |_ ║",
   "║  |  _|   | | | |_ / _ \\ / _` |/ _ \\ '_ \\| __|║",
-  "║  | |___  | | |  _/ ___ \\ (_| |  __/ | | | |_\\__ \\ ║",
-  "║  |_____| |_| |_|/_/   \\_\\__, |\\___|_| |_|\\__|___/║",
+  "║  | |___  | | |  _/ ___ \\ (_| |  __/ | | | |_ ║",
+  "║  |_____| |_| |_|/_/   \\_\\__, |\\___|_| |_|\\__|║",
   "║                         |___/                 ║",
   "║                                              ║",
   "║      Multi-Agent ETF Investment Framework     ║",
@@ -55,7 +55,7 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
 };
 
 // ===========================================================================
-// Team section definitions (matches Python SECTION_DEFINITIONS)
+// Active mini-spine stages. Keep these aligned with buildMiniSpineGraph.
 // ===========================================================================
 
 interface SectionDef {
@@ -65,17 +65,8 @@ interface SectionDef {
 }
 
 const DEFAULT_SECTIONS: SectionDef[] = [
-  { id: "catalyst_sentiment", title: "催化剂与情绪分析", team: "分析师" },
-  { id: "macro_regime", title: "宏观环境分析", team: "分析师" },
-  { id: "meso_commodity", title: "行业与商品分析", team: "分析师" },
-  { id: "holdings_industry", title: "持仓行业归因", team: "分析师" },
-  { id: "top_holdings", title: "头部持仓分析", team: "分析师" },
   { id: "market_flow", title: "行情数据综合分析", team: "分析师" },
-  { id: "bull_researcher", title: "多头研究", team: "研究" },
-  { id: "bear_researcher", title: "空头研究", team: "研究" },
-  { id: "trader", title: "交易信号生成", team: "风险" },
-  { id: "risk_debate", title: "风险辩论", team: "风险" },
-  { id: "portfolio_manager", title: "投资组合建议", team: "决策" },
+  { id: "trader", title: "交易信号生成", team: "决策" },
 ];
 
 function sectionGroups(): Record<string, SectionDef[]> {
@@ -148,6 +139,8 @@ type Action =
   | { type: "etfDetailError"; error: string }
   | { type: "vllmModelsFetched"; models: string[] }
   | { type: "vllmModelsFailed" };
+
+type AppDispatch = (action: Action) => void;
 
 // ===========================================================================
 // Helpers
@@ -242,6 +235,7 @@ function reducer(state: AppState, action: Action): AppState {
         result: "",
         sectionDone: new Set(),
         stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
+        etfDetail: null,
       };
     case "setFocus":
       return {
@@ -310,6 +304,7 @@ function reducer(state: AppState, action: Action): AppState {
         logs: [],
         sectionDone: new Set(),
         stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
+        etfDetail: { loading: true },
       };
     case "appendLog":
       return { ...state, logs: [...state.logs, action.msg] };
@@ -355,7 +350,7 @@ function reducer(state: AppState, action: Action): AppState {
 
 const VLLM_URLS = ["http://127.0.0.1:8020/v1/models", "http://localhost:8000/v1/models"];
 
-async function fetchVllmModels(dispatch: (action: Action) => void) {
+async function fetchVllmModels(dispatch: AppDispatch) {
   for (const url of VLLM_URLS) {
     try {
       const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
@@ -377,24 +372,30 @@ async function fetchVllmModels(dispatch: (action: Action) => void) {
 // Analysis runner
 // ===========================================================================
 
-async function runAnalysis(state: AppState, dispatch: (action: Action) => void) {
-  dispatch({ type: "appendLog", msg: `开始分析 ${state.ticker}` });
+async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: () => boolean) {
+  const dispatchIfCurrent = (action: Action) => {
+    if (isCurrent()) dispatch(action);
+  };
+
+  dispatchIfCurrent({ type: "appendLog", msg: `开始分析 ${state.ticker}` });
   try {
     const [{ HumanMessage }] = await Promise.all([import("@langchain/core/messages")]);
     const { BridgeApi, BridgeClient, pickBridgeTools } = await import("../bridge/index.js");
     const { buildMiniSpineGraph } = await import("../graph/mini_spine.js");
     const { createLlmFromConfig } = await import("../llm/factory.js");
 
-    dispatch({ type: "appendLog", msg: "── 连接 Bridge…" });
+    dispatchIfCurrent({ type: "appendLog", msg: "── 连接 Bridge…" });
     const client = new BridgeClient();
     await client.start();
     try {
+      if (!isCurrent()) return;
       const config = await new BridgeApi(client).configGet();
+      if (!isCurrent()) return;
       const api = new BridgeApi(client);
       const llmOpts: LlmOptions = { tier: "deep" };
       if (state.provider) llmOpts.provider = state.provider;
       if (state.model) llmOpts.model = state.model;
-      dispatch({
+      dispatchIfCurrent({
         type: "appendLog",
         msg: `── LLM: ${llmOpts.provider ?? config.llm_provider}/${llmOpts.model ?? "default"}`,
       });
@@ -406,7 +407,8 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
         "get_etf_share",
         "get_etf_nav",
       ]);
-      dispatch({ type: "appendLog", msg: `── 已加载 ${tools.length} 个数据工具` });
+      if (!isCurrent()) return;
+      dispatchIfCurrent({ type: "appendLog", msg: `── 已加载 ${tools.length} 个数据工具` });
 
       const charLimit = Number(config.report_context_char_limit);
       const promptContext = {
@@ -416,7 +418,7 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
           : {}),
       };
 
-          // Load ETF detail via the same bridge connection
+      // Load ETF detail via the same bridge connection.
       try {
         const detailResult = await api.toolsCall("get_etf_price_data", {
           ticker: state.ticker,
@@ -427,21 +429,21 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
         const rows = raw?.rows ?? [];
         const last = rows[rows.length - 1];
         if (last) {
-          dispatch({
+          dispatchIfCurrent({
             type: "etfDetailLoaded",
             ...(typeof last.name === "string" ? { name: last.name } : {}),
             ...(typeof last.close === "number" ? { close: last.close } : {}),
             ...(typeof last.pct_chg === "number" ? { pctChg: last.pct_chg } : {}),
           });
         } else {
-          dispatch({ type: "etfDetailLoaded", name: state.ticker });
+          dispatchIfCurrent({ type: "etfDetailLoaded", name: state.ticker });
         }
       } catch (e) {
-        dispatch({ type: "etfDetailError", error: (e as Error).message });
+        dispatchIfCurrent({ type: "etfDetailError", error: (e as Error).message });
       }
+      if (!isCurrent()) return;
 
-      dispatch({ type: "appendLog", msg: "── 启动 6-analyst pipeline…" });
-      dispatch({ type: "sectionDone", sectionId: "market_flow" });
+      dispatchIfCurrent({ type: "appendLog", msg: "── 启动 market_flow → trader mini-spine…" });
 
       const graph = buildMiniSpineGraph({
         llm: llmHandle.llm,
@@ -454,8 +456,8 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
         trade_date: state.date,
       });
 
-      dispatch({ type: "appendLog", msg: "✓ Pipeline 完成" });
-      dispatch({
+      dispatchIfCurrent({ type: "appendLog", msg: "✓ Mini-spine 完成" });
+      dispatchIfCurrent({
         type: "analysisDone",
         result: String(final.trader_allocation_plan ?? "(no plan)"),
       });
@@ -464,8 +466,8 @@ async function runAnalysis(state: AppState, dispatch: (action: Action) => void) 
     }
   } catch (err) {
     const msg = (err as Error).message;
-    dispatch({ type: "appendLog", msg: `✗ 错误: ${msg.slice(0, 120)}` });
-    dispatch({
+    dispatchIfCurrent({ type: "appendLog", msg: `✗ 错误: ${msg.slice(0, 120)}` });
+    dispatchIfCurrent({
       type: "analysisError",
       msg:
         msg.includes("ECONNREFUSED") || msg.includes("connect")
@@ -486,6 +488,7 @@ function App() {
   stateRef.current = state;
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
+  const runSeqRef = useRef(0);
 
   // vllm discovery
   const vllmFetchedRef = useRef(false);
@@ -523,8 +526,6 @@ function App() {
     return undefined;
   }, [state.phase, state.status]);
 
-
-
   useInput((input, key) => {
     const s = stateRef.current;
     const d = dispatchRef.current;
@@ -536,6 +537,7 @@ function App() {
         return;
       }
       if (s.phase === "dashboard") {
+        runSeqRef.current += 1;
         d({ type: "backToTicker" });
         return;
       }
@@ -584,8 +586,10 @@ function App() {
         if (isSelectField(s, s.focus)) {
           d({ type: "openSelect" });
         } else {
+          const runId = runSeqRef.current + 1;
+          runSeqRef.current = runId;
           d({ type: "startAnalysis" });
-          runAnalysis(s, d);
+          runAnalysis(s, d, () => runSeqRef.current === runId);
         }
         return;
       }
@@ -602,7 +606,10 @@ function App() {
     }
 
     if (s.phase === "dashboard") {
-      if (key.return && (s.status === "done" || s.status === "error")) d({ type: "backToTicker" });
+      if (key.return && (s.status === "done" || s.status === "error")) {
+        runSeqRef.current += 1;
+        d({ type: "backToTicker" });
+      }
     }
   });
 
@@ -794,7 +801,6 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
 
   const el = fmtElapsed(elapsed);
 
-  // Stats bar values
   const agentsTotal = DEFAULT_SECTIONS.length;
   const agentsDone = done.size;
   const reportsTotal = DEFAULT_SECTIONS.length;
@@ -923,13 +929,9 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
         <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
           {/* Team tabs (top) */}
           <Box marginBottom={1}>
-            <TabButton label="📊 分析团队" done={countDone("analysts")} total={total("analysts")} />
+            <TabButton label="📊 行情分析" done={countDone("analysts")} total={total("analysts")} />
             <Text> </Text>
-            <TabButton label="📖 研究" done={countDone("research")} total={total("research")} />
-            <Text> </Text>
-            <TabButton label="⚠️ 风险" done={countDone("risk")} total={total("risk")} />
-            <Text> </Text>
-            <TabButton label="🎯 决策" done={countDone("decision")} total={total("decision")} />
+            <TabButton label="🎯 交易信号" done={countDone("decision")} total={total("decision")} />
           </Box>
 
           {/* Report body (bottom) */}
@@ -976,7 +978,7 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
       {/* Stats bar */}
       <Box marginTop={1} justifyContent="space-between">
         <Text color="cyan">
-          ◎ Agents {agentsDone}/{agentsTotal}{" "}
+          ◎ Stages {agentsDone}/{agentsTotal}{" "}
           {state.status === "running"
             ? "· 分析中"
             : state.status === "done"
@@ -985,10 +987,7 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
                 ? "· 错误"
                 : "· 等待"}
         </Text>
-        <Text dimColor>
-          LLM {state.stats.llm_calls} · Tools {state.stats.tool_calls} ·{" "}
-          {state.stats.tokens > 0 ? `${state.stats.tokens} tokens` : "--"}
-        </Text>
+        <Text dimColor>Mini-spine · market_flow → trader</Text>
         <Text color="green">
           Reports {reportsDone}/{reportsTotal}
         </Text>
