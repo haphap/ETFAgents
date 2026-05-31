@@ -708,6 +708,20 @@ function normalizePriceRows(rows: Array<Record<string, unknown>>): PriceRow[] {
   return normalized;
 }
 
+/** Column names that identify the real tabular header in a price CSV payload. */
+const PRICE_COLUMN_KEYS = new Set([
+  "date",
+  "trade_date",
+  "close",
+  "open",
+  "high",
+  "low",
+  "vol",
+  "volume",
+  "amount",
+  "pct_chg",
+]);
+
 export function extractPriceRows(text: string): PriceRow[] {
   try {
     const raw = JSON.parse(text) as { rows?: Array<Record<string, unknown>> };
@@ -719,10 +733,18 @@ export function extractPriceRows(text: string): PriceRow[] {
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith("#"));
-    const headerLine = lines[0];
+    // _to_csv_with_header() appends un-commented summary lines (e.g.
+    // "Ticker: 510300.SH", "Close: 3.927") before the real CSV table, so the
+    // first non-comment line is not necessarily the header. Find the actual
+    // tabular header: a comma-separated row containing a known column name.
+    const headerIdx = lines.findIndex((line) => {
+      const cells = parseCsvLine(line).map((cell) => cell.trim().toLowerCase());
+      return cells.length >= 2 && cells.some((cell) => PRICE_COLUMN_KEYS.has(cell));
+    });
+    const headerLine = headerIdx >= 0 ? lines[headerIdx] : undefined;
     if (!headerLine) return [];
     const headers = parseCsvLine(headerLine);
-    const rows = lines.slice(1).map((line) => {
+    const rows = lines.slice(headerIdx + 1).map((line) => {
       const values = parseCsvLine(line);
       return Object.fromEntries(headers.map((header, i) => [header, values[i] ?? ""]));
     });
@@ -1029,6 +1051,18 @@ export function reducer(state: AppState, action: Action): AppState {
         queue: state.queue.map((item, i) =>
           i === action.index ? { ...item, status: "running" } : item,
         ),
+        // Section/report state is per-ticker: clear it when a new ticker starts
+        // so tab counters and "Agents N/N" reflect the current run, not the
+        // aggregate of tickers already finished.
+        sectionDone: new Set(),
+        sectionStatus: initSectionStatus(),
+        activeSection: "",
+        reports: {},
+        reportNodes: {},
+        selectedSectionByTab: {},
+        reportScrollBySection: {},
+        rating: "",
+        executionSummary: null,
       };
     case "queueTickerDone":
       return {

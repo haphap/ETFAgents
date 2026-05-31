@@ -34,6 +34,28 @@ Date,Open,High,Low,Close,Volume
     expect(rows[1]?.pctChg).toBeCloseTo(2, 5);
   });
 
+  it("skips uncommented Key-snapshot summary lines and finds the real CSV header", () => {
+    // Mirrors etfagents.dataflows.tushare._to_csv_with_header: a "# Key snapshot"
+    // block whose summary lines are written WITHOUT a leading "#".
+    const rows = extractPriceRows(`# Daily ETF Price Data
+# Total records: 2
+# Data retrieved on: 2026-05-29 10:00:00
+
+# Key snapshot
+Ticker: 510300.SH
+Trade Date: 2026-05-29
+Close: 3.927
+
+trade_date,open,high,low,close,vol
+2026-05-28,3.800,3.900,3.700,3.850,1000
+2026-05-29,3.850,3.980,3.840,3.927,1250
+`);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({ date: "2026-05-29", close: 3.927, volume: 1250 });
+    expect(rows[1]?.pctChg).toBeCloseTo(2, 5);
+  });
+
   it("keeps JSON row support for future bridge payloads", () => {
     const rows = extractPriceRows(
       JSON.stringify({
@@ -68,6 +90,40 @@ Date,Open,High,Low,Close,Volume
       { ticker: "510300.SH", status: "pending" },
       { ticker: "159915.SZ", status: "pending" },
     ]);
+  });
+
+  it("resets per-ticker section state when the next ticker starts", () => {
+    let state = reducer({ ...initState(), ticker: "510300.SH,159915.SZ" }, { type: "openConfig" });
+    state = reducer(state, { type: "startAnalysis" });
+    // Ticker 1 runs and completes every section.
+    state = reducer(state, { type: "queueTickerStarted", index: 0 });
+    for (const id of [
+      "market_flow",
+      "catalyst_sentiment",
+      "macro_regime",
+      "meso_commodity",
+      "holdings_industry",
+      "top_holdings",
+      "research_debate",
+      "research",
+      "trader",
+      "risk_debate",
+      "portfolio_manager",
+    ]) {
+      state = reducer(state, { type: "sectionDone", sectionId: id });
+    }
+    state = reducer(state, { type: "queueTickerDone", index: 0 });
+    expect(state.sectionDone.size).toBe(11);
+
+    // Ticker 2 starting must clear the aggregate so counters reflect the new run.
+    state = reducer(state, { type: "queueTickerStarted", index: 1 });
+    expect(state.sectionDone.size).toBe(0);
+    expect(state.reports).toEqual({});
+    expect(state.rating).toBe("");
+    expect(state.executionSummary).toBeNull();
+    // Queue history for the finished ticker is preserved.
+    expect(state.queue[0]?.status).toBe("done");
+    expect(state.queue[1]?.status).toBe("running");
   });
 
   it("appends multi-role debate reports instead of overwriting the section body", () => {
