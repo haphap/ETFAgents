@@ -11,6 +11,7 @@
 | Document | Description |
 |---|---|
 | [bridge.md](bridge.md) | JSON-RPC sidecar protocol — TypeScript ↔ Python communication |
+| [ts_tui_parity_plan.md](ts_tui_parity_plan.md) | TypeScript TUI parity plan against the Python Textual TUI |
 | [../tsplan.md](../tsplan.md) | Python → TypeScript migration plan with sub-step tracking |
 | [../ts/README.md](../ts/README.md) | TypeScript project layout, development commands, testing |
 

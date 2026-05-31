@@ -60,6 +60,32 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
 };
 
 // ===========================================================================
+// Analysis config catalog (P1) — mirrors cli/tui/services.py AnalysisConfig.
+// ===========================================================================
+
+/** Six analyst sections, in pipeline order. Toggleable in the config modal. */
+const ANALYST_IDS = [
+  "market_flow",
+  "catalyst_sentiment",
+  "macro_regime",
+  "meso_commodity",
+  "holdings_industry",
+  "top_holdings",
+] as const;
+
+const DEPTH_OPTIONS = ["quick", "standard", "deep"] as const;
+type Depth = (typeof DEPTH_OPTIONS)[number];
+const DEPTH_LABELS: Record<Depth, string> = {
+  quick: "快速",
+  standard: "标准",
+  deep: "深度",
+};
+
+/** Report body viewport (lines) and wrap width used by the P0 reader. */
+const REPORT_VIEWPORT = 18;
+const REPORT_WIDTH = 116;
+
+// ===========================================================================
 // Pipeline section model — mirrors cli/tui/services.py SECTION_DEFINITIONS
 // and the node graph built by buildFullGraph (PR #86 full pipeline).
 // ===========================================================================
@@ -203,9 +229,49 @@ const NODE_INFO: Record<
 // State
 // ===========================================================================
 
-type Phase = "ticker" | "config" | "dashboard";
-type ConfigField = "date" | "provider" | "model";
+type Phase = "ticker" | "config" | "dashboard" | "library" | "backtest" | "paper";
+type ConfigField =
+  | "date"
+  | "provider"
+  | "model"
+  | "depth"
+  | "analysts"
+  | "debateRounds"
+  | "riskRounds";
 type SectionStatus = "pending" | "running" | "done" | "failed";
+
+/** Structured failure detail surfaced in the P6 error overlay. */
+interface ErrorDetail {
+  ticker?: string;
+  section?: string;
+  message: string;
+  stack?: string;
+  timestamp: string;
+}
+
+/** A discovered historical report (P2) or backtest artifact (P4). */
+interface ReportMeta {
+  ticker: string;
+  date: string;
+  path: string;
+  rating?: string;
+}
+
+interface BacktestMeta {
+  path: string;
+  tickers: string[];
+  startDate: string;
+  endDate: string;
+  cumulativeReturn?: number;
+}
+
+interface BacktestView {
+  metrics: Record<string, unknown>;
+  benchmarkMetrics: Array<Record<string, unknown>>;
+  health: Record<string, unknown> | null;
+  nav: number[];
+  trades: number;
+}
 
 interface QueueItem {
   ticker: string;
@@ -242,10 +308,18 @@ interface AppState {
   date: string;
   provider: string;
   model: string;
+  /** Analysis config (P1) */
+  selectedAnalysts: Record<string, boolean>;
+  depth: Depth;
+  debateRounds: number;
+  riskRounds: number;
+  backendUrl: string;
   /** Config modal state */
   focus: ConfigField;
   selectOpen: ConfigField | null;
   selectIdx: number;
+  /** Cursor over analyst toggles when the "analysts" row is focused. */
+  analystCursor: number;
   /** Dashboard state */
   status: "idle" | "running" | "done" | "error";
   result: string;
@@ -260,6 +334,9 @@ interface AppState {
   reportNodes: Record<string, string[]>;
   /** Which team tab is focused in the dashboard. */
   activeTab: string;
+  /** P0 report reader: selected section per tab + scroll offset per section. */
+  selectedSectionByTab: Record<string, string>;
+  reportScrollBySection: Record<string, number>;
   /** Final portfolio-manager rating extracted from the trader signal. */
   rating: string;
   /** Stats from analysis runner */
@@ -280,6 +357,39 @@ interface AppState {
   } | null;
   /** vllm */
   vllmModels: string[] | null;
+  /** P6 structured error detail + overlay visibility. */
+  errorDetail: ErrorDetail | null;
+  showErrorDetail: boolean;
+  /** P3 watchlist (read-only, derived from discovered report history). */
+  watchlist: string[];
+  watchlistIdx: number;
+  /** P2 report library. */
+  library: {
+    loading: boolean;
+    error?: string;
+    reports: ReportMeta[];
+    selectedIdx: number;
+    body: string;
+    bodyLoading: boolean;
+    scroll: number;
+  };
+  /** P4 backtest viewer. */
+  backtest: {
+    loading: boolean;
+    error?: string;
+    records: BacktestMeta[];
+    selectedIdx: number;
+    view: BacktestView | null;
+  };
+  /** P5 paper trading snapshot. */
+  paper: {
+    loading: boolean;
+    error?: string;
+    user?: string;
+    account: Record<string, unknown> | null;
+    positions: Array<Record<string, unknown>>;
+    trades: Array<Record<string, unknown>>;
+  };
 }
 
 type Action =
@@ -325,7 +435,48 @@ type Action =
     }
   | { type: "etfDetailError"; error: string }
   | { type: "vllmModelsFetched"; models: string[] }
-  | { type: "vllmModelsFailed" };
+  | { type: "vllmModelsFailed" }
+  // P1 config
+  | { type: "toggleAnalyst"; id: string }
+  | { type: "moveAnalystCursor"; delta: number }
+  | { type: "stepRounds"; field: "debateRounds" | "riskRounds"; delta: number }
+  | { type: "setBackend"; url: string }
+  // P0 report reader
+  | { type: "selectSection"; delta: number }
+  | { type: "scrollReport"; delta: number }
+  // P2 / P4 / P5 navigation
+  | { type: "goPhase"; phase: Phase }
+  // P2 library
+  | { type: "libraryLoading" }
+  | { type: "libraryLoaded"; reports: ReportMeta[] }
+  | { type: "libraryError"; error: string }
+  | { type: "librarySelect"; delta: number }
+  | { type: "libraryBodyLoading" }
+  | { type: "libraryBody"; body: string }
+  | { type: "libraryScroll"; delta: number }
+  // P3 watchlist
+  | { type: "watchlistLoaded"; tickers: string[] }
+  | { type: "watchlistMove"; delta: number }
+  | { type: "watchlistAddToInput" }
+  // P4 backtest
+  | { type: "backtestLoading" }
+  | { type: "backtestLoaded"; records: BacktestMeta[] }
+  | { type: "backtestError"; error: string }
+  | { type: "backtestSelect"; delta: number }
+  | { type: "backtestView"; view: BacktestView }
+  // P5 paper
+  | { type: "paperLoading" }
+  | {
+      type: "paperLoaded";
+      user?: string;
+      account: Record<string, unknown> | null;
+      positions: Array<Record<string, unknown>>;
+      trades: Array<Record<string, unknown>>;
+    }
+  | { type: "paperError"; error: string }
+  // P6 error detail
+  | { type: "setErrorDetail"; detail: ErrorDetail }
+  | { type: "toggleErrorDetail" };
 
 type AppDispatch = (action: Action) => void;
 
@@ -339,6 +490,122 @@ function today(): string {
 
 function initSectionStatus(): Record<string, SectionStatus> {
   return Object.fromEntries(DEFAULT_SECTIONS.map((s) => [s.id, "pending" as const]));
+}
+
+function initSelectedAnalysts(): Record<string, boolean> {
+  return Object.fromEntries(ANALYST_IDS.map((id) => [id, true]));
+}
+
+/** Section ids belonging to a team tab, in pipeline order. */
+function sectionsForTab(tab: string): string[] {
+  return (sectionGroups()[tab] ?? []).map((s) => s.id);
+}
+
+/** P0: move section selection within a tab, wrapping at the ends. */
+export function nextSectionId(
+  sectionIds: readonly string[],
+  current: string | undefined,
+  delta: number,
+): string | undefined {
+  if (sectionIds.length === 0) return undefined;
+  const i = current ? sectionIds.indexOf(current) : -1;
+  if (i < 0) return delta >= 0 ? sectionIds[0] : sectionIds[sectionIds.length - 1];
+  const next = (i + delta + sectionIds.length) % sectionIds.length;
+  return sectionIds[next];
+}
+
+/** Wrap a single logical line to a max width, preserving word-ish breaks. */
+function wrapToWidth(line: string, width: number): string[] {
+  if (line.length <= width) return [line];
+  const out: string[] = [];
+  for (let i = 0; i < line.length; i += width) out.push(line.slice(i, i + width));
+  return out;
+}
+
+/**
+ * P0: produce the visible report viewport. Returns the wrapped lines, the
+ * clamped scroll offset, the total wrapped-line count, and edge flags so the
+ * caller can render a scroll indicator without recomputing.
+ */
+export function reportViewport(
+  body: string,
+  scroll: number,
+  viewport = REPORT_VIEWPORT,
+  width = REPORT_WIDTH,
+): { lines: string[]; scroll: number; total: number; atTop: boolean; atBottom: boolean } {
+  const wrapped = body.split("\n").flatMap((line) => wrapToWidth(line, width));
+  const total = wrapped.length;
+  const maxScroll = Math.max(0, total - viewport);
+  const clamped = Math.max(0, Math.min(scroll, maxScroll));
+  return {
+    lines: wrapped.slice(clamped, clamped + viewport),
+    scroll: clamped,
+    total,
+    atTop: clamped === 0,
+    atBottom: clamped >= maxScroll,
+  };
+}
+
+/** P1: rounds clamp to the supported range (graph is single-pass: max 1 active). */
+export function clampRound(n: number): number {
+  if (!Number.isFinite(n)) return 1;
+  return Math.max(1, Math.min(3, Math.round(n)));
+}
+
+/** P1: the TS full graph is single-pass; rounds > 1 are not wired yet. */
+export function multiRoundUnsupported(debateRounds: number, riskRounds: number): boolean {
+  return debateRounds > 1 || riskRounds > 1;
+}
+
+/** P1: deselecting analysts is not honoured by the single-pass graph yet. */
+export function analystSelectionUnsupported(selected: Record<string, boolean>): boolean {
+  return ANALYST_IDS.some((id) => selected[id] === false);
+}
+
+/**
+ * P4: accept either the bridge result shape (flat `metrics`) or the on-disk
+ * metrics.json shape ({ metrics, benchmark_metrics, health }) and normalize.
+ */
+export function normalizeBacktestResult(
+  obj: Record<string, unknown>,
+  nav: number[] = [],
+): BacktestView {
+  const metrics = (obj.metrics as Record<string, unknown> | undefined) ?? {};
+  const benchmarkMetrics = Array.isArray(obj.benchmark_metrics)
+    ? (obj.benchmark_metrics as Array<Record<string, unknown>>)
+    : [];
+  const health = (obj.health as Record<string, unknown> | undefined) ?? null;
+  const navFromResult = Array.isArray(obj.nav)
+    ? (obj.nav as Array<{ nav?: number }>)
+        .map((r) => (typeof r.nav === "number" ? r.nav : undefined))
+        .filter((v): v is number => v !== undefined)
+    : [];
+  const trades = Array.isArray(obj.trades) ? (obj.trades as unknown[]).length : 0;
+  return {
+    metrics,
+    benchmarkMetrics,
+    health,
+    nav: nav.length > 0 ? nav : navFromResult,
+    trades,
+  };
+}
+
+/** P2/P4: newest-first ordering by date then ticker. */
+export function sortReports(reports: ReportMeta[]): ReportMeta[] {
+  return [...reports].sort((a, b) =>
+    b.date !== a.date ? b.date.localeCompare(a.date) : a.ticker.localeCompare(b.ticker),
+  );
+}
+
+/** P5: deterministic position ordering by ticker. */
+export function sortByTicker<T extends { ticker?: unknown }>(rows: T[]): T[] {
+  return [...rows].sort((a, b) => String(a.ticker ?? "").localeCompare(String(b.ticker ?? "")));
+}
+
+/** P3: merge a watchlist ticker into the current input, deduplicating. */
+export function appendTickerToInput(input: string, ticker: string): string {
+  const merged = parseTickers(`${input} ${ticker}`);
+  return merged.join(",");
 }
 
 export function parseTickers(input: string): string[] {
@@ -522,18 +789,6 @@ function buildExecutionSummary(finalState: Record<string, unknown>): ExecutionSu
   return summary;
 }
 
-function visibleReportLines(body: string, limit = 80): string[] {
-  const lines = body.split("\n");
-  if (lines.length <= limit) return lines;
-  const headCount = Math.floor(limit / 2);
-  const tailCount = limit - headCount - 1;
-  return [
-    ...lines.slice(0, headCount),
-    `… 省略 ${lines.length - limit + 1} 行，完整滚动阅读见下一步 P0 viewer …`,
-    ...lines.slice(-tailCount),
-  ];
-}
-
 export function initState(): AppState {
   return {
     phase: "ticker",
@@ -544,9 +799,15 @@ export function initState(): AppState {
     date: today(),
     provider: "",
     model: "",
+    selectedAnalysts: initSelectedAnalysts(),
+    depth: "standard",
+    debateRounds: 1,
+    riskRounds: 1,
+    backendUrl: "",
     focus: "date",
     selectOpen: null,
     selectIdx: 0,
+    analystCursor: 0,
     status: "idle",
     result: "",
     errorMsg: "",
@@ -557,11 +818,27 @@ export function initState(): AppState {
     reports: {},
     reportNodes: {},
     activeTab: "analysts",
+    selectedSectionByTab: {},
+    reportScrollBySection: {},
     rating: "",
     stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
     executionSummary: null,
     etfDetail: null,
     vllmModels: null,
+    errorDetail: null,
+    showErrorDetail: false,
+    watchlist: [],
+    watchlistIdx: 0,
+    library: {
+      loading: false,
+      reports: [],
+      selectedIdx: 0,
+      body: "",
+      bodyLoading: false,
+      scroll: 0,
+    },
+    backtest: { loading: false, records: [], selectedIdx: 0, view: null },
+    paper: { loading: false, account: null, positions: [], trades: [] },
   };
 }
 
@@ -573,6 +850,10 @@ function focusValue(state: AppState): string {
       return state.provider;
     case "model":
       return state.model;
+    case "depth":
+      return state.depth;
+    default:
+      return "";
   }
 }
 
@@ -583,6 +864,7 @@ function selectOptions(state: AppState): string[] {
     if (p === "vllm") return state.vllmModels ?? [];
     return MODELS_BY_PROVIDER[p] ?? [];
   }
+  if (state.selectOpen === "depth") return [...DEPTH_OPTIONS];
   return [];
 }
 
@@ -595,11 +877,20 @@ function modelHasOptions(state: AppState): boolean {
 
 function isSelectField(state: AppState, field: ConfigField): boolean {
   if (field === "provider") return true;
+  if (field === "depth") return true;
   if (field === "model") return modelHasOptions(state);
   return false;
 }
 
-const FOCUS_ORDER: ConfigField[] = ["date", "provider", "model"];
+const FOCUS_ORDER: ConfigField[] = [
+  "date",
+  "provider",
+  "model",
+  "depth",
+  "analysts",
+  "debateRounds",
+  "riskRounds",
+];
 function nextFocus(current: ConfigField): ConfigField {
   const i = FOCUS_ORDER.indexOf(current);
   return FOCUS_ORDER[i + 1] ?? FOCUS_ORDER[0] ?? "date";
@@ -623,6 +914,7 @@ export function reducer(state: AppState, action: Action): AppState {
         focus: "date",
         selectOpen: null,
         selectIdx: 0,
+        analystCursor: 0,
         vllmModels: null,
         errorMsg: "",
         status: "idle",
@@ -634,10 +926,14 @@ export function reducer(state: AppState, action: Action): AppState {
         reports: {},
         reportNodes: {},
         activeTab: "analysts",
+        selectedSectionByTab: {},
+        reportScrollBySection: {},
         rating: "",
         stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
         executionSummary: null,
         etfDetail: null,
+        errorDetail: null,
+        showErrorDetail: false,
       };
     case "setFocus":
       return {
@@ -714,10 +1010,14 @@ export function reducer(state: AppState, action: Action): AppState {
         reports: {},
         reportNodes: {},
         activeTab: "analysts",
+        selectedSectionByTab: {},
+        reportScrollBySection: {},
         rating: "",
         stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
         executionSummary: null,
         etfDetail: { loading: true },
+        errorDetail: null,
+        showErrorDetail: false,
       };
     }
     case "appendLog":
@@ -788,6 +1088,8 @@ export function reducer(state: AppState, action: Action): AppState {
           ...state.reportNodes,
           [action.sectionId]: [...(state.reportNodes[action.sectionId] ?? []), action.nodeLabel],
         },
+        // P0: reset scroll so freshly appended content is visible from the top.
+        reportScrollBySection: { ...state.reportScrollBySection, [action.sectionId]: 0 },
       };
     }
     case "setRating":
@@ -803,8 +1105,15 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "setExecutionSummary":
       return { ...state, executionSummary: action.summary };
-    case "setTab":
-      return { ...state, activeTab: action.tab };
+    case "setTab": {
+      // P0: when entering a tab with no prior selection, select its first section.
+      const ids = sectionsForTab(action.tab);
+      const selectedSectionByTab =
+        state.selectedSectionByTab[action.tab] || ids.length === 0
+          ? state.selectedSectionByTab
+          : { ...state.selectedSectionByTab, [action.tab]: ids[0] as string };
+      return { ...state, activeTab: action.tab, selectedSectionByTab };
+    }
     case "analysisDone": {
       return { ...state, status: "done", result: action.result };
     }
@@ -837,6 +1146,169 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, vllmModels: action.models };
     case "vllmModelsFailed":
       return { ...state, vllmModels: [] };
+
+    // --- P1 config ---
+    case "toggleAnalyst":
+      return {
+        ...state,
+        selectedAnalysts: {
+          ...state.selectedAnalysts,
+          [action.id]: !state.selectedAnalysts[action.id],
+        },
+      };
+    case "moveAnalystCursor": {
+      const n = ANALYST_IDS.length;
+      return { ...state, analystCursor: (state.analystCursor + action.delta + n) % n };
+    }
+    case "stepRounds":
+      return { ...state, [action.field]: clampRound(state[action.field] + action.delta) };
+    case "setBackend":
+      return { ...state, backendUrl: action.url };
+
+    // --- P0 report reader ---
+    case "selectSection": {
+      const ids = sectionsForTab(state.activeTab);
+      const current = state.selectedSectionByTab[state.activeTab];
+      const next = nextSectionId(ids, current, action.delta);
+      if (next === undefined) return state;
+      return {
+        ...state,
+        selectedSectionByTab: { ...state.selectedSectionByTab, [state.activeTab]: next },
+      };
+    }
+    case "scrollReport": {
+      const sectionId = state.selectedSectionByTab[state.activeTab];
+      if (!sectionId) return state;
+      const body = state.reports[sectionId] ?? "";
+      const current = state.reportScrollBySection[sectionId] ?? 0;
+      const { scroll } = reportViewport(body, current + action.delta);
+      return {
+        ...state,
+        reportScrollBySection: { ...state.reportScrollBySection, [sectionId]: scroll },
+      };
+    }
+
+    // --- navigation ---
+    case "goPhase":
+      return { ...state, phase: action.phase, errorMsg: "", selectOpen: null, selectIdx: 0 };
+
+    // --- P2 library ---
+    case "libraryLoading": {
+      const { error: _e, ...lib } = state.library;
+      return { ...state, library: { ...lib, loading: true } };
+    }
+    case "libraryLoaded": {
+      const { error: _e, ...lib } = state.library;
+      const reports = sortReports(action.reports);
+      return {
+        ...state,
+        library: {
+          ...lib,
+          loading: false,
+          reports,
+          selectedIdx: 0,
+          body: "",
+          bodyLoading: reports.length > 0,
+          scroll: 0,
+        },
+      };
+    }
+    case "libraryError":
+      return {
+        ...state,
+        library: { ...state.library, loading: false, error: action.error, reports: [] },
+      };
+    case "librarySelect": {
+      const n = state.library.reports.length;
+      if (n === 0) return state;
+      const selectedIdx = (state.library.selectedIdx + action.delta + n) % n;
+      return {
+        ...state,
+        library: { ...state.library, selectedIdx, body: "", bodyLoading: true, scroll: 0 },
+      };
+    }
+    case "libraryBodyLoading":
+      return { ...state, library: { ...state.library, bodyLoading: true } };
+    case "libraryBody":
+      return {
+        ...state,
+        library: { ...state.library, body: action.body, bodyLoading: false, scroll: 0 },
+      };
+    case "libraryScroll": {
+      const { scroll } = reportViewport(state.library.body, state.library.scroll + action.delta);
+      return { ...state, library: { ...state.library, scroll } };
+    }
+
+    // --- P3 watchlist ---
+    case "watchlistLoaded":
+      return { ...state, watchlist: action.tickers, watchlistIdx: 0 };
+    case "watchlistMove": {
+      const n = state.watchlist.length;
+      if (n === 0) return state;
+      return { ...state, watchlistIdx: (state.watchlistIdx + action.delta + n) % n };
+    }
+    case "watchlistAddToInput": {
+      const ticker = state.watchlist[state.watchlistIdx];
+      if (!ticker) return state;
+      return { ...state, ticker: appendTickerToInput(state.ticker, ticker) };
+    }
+
+    // --- P4 backtest ---
+    case "backtestLoading": {
+      const { error: _e, ...bt } = state.backtest;
+      return { ...state, backtest: { ...bt, loading: true } };
+    }
+    case "backtestLoaded": {
+      const { error: _e, ...bt } = state.backtest;
+      return {
+        ...state,
+        backtest: {
+          ...bt,
+          loading: false,
+          records: action.records,
+          selectedIdx: 0,
+          view: null,
+        },
+      };
+    }
+    case "backtestError":
+      return {
+        ...state,
+        backtest: { ...state.backtest, loading: false, error: action.error, records: [] },
+      };
+    case "backtestSelect": {
+      const n = state.backtest.records.length;
+      if (n === 0) return state;
+      const selectedIdx = (state.backtest.selectedIdx + action.delta + n) % n;
+      return { ...state, backtest: { ...state.backtest, selectedIdx, view: null } };
+    }
+    case "backtestView":
+      return { ...state, backtest: { ...state.backtest, view: action.view } };
+
+    // --- P5 paper ---
+    case "paperLoading": {
+      const { error: _e, ...paper } = state.paper;
+      return { ...state, paper: { ...paper, loading: true } };
+    }
+    case "paperLoaded":
+      return {
+        ...state,
+        paper: {
+          loading: false,
+          ...(action.user !== undefined ? { user: action.user } : {}),
+          account: action.account,
+          positions: sortByTicker(action.positions),
+          trades: action.trades,
+        },
+      };
+    case "paperError":
+      return { ...state, paper: { ...state.paper, loading: false, error: action.error } };
+
+    // --- P6 error detail ---
+    case "setErrorDetail":
+      return { ...state, errorDetail: action.detail };
+    case "toggleErrorDetail":
+      return { ...state, showErrorDetail: !state.showErrorDetail };
   }
 }
 
@@ -1074,13 +1546,24 @@ async function runAnalysis(
       await client.close();
     }
   } catch (err) {
-    const msg = (err as Error).message;
+    const error = err as Error;
+    const msg = error.message;
     if (signal.aborted || msg === "分析已取消。") {
       dispatchIfCurrent({ type: "appendLog", msg: "✗ 分析已取消" });
       dispatchIfCurrent({ type: "queueCancelled" });
       return;
     }
     dispatchIfCurrent({ type: "appendLog", msg: `✗ 错误: ${msg.slice(0, 120)}` });
+    // P6: preserve a structured detail object for the error overlay.
+    dispatchIfCurrent({
+      type: "setErrorDetail",
+      detail: {
+        message: msg,
+        ...(state.tickers[0] ? { ticker: state.tickers[0] } : {}),
+        ...(error.stack ? { stack: error.stack } : {}),
+        timestamp: new Date().toISOString(),
+      },
+    });
     dispatchIfCurrent({
       type: "analysisError",
       msg:
@@ -1088,6 +1571,245 @@ async function runAnalysis(
           ? "Bridge 未运行。请先启动 Python bridge。"
           : msg,
     });
+  }
+}
+
+// ===========================================================================
+// Local artifact discovery (P2 report library, P3 watchlist, P4 backtest)
+// ===========================================================================
+//
+// Mirrors cli/tui/services.py ReportRepository / BacktestViewer, reading the
+// same on-disk conventions under results_dir. We do not invent a new TS-only
+// persistence format; we read what the Python pipeline already writes.
+
+const SKIP_REPORT_DIRS = new Set(["backtest", "memory"]);
+
+function resultsDir(): string {
+  const env = process.env.ETFAGENTS_RESULTS_DIR ?? process.env.TRADINGAGENTS_RESULTS_DIR;
+  if (env) return env;
+  const home = process.env.HOME ?? process.env.USERPROFILE ?? ".";
+  return `${home}/.etfagents/logs`;
+}
+
+async function loadLibrary(dispatch: AppDispatch): Promise<void> {
+  dispatch({ type: "libraryLoading" });
+  try {
+    const { readdir, stat } = await import("node:fs/promises");
+    const root = resultsDir();
+    const reports: ReportMeta[] = [];
+    let tickerDirs: string[] = [];
+    try {
+      tickerDirs = await readdir(root);
+    } catch {
+      dispatch({ type: "libraryLoaded", reports: [] });
+      return;
+    }
+    for (const ticker of tickerDirs) {
+      if (ticker.startsWith("_") || SKIP_REPORT_DIRS.has(ticker)) continue;
+      const tickerPath = `${root}/${ticker}`;
+      let dates: string[] = [];
+      try {
+        if (!(await stat(tickerPath)).isDirectory()) continue;
+        dates = await readdir(tickerPath);
+      } catch {
+        continue;
+      }
+      for (const date of dates) {
+        const path = `${tickerPath}/${date}`;
+        try {
+          await stat(`${path}/complete_report.md`);
+          reports.push({ ticker, date, path });
+        } catch {
+          /* no complete report in this date dir */
+        }
+      }
+    }
+    dispatch({ type: "libraryLoaded", reports });
+  } catch (e) {
+    dispatch({ type: "libraryError", error: (e as Error).message });
+  }
+}
+
+async function loadLibraryBody(record: ReportMeta, dispatch: AppDispatch): Promise<void> {
+  dispatch({ type: "libraryBodyLoading" });
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const body = await readFile(`${record.path}/complete_report.md`, "utf-8");
+    dispatch({ type: "libraryBody", body });
+  } catch (e) {
+    dispatch({ type: "libraryBody", body: `读取报告失败: ${(e as Error).message}` });
+  }
+}
+
+/** P3: derive a read-only watchlist from the most recent distinct report tickers. */
+async function loadWatchlist(dispatch: AppDispatch): Promise<void> {
+  try {
+    const { readdir, stat } = await import("node:fs/promises");
+    const root = resultsDir();
+    let tickerDirs: string[] = [];
+    try {
+      tickerDirs = await readdir(root);
+    } catch {
+      dispatch({ type: "watchlistLoaded", tickers: [] });
+      return;
+    }
+    const tickers: string[] = [];
+    for (const ticker of tickerDirs) {
+      if (ticker.startsWith("_") || SKIP_REPORT_DIRS.has(ticker)) continue;
+      try {
+        if ((await stat(`${root}/${ticker}`)).isDirectory()) tickers.push(ticker.toUpperCase());
+      } catch {
+        /* skip */
+      }
+    }
+    dispatch({ type: "watchlistLoaded", tickers: tickers.slice(0, 12) });
+  } catch {
+    dispatch({ type: "watchlistLoaded", tickers: [] });
+  }
+}
+
+async function walkForFile(root: string, target: string): Promise<string[]> {
+  const { readdir, stat } = await import("node:fs/promises");
+  const found: string[] = [];
+  async function recurse(dir: string): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await readdir(dir);
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = `${dir}/${entry}`;
+      try {
+        const info = await stat(full);
+        if (info.isDirectory()) await recurse(full);
+        else if (entry === target) found.push(full);
+      } catch {
+        /* skip */
+      }
+    }
+  }
+  await recurse(root);
+  return found;
+}
+
+async function loadBacktests(dispatch: AppDispatch): Promise<void> {
+  dispatch({ type: "backtestLoading" });
+  try {
+    const { readFile, stat } = await import("node:fs/promises");
+    const metricsFiles = await walkForFile(`${resultsDir()}/backtest`, "metrics.json");
+    const records: Array<BacktestMeta & { mtime: number }> = [];
+    for (const metricsPath of metricsFiles) {
+      const dir = metricsPath.slice(0, metricsPath.lastIndexOf("/"));
+      let manifest: Record<string, unknown> = {};
+      let cumulativeReturn: number | undefined;
+      try {
+        manifest = JSON.parse(await readFile(`${dir}/manifest.json`, "utf-8"));
+      } catch {
+        /* manifest optional */
+      }
+      try {
+        const m = JSON.parse(await readFile(metricsPath, "utf-8"));
+        const cr = (m.metrics as Record<string, unknown> | undefined)?.cumulative_return;
+        if (typeof cr === "number") cumulativeReturn = cr;
+      } catch {
+        /* metrics optional */
+      }
+      let mtime = 0;
+      try {
+        mtime = (await stat(metricsPath)).mtimeMs;
+      } catch {
+        /* ignore */
+      }
+      records.push({
+        path: dir,
+        tickers: Array.isArray(manifest.tickers) ? (manifest.tickers as string[]) : [],
+        startDate: String(manifest.start_date ?? ""),
+        endDate: String(manifest.end_date ?? ""),
+        ...(cumulativeReturn !== undefined ? { cumulativeReturn } : {}),
+        mtime,
+      });
+    }
+    records.sort((a, b) => b.mtime - a.mtime);
+    dispatch({
+      type: "backtestLoaded",
+      records: records.map(({ mtime: _m, ...rest }) => rest),
+    });
+  } catch (e) {
+    dispatch({ type: "backtestError", error: (e as Error).message });
+  }
+}
+
+async function loadBacktestView(record: BacktestMeta, dispatch: AppDispatch): Promise<void> {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const metrics = JSON.parse(await readFile(`${record.path}/metrics.json`, "utf-8"));
+    let nav: number[] = [];
+    try {
+      const navCsv = await readFile(`${record.path}/nav.csv`, "utf-8");
+      const rows = extractPriceRows(navCsv);
+      nav = rows.map((r) => r.close).filter((v): v is number => v !== undefined);
+      if (nav.length === 0) {
+        // nav.csv uses a `nav` column, not `close`; parse it directly.
+        const lines = navCsv.trim().split("\n");
+        const header = parseCsvLine(lines[0] ?? "");
+        const navIdx = header.findIndex((h) => h.toLowerCase() === "nav");
+        if (navIdx >= 0) {
+          nav = lines
+            .slice(1)
+            .map((l) => Number(parseCsvLine(l)[navIdx]))
+            .filter((v) => Number.isFinite(v));
+        }
+      }
+    } catch {
+      /* nav optional */
+    }
+    let trades = 0;
+    try {
+      const tradesCsv = await readFile(`${record.path}/trades.csv`, "utf-8");
+      trades = Math.max(0, tradesCsv.trim().split("\n").length - 1);
+    } catch {
+      /* trades optional */
+    }
+    const view = normalizeBacktestResult(metrics, nav);
+    view.trades = trades;
+    dispatch({ type: "backtestView", view });
+  } catch (e) {
+    dispatch({ type: "backtestError", error: (e as Error).message });
+  }
+}
+
+async function loadPaper(dispatch: AppDispatch): Promise<void> {
+  dispatch({ type: "paperLoading" });
+  const { BridgeApi, BridgeClient } = await import("../bridge/index.js");
+  const client = new BridgeClient();
+  try {
+    await client.start();
+    const api = new BridgeApi(client);
+    const [user, account, positions, trades] = await Promise.all([
+      api.paperCurrentUser().then((r) => r.user),
+      api.paperGetAccount(),
+      api.paperGetPositions(),
+      api.paperGetTrades({ limit: 20 }),
+    ]);
+    dispatch({
+      type: "paperLoaded",
+      user,
+      account: account as unknown as Record<string, unknown>,
+      positions: positions as unknown as Array<Record<string, unknown>>,
+      trades: trades as unknown as Array<Record<string, unknown>>,
+    });
+  } catch (e) {
+    const msg = (e as Error).message;
+    dispatch({
+      type: "paperError",
+      error:
+        msg.includes("ECONNREFUSED") || msg.includes("connect")
+          ? "Bridge 未运行。请先启动 Python bridge。"
+          : msg,
+    });
+  } finally {
+    await client.close();
   }
 }
 
@@ -1141,12 +1863,52 @@ function App() {
     return undefined;
   }, [state.phase, state.status]);
 
+  // P3: load the read-only watchlist once at startup.
+  const watchlistLoadedRef = useRef(false);
+  useEffect(() => {
+    if (watchlistLoadedRef.current) return;
+    watchlistLoadedRef.current = true;
+    loadWatchlist(dispatch);
+  }, []);
+
+  // P2: discover reports when entering the library.
+  useEffect(() => {
+    if (state.phase === "library") loadLibrary(dispatch);
+  }, [state.phase]);
+
+  // P2: load the selected report body when the selection changes.
+  const libSel = state.library.reports[state.library.selectedIdx];
+  useEffect(() => {
+    if (state.phase === "library" && libSel) loadLibraryBody(libSel, dispatch);
+  }, [state.phase, libSel]);
+
+  // P4: discover backtest artifacts when entering the screen.
+  useEffect(() => {
+    if (state.phase === "backtest") loadBacktests(dispatch);
+  }, [state.phase]);
+
+  // P4: load the selected backtest view when the selection changes.
+  const btSel = state.backtest.records[state.backtest.selectedIdx];
+  useEffect(() => {
+    if (state.phase === "backtest" && btSel) loadBacktestView(btSel, dispatch);
+  }, [state.phase, btSel]);
+
+  // P5: load paper-trading snapshot when entering the screen.
+  useEffect(() => {
+    if (state.phase === "paper") loadPaper(dispatch);
+  }, [state.phase]);
+
   useInput((input, key) => {
     const s = stateRef.current;
     const d = dispatchRef.current;
 
+    // P6: an open error-detail overlay swallows the next key (close on any).
+    if (s.showErrorDetail) {
+      d({ type: "toggleErrorDetail" });
+      return;
+    }
+
     if (key.escape) {
-      if (s.phase === "ticker") process.exit(0);
       if (s.phase === "config") {
         d({ type: "backToTicker" });
         return;
@@ -1157,10 +1919,42 @@ function App() {
         d({ type: "backToTicker" });
         return;
       }
+      if (s.phase === "library" || s.phase === "backtest" || s.phase === "paper") {
+        d({ type: "goPhase", phase: "ticker" });
+        return;
+      }
       process.exit(0);
     }
 
     if (s.phase === "ticker") {
+      // Top-level screen navigation (Ctrl+L/B/P avoids clashing with ticker chars).
+      if (key.ctrl && input === "l") {
+        d({ type: "goPhase", phase: "library" });
+        return;
+      }
+      if (key.ctrl && input === "b") {
+        d({ type: "goPhase", phase: "backtest" });
+        return;
+      }
+      if (key.ctrl && input === "p") {
+        d({ type: "goPhase", phase: "paper" });
+        return;
+      }
+      // Watchlist: arrows select, Tab appends the selected ticker to the input.
+      if (s.watchlist.length > 0) {
+        if (key.upArrow) {
+          d({ type: "watchlistMove", delta: -1 });
+          return;
+        }
+        if (key.downArrow) {
+          d({ type: "watchlistMove", delta: 1 });
+          return;
+        }
+        if (key.tab) {
+          d({ type: "watchlistAddToInput" });
+          return;
+        }
+      }
       if (key.return && parseTickers(s.ticker).length > 0) {
         d({ type: "openConfig" });
         return;
@@ -1199,6 +1993,33 @@ function App() {
         d({ type: "setFocus", focus: nextFocus(s.focus) });
         return;
       }
+      // Analyst toggle row: arrows move cursor, space toggles current analyst.
+      if (s.focus === "analysts") {
+        if (key.leftArrow) {
+          d({ type: "moveAnalystCursor", delta: -1 });
+          return;
+        }
+        if (key.rightArrow) {
+          d({ type: "moveAnalystCursor", delta: 1 });
+          return;
+        }
+        if (input === " ") {
+          const id = ANALYST_IDS[s.analystCursor];
+          if (id) d({ type: "toggleAnalyst", id });
+          return;
+        }
+      }
+      // Round steppers: left/right adjust the count.
+      if (s.focus === "debateRounds" || s.focus === "riskRounds") {
+        if (key.leftArrow) {
+          d({ type: "stepRounds", field: s.focus, delta: -1 });
+          return;
+        }
+        if (key.rightArrow) {
+          d({ type: "stepRounds", field: s.focus, delta: 1 });
+          return;
+        }
+      }
       if (key.return) {
         if (isSelectField(s, s.focus)) {
           d({ type: "openSelect" });
@@ -1218,15 +2039,26 @@ function App() {
         return;
       }
       if (key.backspace || key.delete) {
-        d({ type: "deleteChar" });
+        if (s.focus === "date" || s.focus === "model") d({ type: "deleteChar" });
         return;
       }
-      if (input.length === 1 && /[a-zA-Z0-9._\-\u4e00-\u9fff/:]/.test(input))
+      // Free text entry only for the date and (option-less) model fields.
+      if (
+        (s.focus === "date" || s.focus === "model") &&
+        input.length === 1 &&
+        /[a-zA-Z0-9._\-\u4e00-\u9fff/:]/.test(input)
+      )
         d({ type: "appendChar", char: input });
+      return;
     }
 
     if (s.phase === "dashboard") {
-      // Cycle team tabs with Tab / arrow keys.
+      // P6: open error detail when a failure is recorded.
+      if (input === "e" && s.errorDetail) {
+        d({ type: "toggleErrorDetail" });
+        return;
+      }
+      // Cycle team tabs with Tab / left-right arrows.
       if (key.tab || key.rightArrow) {
         const i = TEAM_TABS.findIndex((t) => t.key === s.activeTab);
         const next = TEAM_TABS[(i + 1) % TEAM_TABS.length];
@@ -1239,11 +2071,74 @@ function App() {
         if (prev) d({ type: "setTab", tab: prev.key });
         return;
       }
+      // P0: up/down select a section, PageUp/PageDown scroll its body.
+      if (key.upArrow) {
+        d({ type: "selectSection", delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        d({ type: "selectSection", delta: 1 });
+        return;
+      }
+      if (key.pageUp) {
+        d({ type: "scrollReport", delta: -REPORT_VIEWPORT });
+        return;
+      }
+      if (key.pageDown) {
+        d({ type: "scrollReport", delta: REPORT_VIEWPORT });
+        return;
+      }
       if (key.return && (s.status === "done" || s.status === "error")) {
         abortRef.current?.abort();
         runSeqRef.current += 1;
         d({ type: "backToTicker" });
       }
+      return;
+    }
+
+    if (s.phase === "library") {
+      if (input === "r") {
+        loadLibrary(d);
+        return;
+      }
+      if (key.upArrow) {
+        d({ type: "librarySelect", delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        d({ type: "librarySelect", delta: 1 });
+        return;
+      }
+      if (key.pageUp) {
+        d({ type: "libraryScroll", delta: -REPORT_VIEWPORT });
+        return;
+      }
+      if (key.pageDown) {
+        d({ type: "libraryScroll", delta: REPORT_VIEWPORT });
+        return;
+      }
+      return;
+    }
+
+    if (s.phase === "backtest") {
+      if (input === "r") {
+        loadBacktests(d);
+        return;
+      }
+      if (key.upArrow) {
+        d({ type: "backtestSelect", delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        d({ type: "backtestSelect", delta: 1 });
+        return;
+      }
+      return;
+    }
+
+    if (s.phase === "paper") {
+      if (input === "r") loadPaper(d);
+      return;
     }
   });
 
@@ -1263,7 +2158,15 @@ function App() {
         {state.phase === "ticker" && <TickerScreen state={state} />}
         {state.phase === "config" && <ConfigModal state={state} />}
         {state.phase === "dashboard" && <Dashboard state={state} elapsed={elapsed} />}
+        {state.phase === "library" && <ReportLibrary state={state} />}
+        {state.phase === "backtest" && <BacktestScreen state={state} />}
+        {state.phase === "paper" && <PaperScreen state={state} />}
       </Box>
+
+      {/* P6: error detail overlay */}
+      {state.showErrorDetail && state.errorDetail && (
+        <ErrorDetailOverlay detail={state.errorDetail} />
+      )}
     </Box>
   );
 }
@@ -1286,6 +2189,30 @@ function TickerScreen({ state }: { state: AppState }) {
         {tickers.length > 0 ? ` · 已识别 ${tickers.length} 个` : ""}
       </Text>
       <Text dimColor>输入代码后按 Enter 配置分析参数</Text>
+
+      {/* P3: watchlist cards derived from recent report history. */}
+      {state.watchlist.length > 0 && (
+        <Box flexDirection="column" marginTop={1} borderStyle="round" paddingX={2}>
+          <Text bold>⭐ 自选 / 最近研究</Text>
+          <Box marginTop={1} flexWrap="wrap">
+            {state.watchlist.map((ticker, i) => (
+              <Box key={ticker} marginRight={1}>
+                <Text
+                  {...(i === state.watchlistIdx ? { color: "cyan" as const, bold: true } : {})}
+                  dimColor={i !== state.watchlistIdx}
+                >
+                  {i === state.watchlistIdx ? "▶ " : "  "}
+                  {ticker.split(".")[0] ?? ticker}
+                </Text>
+              </Box>
+            ))}
+          </Box>
+          <Text dimColor>↑↓ 选择 · Tab 加入输入</Text>
+        </Box>
+      )}
+      <Box marginTop={1}>
+        <Text dimColor>Ctrl+L 报告库 · Ctrl+B 回测 · Ctrl+P 模拟盘 · Esc 退出</Text>
+      </Box>
     </Box>
   );
 }
@@ -1343,10 +2270,101 @@ function ConfigModal({ state }: { state: AppState }) {
             hint={state.provider ? "输入模型名称" : "请先选择提供商"}
           />
         )}
+        <SelectFieldRow
+          label="研究深度"
+          value={DEPTH_LABELS[state.depth]}
+          focused={focus("depth")}
+          open={state.selectOpen === "depth"}
+          options={DEPTH_OPTIONS.map((opt) => DEPTH_LABELS[opt])}
+          selectedIdx={state.selectIdx}
+          hint="选择研究深度"
+        />
+        <AnalystToggleRow state={state} focused={focus("analysts")} />
+        <RoundStepperRow
+          label="辩论轮数"
+          value={state.debateRounds}
+          focused={focus("debateRounds")}
+        />
+        <RoundStepperRow label="风险轮数" value={state.riskRounds} focused={focus("riskRounds")} />
+        <Box>
+          <Text dimColor>{"后端".padEnd(8)}</Text>
+          <Text dimColor>{state.backendUrl || "(默认 / 由 bridge 配置)"}</Text>
+        </Box>
+
+        {/* P1: surface settings the single-pass TS graph cannot honour yet. */}
+        {multiRoundUnsupported(state.debateRounds, state.riskRounds) && (
+          <Text color="yellow">⚠ 多轮辩论尚未接入 TS 图（单轮执行），轮数 &gt; 1 暂不生效。</Text>
+        )}
+        {analystSelectionUnsupported(state.selectedAnalysts) && (
+          <Text color="yellow">⚠ 取消分析师尚未接入 TS 图，当前仍会运行全部分析师。</Text>
+        )}
+
         <Box marginTop={1} justifyContent="center">
-          <Text color="green">按 Enter 开始分析</Text>
+          <Text color="green">Tab 切换字段 · Enter 开始分析</Text>
         </Box>
       </Box>
+    </Box>
+  );
+}
+
+function AnalystToggleRow({ state, focused }: { state: AppState; focused: boolean }) {
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Text dimColor>{"分析师".padEnd(6)}</Text>
+        {focused ? (
+          <Text color="yellow" dimColor>
+            (←→ 移动 · 空格 开关)
+          </Text>
+        ) : (
+          <Text dimColor>
+            已选 {ANALYST_IDS.filter((id) => state.selectedAnalysts[id]).length}/
+            {ANALYST_IDS.length}
+          </Text>
+        )}
+      </Box>
+      {focused && (
+        <Box flexWrap="wrap" marginLeft={2}>
+          {ANALYST_IDS.map((id, i) => {
+            const on = state.selectedAnalysts[id] !== false;
+            const title = DEFAULT_SECTIONS.find((s) => s.id === id)?.title ?? id;
+            const isCursor = i === state.analystCursor;
+            return (
+              <Box key={id} marginRight={1}>
+                <Text
+                  {...(isCursor ? { color: "cyan" as const, bold: true } : {})}
+                  dimColor={!isCursor}
+                >
+                  {on ? "☑" : "☐"} {title}
+                </Text>
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function RoundStepperRow({
+  label,
+  value,
+  focused,
+}: {
+  label: string;
+  value: number;
+  focused: boolean;
+}) {
+  return (
+    <Box>
+      <Text dimColor>{label.padEnd(8)}</Text>
+      {focused ? (
+        <Text color="yellow">
+          ◀ {value} ▶ <Text dimColor>(←→ 调整)</Text>
+        </Text>
+      ) : (
+        <Text>{value}</Text>
+      )}
     </Box>
   );
 }
@@ -1626,7 +2644,7 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
           Nodes {state.stats.llm_calls} · Toolset {state.stats.tool_calls} · Reports {reportsDone}/
           {reportsTotal}
         </Text>
-        <Text dimColor>{el} ←→/Tab 切换 · Enter 返回</Text>
+        <Text dimColor>{el} ←→ 团队 · ↑↓ 章节 · PgUp/PgDn 滚动 · e 错误 · Enter 返回</Text>
       </Box>
     </Box>
   );
@@ -1641,21 +2659,25 @@ function TabContent({ state, groups }: { state: AppState; groups: Record<string,
   const sections = groups[state.activeTab] ?? [];
   const tabMeta = TEAM_TABS.find((t) => t.key === state.activeTab);
 
-  // Collect available report bodies for the sections in this tab.
-  const available = sections
-    .map((s) => ({ section: s, body: state.reports[s.id] }))
-    .filter((x): x is { section: SectionDef; body: string } => Boolean(x.body?.trim()));
+  // P0: the selected section for this tab (default to the first section).
+  const selectedId = state.selectedSectionByTab[state.activeTab] ?? sections[0]?.id;
+  const selected = sections.find((s) => s.id === selectedId);
+  const selectedStatus = selectedId ? (state.sectionStatus[selectedId] ?? "pending") : "pending";
+  const selectedBody = selectedId ? (state.reports[selectedId] ?? "") : "";
+  const scroll = selectedId ? (state.reportScrollBySection[selectedId] ?? 0) : 0;
+  const view = reportViewport(selectedBody, scroll);
 
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Text bold>{tabMeta?.label ?? "整体进度"}</Text>
 
-      {/* Section status checklist for this tab */}
+      {/* P0: section checklist with the selected section highlighted. */}
       <Box flexDirection="column" marginTop={1}>
         {sections.map((s) => {
           const status = state.sectionStatus[s.id] ?? "pending";
           const isDone = status === "done";
           const hasBody = Boolean(state.reports[s.id]?.trim());
+          const isSelected = s.id === selectedId;
           const mark =
             status === "done"
               ? "✓"
@@ -1666,59 +2688,88 @@ function TabContent({ state, groups }: { state: AppState; groups: Record<string,
                   : state.status === "running"
                     ? "○"
                     : "·";
-          const colorProps = isDone
-            ? { color: "green" as const }
-            : status === "failed"
-              ? { color: "red" as const }
-              : hasBody || status === "running"
-                ? { color: "yellow" as const }
-                : {};
+          const colorProps = isSelected
+            ? { color: "cyan" as const }
+            : isDone
+              ? { color: "green" as const }
+              : status === "failed"
+                ? { color: "red" as const }
+                : hasBody || status === "running"
+                  ? { color: "yellow" as const }
+                  : {};
           return (
-            <Text key={s.id} dimColor={!isDone && !hasBody} {...colorProps}>
+            <Text
+              key={s.id}
+              bold={isSelected}
+              dimColor={!isSelected && !isDone && !hasBody}
+              {...colorProps}
+            >
+              {isSelected ? "▶ " : "  "}
               {mark} {s.title}
             </Text>
           );
         })}
       </Box>
 
-      {/* Report content for completed sections in this tab */}
+      {/* Decision tab keeps the structured execution-summary panel. */}
       {state.activeTab === "decision" && state.executionSummary && (
         <ExecutionSummaryView summary={state.executionSummary} />
       )}
-      {available.length > 0 ? (
-        <Box flexDirection="column" marginTop={1}>
-          {available.map(({ section, body }) => (
-            <Box key={section.id} flexDirection="column" marginBottom={1}>
-              <Text bold color="cyan">
-                ── {section.title} ──
-              </Text>
-              {visibleReportLines(body).map((line, i) => (
-                /* biome-ignore lint/suspicious/noArrayIndexKey: static report snapshot */
-                <Text key={`${section.id}-${i}`}>{line.slice(0, 120)}</Text>
-              ))}
-            </Box>
-          ))}
-        </Box>
-      ) : (
-        <Box flexDirection="column" marginTop={1}>
-          <Text dimColor>整体进度</Text>
-          {state.logs.length > 0 ? (
-            state.logs.slice(-12).map((log, i) => (
+
+      {/* P0: selected section body viewport, or status/progress fallback. */}
+      <Box flexDirection="column" marginTop={1} flexGrow={1}>
+        {selected && selectedBody.trim() ? (
+          <>
+            <Text bold color="cyan">
+              ── {selected.title} ── <Text dimColor>({selectedStatus})</Text>
+            </Text>
+            {view.lines.map((line, i) => (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: scrolled snapshot */
+              <Text key={`${selectedId}-${i}`}>{line || " "}</Text>
+            ))}
+            <Text dimColor>
+              {view.atTop ? "顶部" : "↑"} · {view.atBottom ? "底部" : "↓"} ·{" "}
+              {scroll + view.lines.length}/{view.total} 行 · PgUp/PgDn 滚动 · ↑↓ 选择章节
+            </Text>
+          </>
+        ) : selectedStatus === "running" ? (
+          <>
+            <Text color="yellow">{selected?.title ?? ""} 运行中…</Text>
+            {state.logs.slice(-8).map((log, i) => (
               /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
-              <Text key={`${i}`} dimColor={log.startsWith("──") || log.startsWith("✓")}>
-                {log.startsWith("──") || log.startsWith("✓") ? `  ${log}` : `• ${log}`}
+              <Text key={`${i}`} dimColor>
+                • {log}
               </Text>
-            ))
-          ) : (
-            <Text dimColor>准备开始分析。</Text>
-          )}
-          {state.status === "error" && (
-            <Box marginTop={1}>
-              <Text color="red">{state.errorMsg.slice(0, 120)}</Text>
-            </Box>
-          )}
-        </Box>
-      )}
+            ))}
+          </>
+        ) : selectedStatus === "failed" ? (
+          <>
+            <Text color="red">{selected?.title ?? ""} 失败</Text>
+            <Text color="red">{state.errorMsg.slice(0, 200)}</Text>
+            {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
+          </>
+        ) : (
+          <>
+            <Text dimColor>整体进度</Text>
+            {state.logs.length > 0 ? (
+              state.logs.slice(-12).map((log, i) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
+                <Text key={`${i}`} dimColor={log.startsWith("──") || log.startsWith("✓")}>
+                  {log.startsWith("──") || log.startsWith("✓") ? `  ${log}` : `• ${log}`}
+                </Text>
+              ))
+            ) : (
+              <Text dimColor>{selected ? `${selected.title} 等待中` : "准备开始分析。"}</Text>
+            )}
+            {state.status === "error" && (
+              <Box marginTop={1} flexDirection="column">
+                <Text color="red">{state.errorMsg.slice(0, 120)}</Text>
+                {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
+              </Box>
+            )}
+          </>
+        )}
+      </Box>
     </Box>
   );
 }
@@ -1785,6 +2836,265 @@ function SummaryLine({ label, values }: { label: string; values: string[] }) {
 function fmtElapsed(s: number): string {
   const m = Math.floor(s / 60);
   return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+// ===========================================================================
+// P2: Report library screen
+// ===========================================================================
+
+function ReportLibrary({ state }: { state: AppState }) {
+  const { reports, selectedIdx, body, bodyLoading, loading, error, scroll } = state.library;
+  const view = reportViewport(body, scroll);
+  return (
+    <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Text bold>📚 报告库</Text>
+      <Box flexDirection="row" flexGrow={1} marginTop={1}>
+        {/* Left: report list */}
+        <Box flexDirection="column" width={28} borderStyle="single" paddingX={1}>
+          <Text bold>历史报告</Text>
+          {loading ? (
+            <Text dimColor>加载中…</Text>
+          ) : error ? (
+            <Text color="red">{error.slice(0, 24)}</Text>
+          ) : reports.length === 0 ? (
+            <Text dimColor>暂无报告</Text>
+          ) : (
+            reports.slice(0, 18).map((r, i) => (
+              <Text
+                key={r.path}
+                {...(i === selectedIdx ? { color: "cyan" as const, bold: true } : {})}
+                dimColor={i !== selectedIdx}
+              >
+                {i === selectedIdx ? "▶ " : "  "}
+                {(r.ticker.split(".")[0] ?? r.ticker).padEnd(8)} {r.date}
+              </Text>
+            ))
+          )}
+          <Box marginTop={1}>
+            <Text dimColor>↑↓ 选择 · r 刷新 · Esc 返回</Text>
+          </Box>
+        </Box>
+        {/* Right: body viewer (reuses the P0 viewport math) */}
+        <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1} marginLeft={1}>
+          {reports[selectedIdx] && (
+            <Text bold color="cyan">
+              {reports[selectedIdx]?.ticker} · {reports[selectedIdx]?.date}
+            </Text>
+          )}
+          {bodyLoading ? (
+            <Text dimColor>读取中…</Text>
+          ) : body ? (
+            <>
+              {view.lines.map((line, i) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: scrolled snapshot */
+                <Text key={`lib-${i}`}>{line || " "}</Text>
+              ))}
+              <Text dimColor>
+                {view.atBottom ? "底部" : "↓"} · {scroll + view.lines.length}/{view.total} 行 ·
+                PgUp/PgDn 滚动
+              </Text>
+            </>
+          ) : (
+            <Text dimColor>选择左侧报告查看内容。</Text>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
+// P4: Backtest viewer screen
+// ===========================================================================
+
+function fmtPct(v: unknown): string {
+  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(2)}%` : "—";
+}
+function fmtNum(v: unknown): string {
+  return typeof v === "number" && Number.isFinite(v) ? v.toFixed(4) : "—";
+}
+
+function BacktestScreen({ state }: { state: AppState }) {
+  const { records, selectedIdx, view, loading, error } = state.backtest;
+  const selected = records[selectedIdx];
+  const metrics = view?.metrics ?? {};
+  const health = view?.health ?? null;
+  return (
+    <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Text bold>📈 回测结果</Text>
+      <Box flexDirection="row" flexGrow={1} marginTop={1}>
+        <Box flexDirection="column" width={28} borderStyle="single" paddingX={1}>
+          <Text bold>回测记录</Text>
+          {loading ? (
+            <Text dimColor>加载中…</Text>
+          ) : error ? (
+            <Text color="red">{error.slice(0, 24)}</Text>
+          ) : records.length === 0 ? (
+            <Text dimColor>暂无回测产物</Text>
+          ) : (
+            records.slice(0, 16).map((r, i) => (
+              <Text
+                key={r.path}
+                {...(i === selectedIdx ? { color: "cyan" as const, bold: true } : {})}
+                dimColor={i !== selectedIdx}
+              >
+                {i === selectedIdx ? "▶ " : "  "}
+                {(r.tickers[0]?.split(".")[0] ?? "?").padEnd(8)} {r.startDate}
+              </Text>
+            ))
+          )}
+          <Box marginTop={1}>
+            <Text dimColor>↑↓ 选择 · r 刷新 · Esc 返回</Text>
+          </Box>
+        </Box>
+        <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1} marginLeft={1}>
+          {selected ? (
+            <>
+              <Text bold color="cyan">
+                {selected.tickers.join(", ") || "?"} · {selected.startDate} → {selected.endDate}
+              </Text>
+              {view && view.nav.length > 1 && <Text color="cyan">{sparkline(view.nav, 40)}</Text>}
+              <Box flexDirection="column" marginTop={1}>
+                <Text>最终净值: {fmtNum(metrics.final_value)}</Text>
+                <Text>累计收益: {fmtPct(metrics.cumulative_return)}</Text>
+                <Text>年化收益: {fmtPct(metrics.annualized_return)}</Text>
+                <Text>最大回撤: {fmtPct(metrics.max_drawdown)}</Text>
+                <Text>夏普比率: {fmtNum(metrics.sharpe_ratio)}</Text>
+                <Text>交易笔数: {String(metrics.total_trades ?? view?.trades ?? "—")}</Text>
+              </Box>
+              {view && view.benchmarkMetrics.length > 0 && (
+                <Box flexDirection="column" marginTop={1}>
+                  <Text bold>基准对比</Text>
+                  {view.benchmarkMetrics.slice(0, 3).map((b, i) => (
+                    <Text key={String(b.benchmark ?? i)} dimColor>
+                      {String(b.benchmark ?? "?")}: 累计 {fmtPct(b.cumulative_return)} · 超额{" "}
+                      {fmtPct(b.excess_cumulative_return)}
+                    </Text>
+                  ))}
+                </Box>
+              )}
+              {health && Array.isArray(health.warnings) && health.warnings.length > 0 && (
+                <Box flexDirection="column" marginTop={1}>
+                  <Text bold color="yellow">
+                    ⚠ 健康提示
+                  </Text>
+                  {(health.warnings as unknown[]).slice(0, 4).map((w, i) => (
+                    /* biome-ignore lint/suspicious/noArrayIndexKey: static list */
+                    <Text key={`w-${i}`} color="yellow">
+                      • {String(w).slice(0, 80)}
+                    </Text>
+                  ))}
+                </Box>
+              )}
+            </>
+          ) : (
+            <Text dimColor>选择左侧回测记录查看详情。</Text>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
+// P5: Paper trading screen
+// ===========================================================================
+
+function PaperScreen({ state }: { state: AppState }) {
+  const { account, positions, trades, loading, error, user } = state.paper;
+  return (
+    <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Text bold>💼 模拟交易{user ? ` · ${user}` : ""}</Text>
+      {loading ? (
+        <Text dimColor>加载中…</Text>
+      ) : error ? (
+        <Text color="red">{error}</Text>
+      ) : (
+        <Box flexDirection="column" marginTop={1}>
+          {account && (
+            <Box flexDirection="column" marginBottom={1}>
+              <Text bold>账户</Text>
+              <Text>
+                总资产: {fmtNum(account.total_assets)} · 现金: {fmtNum(account.cash)} · 市值:{" "}
+                {fmtNum(account.market_value)}
+              </Text>
+              <Text dimColor>
+                已实现盈亏: {fmtNum(account.realized_pnl)} · 浮动盈亏:{" "}
+                {fmtNum(account.unrealized_pnl)}
+              </Text>
+            </Box>
+          )}
+          <Text bold>持仓 ({positions.length})</Text>
+          {positions.length === 0 ? (
+            <Text dimColor>无持仓</Text>
+          ) : (
+            positions.slice(0, 10).map((p) => (
+              <Text key={String(p.ticker)}>
+                {String(p.ticker).padEnd(12)} 数量 {String(p.quantity)} · 现价{" "}
+                {fmtNum(p.current_price)} · 盈亏 {fmtPct(p.pnl_pct)}
+              </Text>
+            ))
+          )}
+          <Box marginTop={1} flexDirection="column">
+            <Text bold>最近成交 ({trades.length})</Text>
+            {trades.slice(0, 8).map((t) => (
+              <Text key={String(t.id)} dimColor>
+                {String(t.created_at).slice(0, 10)} {String(t.side)} {String(t.ticker)} ×{" "}
+                {String(t.quantity)} @ {fmtNum(t.price)}
+              </Text>
+            ))}
+          </Box>
+        </Box>
+      )}
+      <Box marginTop={1}>
+        <Text dimColor>r 刷新 · Esc 返回</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
+// P6: Error detail overlay
+// ===========================================================================
+
+function ErrorDetailOverlay({ detail }: { detail: ErrorDetail }) {
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="double"
+      borderColor="red"
+      paddingX={2}
+      paddingY={1}
+      marginTop={1}
+    >
+      <Text bold color="red">
+        ✗ 错误详情
+      </Text>
+      {detail.ticker && <Text>标的: {detail.ticker}</Text>}
+      {detail.section && <Text>章节: {detail.section}</Text>}
+      <Text dimColor>时间: {detail.timestamp}</Text>
+      <Box marginTop={1}>
+        <Text>{detail.message.slice(0, 400)}</Text>
+      </Box>
+      {detail.stack && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>调用栈:</Text>
+          {detail.stack
+            .split("\n")
+            .slice(0, 8)
+            .map((line, i) => (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: static stack snapshot */
+              <Text key={`stk-${i}`} dimColor>
+                {line.slice(0, 110)}
+              </Text>
+            ))}
+        </Box>
+      )}
+      <Box marginTop={1}>
+        <Text dimColor>按任意键关闭</Text>
+      </Box>
+    </Box>
+  );
 }
 
 // ===========================================================================
