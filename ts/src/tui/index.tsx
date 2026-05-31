@@ -13,6 +13,7 @@
  *   Stats bar: Stages | rating | Reports | timer
  */
 
+import { pathToFileURL } from "node:url";
 import { Box, render, Text, useInput } from "ink";
 import { useEffect, useReducer, useRef, useState } from "react";
 import type { LlmOptions } from "../llm/factory.js";
@@ -204,10 +205,30 @@ const NODE_INFO: Record<
 
 type Phase = "ticker" | "config" | "dashboard";
 type ConfigField = "date" | "provider" | "model";
+type SectionStatus = "pending" | "running" | "done" | "failed";
+
+interface QueueItem {
+  ticker: string;
+  status: "pending" | "running" | "done" | "failed" | "cancelled";
+}
+
+interface ExecutionSummary {
+  rating?: string;
+  targetWeightPct?: number;
+  targetWeightMinPct?: number;
+  targetWeightMaxPct?: number;
+  executionDelay?: string;
+  addConditions: string[];
+  reduceConditions: string[];
+  riskControls: string[];
+}
 
 interface AppState {
   phase: Phase;
   ticker: string;
+  tickers: string[];
+  queue: QueueItem[];
+  currentTickerIdx: number;
   date: string;
   provider: string;
   model: string;
@@ -222,19 +243,28 @@ interface AppState {
   logs: string[];
   /** Section completion tracking */
   sectionDone: Set<string>;
+  sectionStatus: Record<string, SectionStatus>;
+  activeSection: string;
   /** Per-section report bodies, keyed by section id (filled as nodes finish). */
   reports: Record<string, string>;
+  reportNodes: Record<string, string[]>;
   /** Which team tab is focused in the dashboard. */
   activeTab: string;
   /** Final portfolio-manager rating extracted from the trader signal. */
   rating: string;
   /** Stats from analysis runner */
   stats: { llm_calls: number; tool_calls: number; tokens: number };
+  executionSummary: ExecutionSummary | null;
   /** ETF detail loaded from bridge (basic info card) */
   etfDetail: {
     name?: string;
     close?: number;
     pctChg?: number;
+    high?: number;
+    low?: number;
+    volume?: number;
+    volumeChangePct?: number;
+    history?: number[];
     loading: boolean;
     error?: string;
   } | null;
@@ -256,15 +286,33 @@ type Action =
   | { type: "selectPick" }
   | { type: "startAnalysis" }
   | { type: "appendLog"; msg: string }
+  | { type: "queueTickerStarted"; index: number }
+  | { type: "queueTickerDone"; index: number }
+  | { type: "queueTickerFailed"; index: number; msg: string }
+  | { type: "queueCancelled" }
+  | { type: "sectionStarted"; sectionId: string }
   | { type: "sectionDone"; sectionId: string }
-  | { type: "sectionReport"; sectionId: string; body: string }
+  | { type: "sectionFailed"; sectionId: string }
+  | { type: "sectionReport"; sectionId: string; nodeLabel: string; body: string }
   | { type: "setRating"; rating: string }
+  | { type: "setStats"; stats: { llm_calls?: number; tool_calls?: number; tokens?: number } }
+  | { type: "setExecutionSummary"; summary: ExecutionSummary }
   | { type: "setTab"; tab: string }
   | { type: "analysisDone"; result: string }
   | { type: "analysisError"; msg: string }
   | { type: "backToTicker" }
   | { type: "etfDetailLoading" }
-  | { type: "etfDetailLoaded"; name?: string; close?: number; pctChg?: number }
+  | {
+      type: "etfDetailLoaded";
+      name?: string;
+      close?: number;
+      pctChg?: number;
+      high?: number;
+      low?: number;
+      volume?: number;
+      volumeChangePct?: number;
+      history?: number[];
+    }
   | { type: "etfDetailError"; error: string }
   | { type: "vllmModelsFetched"; models: string[] }
   | { type: "vllmModelsFailed" };
@@ -279,10 +327,113 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-function initState(): AppState {
+function initSectionStatus(): Record<string, SectionStatus> {
+  return Object.fromEntries(DEFAULT_SECTIONS.map((s) => [s.id, "pending" as const]));
+}
+
+export function parseTickers(input: string): string[] {
+  const seen = new Set<string>();
+  const tickers: string[] = [];
+  for (const raw of input.split(/[\s,，;；]+/)) {
+    const ticker = raw.trim().toUpperCase();
+    if (!ticker || seen.has(ticker)) continue;
+    seen.add(ticker);
+    tickers.push(ticker);
+  }
+  return tickers;
+}
+
+function dateDaysBefore(isoDate: string, days: number): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  if (Number.isNaN(date.getTime())) return isoDate;
+  date.setUTCDate(date.getUTCDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+function asNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function extractPriceRows(text: string): Array<Record<string, unknown>> {
+  try {
+    const raw = JSON.parse(text) as { rows?: Array<Record<string, unknown>> };
+    return raw.rows ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function sparkline(values: readonly number[], width = 16): string {
+  if (values.length === 0) return "";
+  const sample = values.slice(-width);
+  const min = Math.min(...sample);
+  const max = Math.max(...sample);
+  const blocks = "▁▂▃▄▅▆▇█";
+  if (max === min) return "▁".repeat(sample.length);
+  return sample
+    .map((value) => {
+      const idx = Math.round(((value - min) / (max - min)) * (blocks.length - 1));
+      return blocks[idx] ?? "▁";
+    })
+    .join("");
+}
+
+function listFromUnknown(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => String(item))
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function queueStatusLabel(status: QueueItem["status"]): string {
+  switch (status) {
+    case "pending":
+      return "等待";
+    case "running":
+      return "分析中";
+    case "done":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "cancelled":
+      return "已取消";
+  }
+}
+
+function buildExecutionSummary(finalState: Record<string, unknown>): ExecutionSummary | null {
+  const signal = finalState.trader_backtest_signal as Record<string, unknown> | undefined;
+  if (!signal) return null;
+  const summary: ExecutionSummary = {
+    addConditions: listFromUnknown(signal.add_conditions),
+    reduceConditions: listFromUnknown(signal.reduce_conditions),
+    riskControls: listFromUnknown(signal.risk_controls),
+  };
+  const rating = signal.rating;
+  if (typeof rating === "string" && rating) summary.rating = rating;
+  const target = asNumber(signal.target_weight_pct);
+  if (target !== undefined) summary.targetWeightPct = target;
+  const targetMin = asNumber(signal.target_weight_min_pct);
+  if (targetMin !== undefined) summary.targetWeightMinPct = targetMin;
+  const targetMax = asNumber(signal.target_weight_max_pct);
+  if (targetMax !== undefined) summary.targetWeightMaxPct = targetMax;
+  const delay = signal.execution_delay;
+  if (typeof delay === "string" && delay) summary.executionDelay = delay;
+  return summary;
+}
+
+export function initState(): AppState {
   return {
     phase: "ticker",
     ticker: "",
+    tickers: [],
+    queue: [],
+    currentTickerIdx: 0,
     date: today(),
     provider: "",
     model: "",
@@ -294,10 +445,14 @@ function initState(): AppState {
     errorMsg: "",
     logs: [],
     sectionDone: new Set(),
+    sectionStatus: initSectionStatus(),
+    activeSection: "",
     reports: {},
+    reportNodes: {},
     activeTab: "analysts",
     rating: "",
     stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
+    executionSummary: null,
     etfDetail: null,
     vllmModels: null,
   };
@@ -347,7 +502,7 @@ function nextFocus(current: ConfigField): ConfigField {
 // Reducer
 // ===========================================================================
 
-function reducer(state: AppState, action: Action): AppState {
+export function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case "appendTicker":
       return { ...state, ticker: state.ticker + action.char };
@@ -357,6 +512,7 @@ function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         phase: "config",
+        tickers: parseTickers(state.ticker),
         focus: "date",
         selectOpen: null,
         selectIdx: 0,
@@ -366,10 +522,14 @@ function reducer(state: AppState, action: Action): AppState {
         logs: [],
         result: "",
         sectionDone: new Set(),
+        sectionStatus: initSectionStatus(),
+        activeSection: "",
         reports: {},
+        reportNodes: {},
         activeTab: "analysts",
         rating: "",
         stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
+        executionSummary: null,
         etfDetail: null,
       };
     case "setFocus":
@@ -429,42 +589,117 @@ function reducer(state: AppState, action: Action): AppState {
         vllmModels,
       };
     }
-    case "startAnalysis":
+    case "startAnalysis": {
+      const tickers = state.tickers.length > 0 ? state.tickers : parseTickers(state.ticker);
       return {
         ...state,
         phase: "dashboard",
         status: "running",
+        tickers,
+        queue: tickers.map((ticker) => ({ ticker, status: "pending" })),
+        currentTickerIdx: 0,
         result: "",
         errorMsg: "",
         logs: [],
         sectionDone: new Set(),
+        sectionStatus: initSectionStatus(),
+        activeSection: "",
         reports: {},
+        reportNodes: {},
         activeTab: "analysts",
         rating: "",
         stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
+        executionSummary: null,
         etfDetail: { loading: true },
       };
+    }
     case "appendLog":
       return { ...state, logs: [...state.logs, action.msg] };
+    case "queueTickerStarted":
+      return {
+        ...state,
+        currentTickerIdx: action.index,
+        queue: state.queue.map((item, i) =>
+          i === action.index ? { ...item, status: "running" } : item,
+        ),
+      };
+    case "queueTickerDone":
+      return {
+        ...state,
+        queue: state.queue.map((item, i) =>
+          i === action.index ? { ...item, status: "done" } : item,
+        ),
+      };
+    case "queueTickerFailed":
+      return {
+        ...state,
+        errorMsg: action.msg,
+        queue: state.queue.map((item, i) =>
+          i === action.index ? { ...item, status: "failed" } : item,
+        ),
+      };
+    case "queueCancelled":
+      return {
+        ...state,
+        status: "error",
+        errorMsg: "分析已取消。",
+        queue: state.queue.map((item) =>
+          item.status === "pending" || item.status === "running"
+            ? { ...item, status: "cancelled" }
+            : item,
+        ),
+      };
+    case "sectionStarted":
+      return {
+        ...state,
+        activeSection: action.sectionId,
+        sectionStatus: { ...state.sectionStatus, [action.sectionId]: "running" },
+      };
     case "sectionDone": {
       const next = new Set(state.sectionDone);
       next.add(action.sectionId);
-      return { ...state, sectionDone: next };
-    }
-    case "sectionReport":
       return {
         ...state,
-        reports: { ...state.reports, [action.sectionId]: action.body },
+        sectionDone: next,
+        sectionStatus: { ...state.sectionStatus, [action.sectionId]: "done" },
       };
+    }
+    case "sectionFailed":
+      return {
+        ...state,
+        sectionStatus: { ...state.sectionStatus, [action.sectionId]: "failed" },
+      };
+    case "sectionReport": {
+      const previous = state.reports[action.sectionId];
+      const nextBody = previous
+        ? `${previous.trim()}\n\n### ${action.nodeLabel}\n\n${action.body.trim()}`
+        : `### ${action.nodeLabel}\n\n${action.body.trim()}`;
+      return {
+        ...state,
+        reports: { ...state.reports, [action.sectionId]: nextBody },
+        reportNodes: {
+          ...state.reportNodes,
+          [action.sectionId]: [...(state.reportNodes[action.sectionId] ?? []), action.nodeLabel],
+        },
+      };
+    }
     case "setRating":
       return { ...state, rating: action.rating };
+    case "setStats":
+      return {
+        ...state,
+        stats: {
+          llm_calls: state.stats.llm_calls + (action.stats.llm_calls ?? 0),
+          tool_calls: state.stats.tool_calls + (action.stats.tool_calls ?? 0),
+          tokens: state.stats.tokens + (action.stats.tokens ?? 0),
+        },
+      };
+    case "setExecutionSummary":
+      return { ...state, executionSummary: action.summary };
     case "setTab":
       return { ...state, activeTab: action.tab };
     case "analysisDone": {
-      // Mark all sections done
-      const allDone = new Set(state.sectionDone);
-      for (const s of DEFAULT_SECTIONS) allDone.add(s.id);
-      return { ...state, status: "done", result: action.result, sectionDone: allDone };
+      return { ...state, status: "done", result: action.result };
     }
     case "analysisError":
       return { ...state, status: "error", errorMsg: action.msg };
@@ -480,6 +715,13 @@ function reducer(state: AppState, action: Action): AppState {
           ...(action.name !== undefined ? { name: action.name } : {}),
           ...(action.close !== undefined ? { close: action.close } : {}),
           ...(action.pctChg !== undefined ? { pctChg: action.pctChg } : {}),
+          ...(action.high !== undefined ? { high: action.high } : {}),
+          ...(action.low !== undefined ? { low: action.low } : {}),
+          ...(action.volume !== undefined ? { volume: action.volume } : {}),
+          ...(action.volumeChangePct !== undefined
+            ? { volumeChangePct: action.volumeChangePct }
+            : {}),
+          ...(action.history !== undefined ? { history: action.history } : {}),
         },
       };
     case "etfDetailError":
@@ -519,12 +761,22 @@ async function fetchVllmModels(dispatch: AppDispatch) {
 // Analysis runner
 // ===========================================================================
 
-async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: () => boolean) {
+async function runAnalysis(
+  state: AppState,
+  dispatch: AppDispatch,
+  isCurrent: () => boolean,
+  signal: AbortSignal,
+) {
   const dispatchIfCurrent = (action: Action) => {
     if (isCurrent()) dispatch(action);
   };
+  const ensureActive = () => {
+    if (signal.aborted) throw new Error("分析已取消。");
+    return isCurrent();
+  };
 
-  dispatchIfCurrent({ type: "appendLog", msg: `开始分析 ${state.ticker}` });
+  const tickers = state.tickers.length > 0 ? state.tickers : parseTickers(state.ticker);
+  dispatchIfCurrent({ type: "appendLog", msg: `开始分析 ${tickers.join(", ")}` });
   try {
     const [{ HumanMessage }] = await Promise.all([import("@langchain/core/messages")]);
     const { BridgeApi, BridgeClient, pickBridgeTools } = await import("../bridge/index.js");
@@ -536,10 +788,10 @@ async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: ()
     const client = new BridgeClient();
     await client.start();
     try {
-      if (!isCurrent()) return;
+      if (!ensureActive()) return;
       const api = new BridgeApi(client);
       const config = await api.configGet();
-      if (!isCurrent()) return;
+      if (!ensureActive()) return;
       const llmOpts: LlmOptions = { tier: "deep" };
       if (state.provider) llmOpts.provider = state.provider;
       if (state.model) llmOpts.model = state.model;
@@ -562,11 +814,12 @@ async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: ()
         ]),
       );
       const allTools = await pickBridgeTools(api, uniqueToolNames);
-      if (!isCurrent()) return;
+      if (!ensureActive()) return;
       const byName = new Map(allTools.map((t) => [t.name, t] as const));
       const pick = (names: ReadonlyArray<string>) =>
         names.map((n) => byName.get(n)).filter((t): t is NonNullable<typeof t> => t !== undefined);
       dispatchIfCurrent({ type: "appendLog", msg: `── 已加载 ${allTools.length} 个数据工具` });
+      dispatchIfCurrent({ type: "setStats", stats: { tool_calls: allTools.length } });
 
       const charLimit = Number(config.report_context_char_limit);
       const promptContext = {
@@ -575,37 +828,6 @@ async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: ()
           ? { reportContextCharLimit: charLimit }
           : {}),
       };
-
-      // Load the ETF basic-info card via the same bridge connection.
-      // NOTE: get_etf_price_data's parameter is `symbol`, not `ticker`.
-      try {
-        const detailResult = await api.toolsCall("get_etf_price_data", {
-          symbol: state.ticker,
-          start_date: state.date,
-          end_date: state.date,
-        });
-        const raw = JSON.parse(detailResult.text) as { rows?: Array<Record<string, unknown>> };
-        const rows = raw?.rows ?? [];
-        const last = rows[rows.length - 1];
-        if (last) {
-          dispatchIfCurrent({
-            type: "etfDetailLoaded",
-            ...(typeof last.name === "string" ? { name: last.name } : {}),
-            ...(typeof last.close === "number" ? { close: last.close } : {}),
-            ...(typeof last.pct_chg === "number" ? { pctChg: last.pct_chg } : {}),
-          });
-        } else {
-          dispatchIfCurrent({ type: "etfDetailLoaded", name: state.ticker });
-        }
-      } catch (e) {
-        dispatchIfCurrent({ type: "etfDetailError", error: (e as Error).message });
-      }
-      if (!isCurrent()) return;
-
-      dispatchIfCurrent({
-        type: "appendLog",
-        msg: "── 启动完整流水线：分析师 → 辩论 → 交易 → 风控 → 决策",
-      });
 
       const graph = buildFullGraph({
         llm: llmHandle.llm,
@@ -622,64 +844,137 @@ async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: ()
         promptContext,
       });
 
-      // Stream the graph so the dashboard updates per node instead of waiting
-      // for the whole pipeline. Each chunk is { nodeName: stateUpdate }.
-      const stream = await graph.stream(
-        {
-          messages: [new HumanMessage(state.ticker)],
-          asset_of_interest: state.ticker,
-          trade_date: state.date,
-        },
-        { recursionLimit: 100 },
-      );
+      let lastDecision = "";
+      for (const [index, ticker] of tickers.entries()) {
+        if (!ensureActive()) return;
+        dispatchIfCurrent({ type: "queueTickerStarted", index });
+        dispatchIfCurrent({ type: "appendLog", msg: `开始分析 ${ticker}` });
 
-      let finalState: Record<string, unknown> = {};
-      for await (const chunk of stream) {
-        if (!isCurrent()) return;
-        for (const [node, update] of Object.entries(chunk as Record<string, unknown>)) {
-          if (!update || typeof update !== "object") continue;
-          finalState = { ...finalState, ...(update as Record<string, unknown>) };
-          const info = NODE_INFO[node];
-          if (!info) continue; // tool-loop node (e.g. *_tools) — no UI section
-          const body = (update as Record<string, unknown>)[info.key];
-          const hasBody = typeof body === "string" && body.trim().length > 0;
-          // Analyst nodes re-enter via their ToolNode while fetching data; those
-          // intermediate passes only carry { messages } and no report body, so
-          // skip them — we only advance the UI once real output is produced.
-          if (!hasBody) continue;
-          dispatchIfCurrent({
-            type: "sectionReport",
-            sectionId: info.section,
-            body: body as string,
+        // Load the ETF basic-info card via the same bridge connection.
+        // NOTE: get_etf_price_data's parameter is `symbol`, not `ticker`.
+        try {
+          const detailResult = await api.toolsCall("get_etf_price_data", {
+            symbol: ticker,
+            start_date: dateDaysBefore(state.date, 365),
+            end_date: state.date,
           });
-          if (info.completes) {
-            dispatchIfCurrent({ type: "sectionDone", sectionId: info.section });
+          const rows = extractPriceRows(detailResult.text);
+          const last = rows[rows.length - 1];
+          const prev = rows[rows.length - 2];
+          if (last) {
+            const close = asNumber(last.close);
+            const pctChg = asNumber(last.pct_chg);
+            const high = asNumber(last.high);
+            const low = asNumber(last.low);
+            const volume = asNumber(last.vol ?? last.volume);
+            const prevVolume = asNumber(prev?.vol ?? prev?.volume);
+            const volumeChangePct =
+              volume !== undefined && prevVolume !== undefined && prevVolume !== 0
+                ? ((volume - prevVolume) / prevVolume) * 100
+                : undefined;
+            dispatchIfCurrent({
+              type: "etfDetailLoaded",
+              ...(typeof last.name === "string" ? { name: last.name } : { name: ticker }),
+              ...(close !== undefined ? { close } : {}),
+              ...(pctChg !== undefined ? { pctChg } : {}),
+              ...(high !== undefined ? { high } : {}),
+              ...(low !== undefined ? { low } : {}),
+              ...(volume !== undefined ? { volume } : {}),
+              ...(volumeChangePct !== undefined ? { volumeChangePct } : {}),
+              history: rows
+                .map((row) => asNumber(row.close))
+                .filter((v): v is number => v !== undefined),
+            });
+          } else {
+            dispatchIfCurrent({ type: "etfDetailLoaded", name: ticker });
           }
-          dispatchIfCurrent({ type: "appendLog", msg: `✓ ${info.label}` });
-          // Surface the trader rating as soon as the trader node lands.
-          if (node === "trader") {
-            const signal = (update as Record<string, unknown>).trader_backtest_signal as
-              | Record<string, unknown>
-              | undefined;
-            const rating = signal?.rating;
-            if (typeof rating === "string" && rating) {
-              dispatchIfCurrent({ type: "setRating", rating });
+        } catch (e) {
+          dispatchIfCurrent({ type: "etfDetailError", error: (e as Error).message });
+        }
+        if (!ensureActive()) return;
+
+        dispatchIfCurrent({
+          type: "appendLog",
+          msg: "── 启动完整流水线：分析师 → 辩论 → 交易 → 风控 → 决策",
+        });
+
+        // Stream the graph so the dashboard updates per node instead of waiting
+        // for the whole pipeline. Each chunk is { nodeName: stateUpdate }.
+        const stream = await graph.stream(
+          {
+            messages: [new HumanMessage(ticker)],
+            asset_of_interest: ticker,
+            trade_date: state.date,
+          },
+          { recursionLimit: 100, signal } as { recursionLimit: number; signal: AbortSignal },
+        );
+
+        let finalState: Record<string, unknown> = {};
+        try {
+          for await (const chunk of stream) {
+            if (!ensureActive()) return;
+            for (const [node, update] of Object.entries(chunk as Record<string, unknown>)) {
+              if (!update || typeof update !== "object") continue;
+              finalState = { ...finalState, ...(update as Record<string, unknown>) };
+              const info = NODE_INFO[node];
+              if (!info) continue; // tool-loop node (e.g. *_tools) — no UI section
+              dispatchIfCurrent({ type: "sectionStarted", sectionId: info.section });
+              const body = (update as Record<string, unknown>)[info.key];
+              const hasBody = typeof body === "string" && body.trim().length > 0;
+              // Analyst nodes re-enter via their ToolNode while fetching data; those
+              // intermediate passes only carry { messages } and no report body, so
+              // skip them — we only advance the UI once real output is produced.
+              if (!hasBody) continue;
+              dispatchIfCurrent({
+                type: "sectionReport",
+                sectionId: info.section,
+                nodeLabel: tickers.length > 1 ? `${ticker} · ${info.label}` : info.label,
+                body: body as string,
+              });
+              dispatchIfCurrent({ type: "setStats", stats: { llm_calls: 1 } });
+              if (info.completes) {
+                dispatchIfCurrent({ type: "sectionDone", sectionId: info.section });
+              }
+              dispatchIfCurrent({ type: "appendLog", msg: `✓ ${ticker} · ${info.label}` });
+              // Surface the trader rating as soon as the trader node lands.
+              if (node === "trader") {
+                const traderSignal = (update as Record<string, unknown>).trader_backtest_signal as
+                  | Record<string, unknown>
+                  | undefined;
+                const rating = traderSignal?.rating;
+                if (typeof rating === "string" && rating) {
+                  dispatchIfCurrent({ type: "setRating", rating });
+                }
+              }
             }
           }
+          const summary = buildExecutionSummary(finalState);
+          if (summary) dispatchIfCurrent({ type: "setExecutionSummary", summary });
+          const decision =
+            (finalState.final_allocation_decision as string) ||
+            (finalState.trader_allocation_plan as string) ||
+            "(无最终决策)";
+          lastDecision = decision;
+          dispatchIfCurrent({ type: "queueTickerDone", index });
+        } catch (e) {
+          const msg = (e as Error).message;
+          dispatchIfCurrent({ type: "queueTickerFailed", index, msg });
+          throw e;
         }
       }
 
       dispatchIfCurrent({ type: "appendLog", msg: "✓ 流水线完成" });
-      const decision =
-        (finalState.final_allocation_decision as string) ||
-        (finalState.trader_allocation_plan as string) ||
-        "(无最终决策)";
-      dispatchIfCurrent({ type: "analysisDone", result: decision });
+      dispatchIfCurrent({ type: "analysisDone", result: lastDecision || "(无最终决策)" });
     } finally {
       await client.close();
     }
   } catch (err) {
     const msg = (err as Error).message;
+    if (signal.aborted || msg === "分析已取消。") {
+      dispatchIfCurrent({ type: "appendLog", msg: "✗ 分析已取消" });
+      dispatchIfCurrent({ type: "queueCancelled" });
+      return;
+    }
     dispatchIfCurrent({ type: "appendLog", msg: `✗ 错误: ${msg.slice(0, 120)}` });
     dispatchIfCurrent({
       type: "analysisError",
@@ -703,6 +998,7 @@ function App() {
   const dispatchRef = useRef(dispatch);
   dispatchRef.current = dispatch;
   const runSeqRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   // vllm discovery
   const vllmFetchedRef = useRef(false);
@@ -751,6 +1047,7 @@ function App() {
         return;
       }
       if (s.phase === "dashboard") {
+        abortRef.current?.abort();
         runSeqRef.current += 1;
         d({ type: "backToTicker" });
         return;
@@ -759,7 +1056,7 @@ function App() {
     }
 
     if (s.phase === "ticker") {
-      if (key.return && s.ticker) {
+      if (key.return && parseTickers(s.ticker).length > 0) {
         d({ type: "openConfig" });
         return;
       }
@@ -767,7 +1064,7 @@ function App() {
         d({ type: "deleteTicker" });
         return;
       }
-      if (input.length === 1 && /[a-zA-Z0-9._-]/.test(input))
+      if (input.length === 1 && /[a-zA-Z0-9._,\-，;；\s]/.test(input))
         d({ type: "appendTicker", char: input });
       return;
     }
@@ -802,8 +1099,11 @@ function App() {
         } else {
           const runId = runSeqRef.current + 1;
           runSeqRef.current = runId;
+          abortRef.current?.abort();
+          const controller = new AbortController();
+          abortRef.current = controller;
           d({ type: "startAnalysis" });
-          runAnalysis(s, d, () => runSeqRef.current === runId);
+          runAnalysis(s, d, () => runSeqRef.current === runId, controller.signal);
         }
         return;
       }
@@ -834,6 +1134,7 @@ function App() {
         return;
       }
       if (key.return && (s.status === "done" || s.status === "error")) {
+        abortRef.current?.abort();
         runSeqRef.current += 1;
         d({ type: "backToTicker" });
       }
@@ -866,6 +1167,7 @@ function App() {
 // ===========================================================================
 
 function TickerScreen({ state }: { state: AppState }) {
+  const tickers = parseTickers(state.ticker);
   return (
     <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
       <Text bold>创建研究任务</Text>
@@ -873,6 +1175,10 @@ function TickerScreen({ state }: { state: AppState }) {
         <Text dimColor>ETF 代码 </Text>
         <Text color="yellow">{state.ticker || "▌"}</Text>
       </Box>
+      <Text dimColor>
+        支持多个代码，用逗号或空格分隔
+        {tickers.length > 0 ? ` · 已识别 ${tickers.length} 个` : ""}
+      </Text>
       <Text dimColor>输入代码后按 Enter 配置分析参数</Text>
     </Box>
   );
@@ -1067,6 +1373,23 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
                     )}
                   </Text>
                 )}
+                {state.etfDetail?.history && state.etfDetail.history.length > 1 && (
+                  <Text color="cyan">{sparkline(state.etfDetail.history)}</Text>
+                )}
+                {(state.etfDetail?.high !== undefined || state.etfDetail?.low !== undefined) && (
+                  <Text dimColor>
+                    H/L: {state.etfDetail.high?.toFixed(3) ?? "—"}/
+                    {state.etfDetail.low?.toFixed(3) ?? "—"}
+                  </Text>
+                )}
+                {state.etfDetail?.volume !== undefined && (
+                  <Text dimColor>
+                    量: {Math.round(state.etfDetail.volume).toLocaleString()}
+                    {state.etfDetail.volumeChangePct !== undefined
+                      ? ` (${state.etfDetail.volumeChangePct > 0 ? "+" : ""}${state.etfDetail.volumeChangePct.toFixed(1)}%)`
+                      : ""}
+                  </Text>
+                )}
                 <Text dimColor>{state.date}</Text>
               </>
             )}
@@ -1087,6 +1410,7 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
             <Text dimColor>日期: {state.date}</Text>
             <Text dimColor>提供商: {state.provider || "—"}</Text>
             <Text dimColor>模型: {state.model || "—"}</Text>
+            <Text dimColor>标的: {state.tickers.length || parseTickers(state.ticker).length}</Text>
           </Box>
 
           {/* Cancel button */}
@@ -1110,7 +1434,8 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
                   : state.status === "running"
                     ? "🟡"
                     : "⚪"}{" "}
-              1/1
+              {state.queue.filter((item) => item.status === "done").length}/
+              {state.queue.length || 1}
               {state.status === "error"
                 ? " 有失败"
                 : state.status === "done"
@@ -1120,31 +1445,28 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
                     : " 等待中"}
             </Text>
             <Box flexDirection="column" marginTop={1}>
-              {state.status === "running" || state.status === "done" || state.status === "error" ? (
-                <Text>
-                  <Text
-                    color={
-                      state.status === "done"
-                        ? "green"
-                        : state.status === "error"
-                          ? "red"
-                          : "yellow"
-                    }
-                  >
-                    {"> "}
-                    {state.ticker.split(".")[0] ?? state.ticker}
+              {state.queue.length > 0 ? (
+                state.queue.slice(0, 8).map((item, index) => (
+                  <Text key={item.ticker}>
+                    <Text
+                      {...(() => {
+                        const color =
+                          item.status === "done"
+                            ? "green"
+                            : item.status === "failed" || item.status === "cancelled"
+                              ? "red"
+                              : item.status === "running"
+                                ? "yellow"
+                                : undefined;
+                        return color ? { color: color as "green" | "red" | "yellow" } : {};
+                      })()}
+                    >
+                      {index === state.currentTickerIdx ? "> " : "  "}
+                      {item.ticker.split(".")[0] ?? item.ticker}
+                    </Text>
+                    <Text dimColor> ({queueStatusLabel(item.status)})</Text>
                   </Text>
-                  <Text dimColor>
-                    {" "}
-                    (
-                    {state.status === "done"
-                      ? "已完成"
-                      : state.status === "error"
-                        ? "失败"
-                        : "分析中"}
-                    )
-                  </Text>
-                </Text>
+                ))
               ) : (
                 <Text dimColor>等待分析启动…</Text>
               )}
@@ -1178,7 +1500,7 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
       {/* Stats bar */}
       <Box marginTop={1} justifyContent="space-between">
         <Text color="cyan">
-          ◎ Stages {agentsDone}/{agentsTotal}{" "}
+          ◎ Agents {agentsDone}/{agentsTotal}{" "}
           {state.status === "running"
             ? "· 分析中"
             : state.status === "done"
@@ -1187,9 +1509,16 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
                 ? "· 错误"
                 : "· 等待"}
         </Text>
-        <Text dimColor>{state.rating ? `评级 ${state.rating}` : "完整流水线"}</Text>
+        <Text dimColor>
+          {state.activeSection
+            ? `当前 ${DEFAULT_SECTIONS.find((s) => s.id === state.activeSection)?.title ?? state.activeSection}`
+            : state.rating
+              ? `评级 ${state.rating}`
+              : "完整流水线"}
+        </Text>
         <Text color="green">
-          Reports {reportsDone}/{reportsTotal}
+          LLM {state.stats.llm_calls} · Tools {state.stats.tool_calls} · Reports {reportsDone}/
+          {reportsTotal}
         </Text>
         <Text dimColor>{el} ←→/Tab 切换 · Enter 返回</Text>
       </Box>
@@ -1218,14 +1547,26 @@ function TabContent({ state, groups }: { state: AppState; groups: Record<string,
       {/* Section status checklist for this tab */}
       <Box flexDirection="column" marginTop={1}>
         {sections.map((s) => {
-          const isDone = state.sectionDone.has(s.id);
+          const status = state.sectionStatus[s.id] ?? "pending";
+          const isDone = status === "done";
           const hasBody = Boolean(state.reports[s.id]?.trim());
-          const mark = isDone ? "✓" : hasBody ? "◐" : state.status === "running" ? "○" : "·";
+          const mark =
+            status === "done"
+              ? "✓"
+              : status === "failed"
+                ? "×"
+                : status === "running"
+                  ? "◐"
+                  : state.status === "running"
+                    ? "○"
+                    : "·";
           const colorProps = isDone
             ? { color: "green" as const }
-            : hasBody
-              ? { color: "yellow" as const }
-              : {};
+            : status === "failed"
+              ? { color: "red" as const }
+              : hasBody || status === "running"
+                ? { color: "yellow" as const }
+                : {};
           return (
             <Text key={s.id} dimColor={!isDone && !hasBody} {...colorProps}>
               {mark} {s.title}
@@ -1235,6 +1576,9 @@ function TabContent({ state, groups }: { state: AppState; groups: Record<string,
       </Box>
 
       {/* Report content for completed sections in this tab */}
+      {state.activeTab === "decision" && state.executionSummary && (
+        <ExecutionSummaryView summary={state.executionSummary} />
+      )}
       {available.length > 0 ? (
         <Box flexDirection="column" marginTop={1}>
           {available.map(({ section, body }) => (
@@ -1244,7 +1588,7 @@ function TabContent({ state, groups }: { state: AppState; groups: Record<string,
               </Text>
               {body
                 .split("\n")
-                .slice(0, 20)
+                .slice(0, 40)
                 .map((line, i) => (
                   /* biome-ignore lint/suspicious/noArrayIndexKey: static report snapshot */
                   <Text key={`${section.id}-${i}`}>{line.slice(0, 120)}</Text>
@@ -1300,6 +1644,41 @@ function TabButton({
   );
 }
 
+function ExecutionSummaryView({ summary }: { summary: ExecutionSummary }) {
+  const range =
+    summary.targetWeightMinPct !== undefined && summary.targetWeightMaxPct !== undefined
+      ? `${summary.targetWeightMinPct.toFixed(1)}%-${summary.targetWeightMaxPct.toFixed(1)}%`
+      : summary.targetWeightPct !== undefined
+        ? `${summary.targetWeightPct.toFixed(1)}%`
+        : "—";
+  const weight = summary.targetWeightPct ?? summary.targetWeightMaxPct ?? 0;
+  const filled = Math.max(0, Math.min(10, Math.round(weight / 10)));
+  return (
+    <Box flexDirection="column" marginTop={1} marginBottom={1}>
+      <Text bold color="cyan">
+        ── 执行摘要 ──
+      </Text>
+      <Text>
+        评级: <Text bold>{summary.rating ?? "—"}</Text> · 目标仓位: {range}{" "}
+        <Text color="green">{"█".repeat(filled)}</Text>
+        <Text dimColor>{"░".repeat(10 - filled)}</Text>
+      </Text>
+      <Text dimColor>执行节奏: {summary.executionDelay || "—"}</Text>
+      <SummaryLine label="加仓条件" values={summary.addConditions} />
+      <SummaryLine label="减仓条件" values={summary.reduceConditions} />
+      <SummaryLine label="风险控制" values={summary.riskControls} />
+    </Box>
+  );
+}
+
+function SummaryLine({ label, values }: { label: string; values: string[] }) {
+  return (
+    <Text dimColor>
+      {label}: {values.length > 0 ? values.join("；").slice(0, 100) : "—"}
+    </Text>
+  );
+}
+
 function fmtElapsed(s: number): string {
   const m = Math.floor(s / 60);
   return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -1309,4 +1688,6 @@ function fmtElapsed(s: number): string {
 // Entry
 // ===========================================================================
 
-render(<App />);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  render(<App />);
+}
