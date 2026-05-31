@@ -1202,13 +1202,7 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
  * and the per-section report content for the selected team tab. Falls back to
  * the progress log until a section has produced output.
  */
-function TabContent({
-  state,
-  groups,
-}: {
-  state: AppState;
-  groups: Record<string, SectionDef[]>;
-}) {
+function TabContent({ state, groups }: { state: AppState; groups: Record<string, SectionDef[]> }) {
   const sections = groups[state.activeTab] ?? [];
   const tabMeta = TEAM_TABS.find((t) => t.key === state.activeTab);
 
@@ -1227,12 +1221,13 @@ function TabContent({
           const isDone = state.sectionDone.has(s.id);
           const hasBody = Boolean(state.reports[s.id]?.trim());
           const mark = isDone ? "✓" : hasBody ? "◐" : state.status === "running" ? "○" : "·";
+          const colorProps = isDone
+            ? { color: "green" as const }
+            : hasBody
+              ? { color: "yellow" as const }
+              : {};
           return (
-            <Text
-              key={s.id}
-              color={isDone ? "green" : hasBody ? "yellow" : undefined}
-              dimColor={!isDone && !hasBody}
-            >
+            <Text key={s.id} dimColor={!isDone && !hasBody} {...colorProps}>
               {mark} {s.title}
             </Text>
           );
@@ -1295,7 +1290,7 @@ function TabButton({
   const allDone = done === total && total > 0;
   return (
     <Box flexDirection="column" borderStyle={active ? "round" : "single"} paddingX={1}>
-      <Text bold={active} color={active ? "cyan" : undefined}>
+      <Text bold={active} {...(active ? { color: "cyan" as const } : {})}>
         {label} {active ? "▾" : "▸"}
       </Text>
       <Text color={allDone ? "green" : "yellow"}>

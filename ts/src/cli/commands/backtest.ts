@@ -135,9 +135,7 @@ export function registerBacktest(program: Command): void {
         }
 
         // Benchmark comparison (list of BacktraderBenchmarkMetrics).
-        const benchMetrics = result.benchmark_metrics as
-          | Array<Record<string, unknown>>
-          | undefined;
+        const benchMetrics = result.benchmark_metrics as Array<Record<string, unknown>> | undefined;
         if (Array.isArray(benchMetrics) && benchMetrics.length > 0) {
           console.log(pc.cyan("\n=== Benchmark Comparison ==="));
           for (const b of benchMetrics) {
