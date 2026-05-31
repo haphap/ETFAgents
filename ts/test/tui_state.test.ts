@@ -5,7 +5,6 @@ import {
   clampRound,
   extractPriceRows,
   initState,
-  multiRoundUnsupported,
   nextSectionId,
   normalizeBacktestResult,
   parseTickers,
@@ -238,9 +237,7 @@ describe("P1 analysis config", () => {
     expect(s.debateRounds).toBe(1);
   });
 
-  it("flags multi-round and analyst-deselection as unsupported by the single-pass graph", () => {
-    expect(multiRoundUnsupported(1, 1)).toBe(false);
-    expect(multiRoundUnsupported(2, 1)).toBe(true);
+  it("flags analyst deselection as unsupported by the graph", () => {
     const s = reducer(initState(), { type: "toggleAnalyst", id: "top_holdings" });
     expect(analystSelectionUnsupported(initState().selectedAnalysts)).toBe(false);
     expect(analystSelectionUnsupported(s.selectedAnalysts)).toBe(true);

@@ -17,8 +17,12 @@ unit coverage in `ts/test/tui_state.test.ts`. Verified with `pnpm typecheck`,
   `setTab` default-selects the first section.
 - **P1 Analysis config parity** — analyst toggles (←/→ cursor, Space toggle),
   research depth select, debate/risk round steppers (clamped 1–3), read-only
-  backend row. Multi-round and analyst-deselection are surfaced as explicit
-  "pending graph support" warnings because the TS graph is still single-pass.
+  backend row. **Multi-round debate is now wired**: `debateRounds`/`riskRounds`
+  flow into `buildFullGraph`, the debator nodes accumulate
+  `investment_debate_state`/`risk_debate_state` (`count`/`latestSpeaker`/
+  `history`), and the bull↔bear and aggressive→conservative→neutral edges loop
+  via `routeDebate`/`routeRiskDebate`, matching the Python graph. Analyst
+  deselection is still surfaced as a "pending graph support" warning.
 - **P2 Report library** — `Ctrl+L` screen; discovers
   `results_dir/{ticker}/{date}/complete_report.md`, newest-first; reuses the P0
   viewport for the selected body; `r` refresh.
@@ -743,6 +747,7 @@ report library and historical readers can reuse.
 - Do not migrate from Ink to another TUI framework.
 - Do not attempt pixel-perfect Textual parity.
 - Do not add a separate TS persistence format for reports or watchlists.
-- Do not claim multi-round debate support until the graph actually supports it.
+- Multi-round debate support is now implemented in the graph (see Implementation
+  Status); analyst deselection remains the one config control not yet wired.
 - Do not add trade placement to paper trading before the read-only view is
   reliable.

@@ -552,11 +552,6 @@ export function clampRound(n: number): number {
   return Math.max(1, Math.min(3, Math.round(n)));
 }
 
-/** P1: the TS full graph is single-pass; rounds > 1 are not wired yet. */
-export function multiRoundUnsupported(debateRounds: number, riskRounds: number): boolean {
-  return debateRounds > 1 || riskRounds > 1;
-}
-
 /** P1: deselecting analysts is not honoured by the single-pass graph yet. */
 export function analystSelectionUnsupported(selected: Record<string, boolean>): boolean {
   return ANALYST_IDS.some((id) => selected[id] === false);
@@ -1455,6 +1450,8 @@ async function runAnalysis(
           riskDebate: [],
         },
         promptContext,
+        maxDebateRounds: state.debateRounds,
+        maxRiskRounds: state.riskRounds,
       });
 
       let lastDecision = "";
@@ -2325,10 +2322,7 @@ function ConfigModal({ state }: { state: AppState }) {
           <Text dimColor>{state.backendUrl || "(默认 / 由 bridge 配置)"}</Text>
         </Box>
 
-        {/* P1: surface settings the single-pass TS graph cannot honour yet. */}
-        {multiRoundUnsupported(state.debateRounds, state.riskRounds) && (
-          <Text color="yellow">⚠ 多轮辩论尚未接入 TS 图（单轮执行），轮数 &gt; 1 暂不生效。</Text>
-        )}
+        {/* P1: analyst deselection is still not wired into the TS graph. */}
         {analystSelectionUnsupported(state.selectedAnalysts) && (
           <Text color="yellow">⚠ 取消分析师尚未接入 TS 图，当前仍会运行全部分析师。</Text>
         )}
