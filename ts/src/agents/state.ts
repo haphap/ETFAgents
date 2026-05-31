@@ -10,6 +10,16 @@
 
 import { Annotation, MessagesAnnotation } from "@langchain/langgraph";
 
+/** Accumulating debate accounting shared by the research and risk debates. */
+export interface DebateState {
+  /** Number of completed debator turns. */
+  count: number;
+  /** Role label of the most recent speaker (e.g. "Bull", "Aggressive"). */
+  latestSpeaker: string;
+  /** Concatenated debate transcript, appended one turn at a time. */
+  history: string;
+}
+
 export const SpineState = Annotation.Root({
   ...MessagesAnnotation.spec,
 
@@ -71,6 +81,18 @@ export const SpineState = Annotation.Root({
   bear_researcher_report: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => "",
+  }),
+  // Multi-round debate accounting. `count` is the number of completed turns
+  // (bull+bear, or aggressive+conservative+neutral); `latestSpeaker` drives the
+  // conditional routers (routeDebate / routeRiskDebate). Mirrors the Python
+  // investment_debate_state / risk_debate_state used by ConditionalLogic.
+  investment_debate_state: Annotation<DebateState>({
+    reducer: (_prev, next) => next,
+    default: () => ({ count: 0, latestSpeaker: "", history: "" }),
+  }),
+  risk_debate_state: Annotation<DebateState>({
+    reducer: (_prev, next) => next,
+    default: () => ({ count: 0, latestSpeaker: "", history: "" }),
   }),
   aggressive_debator_response: Annotation<string>({
     reducer: (_prev, next) => next,
