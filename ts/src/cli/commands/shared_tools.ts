@@ -13,7 +13,9 @@ export const ANALYST_TOOLS = {
     "get_news",
   ],
   mesoCommodity: ["get_commodity_cluster_data"],
-  catalystSentiment: [] as string[],
+  // catalyst_sentiment pre-fetches these (no LLM tool loop) — see
+  // createCatalystSentimentNode.
+  catalystSentiment: ["get_etf_info", "get_etf_holdings", "get_news", "get_global_news"],
   holdingsIndustry: ["get_etf_holdings", "get_etf_industry_research"],
   topHoldings: ["get_etf_holdings", "get_etf_top_holdings_research"],
   bullBear: [] as string[],

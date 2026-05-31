@@ -6,6 +6,7 @@
  */
 
 import { HumanMessage } from "@langchain/core/messages";
+import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { Command } from "commander";
 import pc from "picocolors";
 import { BridgeApi, BridgeClient, pickBridgeTools, RpcError } from "../../bridge/index.js";
@@ -55,35 +56,37 @@ export function registerAnalyzeCandidatePool(program: Command): void {
             : {}),
         };
 
-        // Pick tools once (shared across all tickers).
-        const toolNames = [
-          ...ANALYST_TOOLS.marketFlow,
-          ...ANALYST_TOOLS.macroRegime,
-          ...ANALYST_TOOLS.mesoCommodity,
-          ...ANALYST_TOOLS.holdingsIndustry,
-          ...ANALYST_TOOLS.topHoldings,
-        ];
-        const allTools = await pickBridgeTools(api, toolNames);
+        // Pick tools once (shared across all tickers). De-duplicate by name so
+        // shared tools (e.g. get_etf_holdings appears in several analyst sets)
+        // are only fetched once, and each analyst is bound a single instance
+        // per tool name — binding duplicate-named tools is rejected by most LLM
+        // providers.
+        const uniqueToolNames = Array.from(
+          new Set<string>([
+            ...ANALYST_TOOLS.marketFlow,
+            ...ANALYST_TOOLS.macroRegime,
+            ...ANALYST_TOOLS.mesoCommodity,
+            ...ANALYST_TOOLS.catalystSentiment,
+            ...ANALYST_TOOLS.holdingsIndustry,
+            ...ANALYST_TOOLS.topHoldings,
+          ]),
+        );
+        const allTools = await pickBridgeTools(api, uniqueToolNames);
+        const byName = new Map(allTools.map((t) => [t.name, t] as const));
+        const pick = (names: ReadonlyArray<string>): StructuredToolInterface[] =>
+          names
+            .map((n) => byName.get(n))
+            .filter((t): t is StructuredToolInterface => t !== undefined);
 
         const toolSets = {
-          marketFlow: allTools.filter((t) =>
-            (ANALYST_TOOLS.marketFlow as readonly string[]).includes(t.name),
-          ),
-          macroRegime: allTools.filter((t) =>
-            (ANALYST_TOOLS.macroRegime as readonly string[]).includes(t.name),
-          ),
-          mesoCommodity: allTools.filter((t) =>
-            (ANALYST_TOOLS.mesoCommodity as readonly string[]).includes(t.name),
-          ),
-          catalystSentiment: [] as typeof allTools,
-          holdingsIndustry: allTools.filter((t) =>
-            (ANALYST_TOOLS.holdingsIndustry as readonly string[]).includes(t.name),
-          ),
-          topHoldings: allTools.filter((t) =>
-            (ANALYST_TOOLS.topHoldings as readonly string[]).includes(t.name),
-          ),
-          bullBear: [] as typeof allTools,
-          riskDebate: [] as typeof allTools,
+          marketFlow: pick(ANALYST_TOOLS.marketFlow),
+          macroRegime: pick(ANALYST_TOOLS.macroRegime),
+          mesoCommodity: pick(ANALYST_TOOLS.mesoCommodity),
+          catalystSentiment: pick(ANALYST_TOOLS.catalystSentiment),
+          holdingsIndustry: pick(ANALYST_TOOLS.holdingsIndustry),
+          topHoldings: pick(ANALYST_TOOLS.topHoldings),
+          bullBear: [] as StructuredToolInterface[],
+          riskDebate: [] as StructuredToolInterface[],
         };
 
         console.log(

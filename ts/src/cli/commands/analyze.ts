@@ -49,7 +49,7 @@ export function registerAnalyze(program: Command): void {
           marketFlow: await pickBridgeTools(api, ANALYST_TOOLS.marketFlow),
           macroRegime: await pickBridgeTools(api, ANALYST_TOOLS.macroRegime),
           mesoCommodity: await pickBridgeTools(api, ANALYST_TOOLS.mesoCommodity),
-          catalystSentiment: [],
+          catalystSentiment: await pickBridgeTools(api, ANALYST_TOOLS.catalystSentiment),
           holdingsIndustry: await pickBridgeTools(api, ANALYST_TOOLS.holdingsIndustry),
           topHoldings: await pickBridgeTools(api, ANALYST_TOOLS.topHoldings),
           bullBear: [],
@@ -75,7 +75,7 @@ export function registerAnalyze(program: Command): void {
             `provider=${llmHandle.provider} model=${llmHandle.model} ticker=${ticker} trade_date=${tradeDate}`,
           ),
         );
-        console.log(pc.yellow("Running 6-analyst pipeline..."));
+        console.log(pc.yellow("Running full pipeline: analysts → debate → trader → risk → PM"));
 
         const final = await graph.invoke({
           messages: [new HumanMessage(ticker)],
@@ -83,8 +83,17 @@ export function registerAnalyze(program: Command): void {
           trade_date: tradeDate,
         });
 
+        if (final.research_allocation_plan) {
+          console.log(pc.cyan("\n=== research_allocation_plan ==="));
+          console.log(final.research_allocation_plan);
+        }
+
         console.log(pc.cyan("\n=== trader_allocation_plan ==="));
         console.log(final.trader_allocation_plan || pc.dim("(empty)"));
+
+        console.log(pc.cyan("\n=== final_allocation_decision (portfolio manager) ==="));
+        console.log(final.final_allocation_decision || pc.dim("(empty)"));
+
         console.log(pc.dim(`\nrating=${final.trader_backtest_signal?.rating ?? "?"}`));
       } catch (err) {
         if (err instanceof RpcError) {

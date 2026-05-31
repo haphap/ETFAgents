@@ -12,21 +12,21 @@ export function registerPaper(program: Command): void {
   const paperCmd = program.command("paper").description("Paper trading account management");
 
   paperCmd
-    .command("register <username>")
+    .command("register <username> <password>")
     .description("Register a paper trading account")
-    .action(async (username: string) => {
+    .action(async (username: string, password: string) => {
       await withBridge(async (api) => {
-        const result = await api.paperRegister(username);
+        const result = await api.paperRegister(username, password);
         console.log(pc.green(`Registered: ${JSON.stringify(result)}`));
       });
     });
 
   paperCmd
-    .command("login <username>")
+    .command("login <username> <password>")
     .description("Login to paper trading account")
-    .action(async (username: string) => {
+    .action(async (username: string, password: string) => {
       await withBridge(async (api) => {
-        const result = await api.paperLogin(username);
+        const result = await api.paperLogin(username, password);
         console.log(pc.green(`Logged in: ${JSON.stringify(result)}`));
       });
     });

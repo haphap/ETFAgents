@@ -99,7 +99,7 @@ export function createAnalystNode(
 
     const baseMessages = state.messages as BaseMessage[];
 
-    const { report } = await runToolReportChain({
+    const { result, report } = await runToolReportChain({
       llm,
       tools: config.tools,
       baseMessages,
@@ -111,6 +111,14 @@ export function createAnalystNode(
       rejectedReportFallback: "last_attempt" as const,
       language: ctx.language,
     });
+
+    // Tool routing: when the model emitted tool calls, surface that message so
+    // the graph can route to the ToolNode and re-enter this analyst with the
+    // tool results appended. Mirrors the market_flow node's handling — without
+    // this the bound tools are never executed and the report comes back empty.
+    if ((result.tool_calls ?? []).length > 0) {
+      return { messages: [result] } as SpineStateUpdate;
+    }
 
     // --- Post-processing pipeline ---
     let processedReport = report;
