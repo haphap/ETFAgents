@@ -49,7 +49,7 @@ export function registerBacktest(program: Command): void {
     )
     .option("--benchmark-tickers <list>", "Comma-separated benchmark tickers", "equal_weight_pool")
     .option("--timeout <seconds>", "Bridge RPC timeout in seconds (0 disables)", "900")
-    .option("--output <path>", "Write CSV result to path")
+    .option("--output <path>", "Write the full result JSON to path")
     .action(async (tickers: string[], opts: Record<string, string>) => {
       if (!opts.startDate || !opts.endDate) {
         console.error(pc.red("--start-date and --end-date are required"));
@@ -100,46 +100,66 @@ export function registerBacktest(program: Command): void {
           { timeoutMs },
         );
 
-        // Render results
-        if (result.nav_curves) {
+        // Render results. The bridge returns BacktraderBacktestResult.to_dict()
+        // (asdict), so the shape is the dataclass fields: a flat `metrics`
+        // object, `nav` / `benchmark_nav` records, `benchmark_metrics`,
+        // `trades`, etc. See etfagents/backtest/backtrader_engine.py.
+        const fmtNum = (v: unknown): string =>
+          typeof v === "number" && Number.isFinite(v) ? v.toFixed(4) : String(v ?? "—");
+        const fmtPct = (v: unknown): string =>
+          typeof v === "number" && Number.isFinite(v)
+            ? `${(v * 100).toFixed(2)}%`
+            : String(v ?? "—");
+
+        // Strategy NAV curve (list of {date, nav, cash, gross_exposure}).
+        const nav = result.nav as Array<{ date?: string; nav?: number }> | undefined;
+        if (Array.isArray(nav) && nav.length > 0) {
           console.log(pc.cyan("\n=== NAV Curve (last 5 points) ==="));
-          const curves = result.nav_curves as Record<string, number[]>;
-          for (const [name, values] of Object.entries(curves)) {
-            const tail = values
-              .slice(-5)
-              .map((v) => v.toFixed(4))
-              .join(" → ");
-            console.log(`  ${name}: ${pc.dim("...→")} ${tail}`);
+          for (const row of nav.slice(-5)) {
+            console.log(`  ${row.date ?? "?"}: ${fmtNum(row.nav)}`);
           }
         }
 
-        if (result.metrics) {
+        // Strategy performance metrics (flat BacktraderMetrics object).
+        const metrics = result.metrics as Record<string, unknown> | undefined;
+        if (metrics && typeof metrics === "object") {
           console.log(pc.cyan("\n=== Performance Metrics ==="));
-          for (const [name, metrics] of Object.entries(
-            result.metrics as Record<string, Record<string, number>>,
-          )) {
-            console.log(`  ${pc.bold(name)}:`);
-            for (const [key, value] of Object.entries(metrics)) {
-              const fmt = typeof value === "number" ? value.toFixed(4) : String(value);
-              console.log(`    ${key}: ${fmt}`);
-            }
+          console.log(`  ${pc.bold("最终净值")}: ${fmtNum(metrics.final_value)}`);
+          console.log(`  ${pc.bold("累计收益")}: ${fmtPct(metrics.cumulative_return)}`);
+          console.log(`  ${pc.bold("年化收益")}: ${fmtPct(metrics.annualized_return)}`);
+          console.log(`  ${pc.bold("年化波动")}: ${fmtPct(metrics.annualized_volatility)}`);
+          console.log(`  ${pc.bold("最大回撤")}: ${fmtPct(metrics.max_drawdown)}`);
+          console.log(`  ${pc.bold("夏普比率")}: ${fmtNum(metrics.sharpe_ratio)}`);
+          console.log(`  ${pc.bold("交易笔数")}: ${metrics.total_trades ?? "—"}`);
+          console.log(`  ${pc.bold("平均换手")}: ${fmtPct(metrics.average_turnover)}`);
+        }
+
+        // Benchmark comparison (list of BacktraderBenchmarkMetrics).
+        const benchMetrics = result.benchmark_metrics as
+          | Array<Record<string, unknown>>
+          | undefined;
+        if (Array.isArray(benchMetrics) && benchMetrics.length > 0) {
+          console.log(pc.cyan("\n=== Benchmark Comparison ==="));
+          for (const b of benchMetrics) {
+            console.log(
+              `  ${pc.bold(String(b.benchmark ?? "?"))}: ` +
+                `累计 ${fmtPct(b.cumulative_return)} · ` +
+                `超额 ${fmtPct(b.excess_cumulative_return)} · ` +
+                `信息比率 ${fmtNum(b.information_ratio)}`,
+            );
           }
         }
 
-        if (result.rankings) {
-          console.log(pc.cyan("\n=== Rankings ==="));
-          const rankings = result.rankings as Array<{ ticker: string; score: number }>;
-          for (let i = 0; i < rankings.length; i++) {
-            const r = rankings[i];
-            if (!r) continue;
-            console.log(`  ${i + 1}. ${r.ticker}  score=${r.score.toFixed(4)}`);
-          }
+        const trades = result.trades as unknown[] | undefined;
+        if (Array.isArray(trades)) {
+          console.log(pc.dim(`\ntrades=${trades.length}`));
         }
 
-        if (opts.output && result.csv) {
+        // --output writes the full result JSON (the bridge does not emit CSV).
+        if (opts.output) {
           const fs = await import("node:fs/promises");
-          await fs.writeFile(opts.output, String(result.csv));
-          console.log(pc.green(`\nCSV written to ${opts.output}`));
+          await fs.writeFile(opts.output, JSON.stringify(result, null, 2));
+          console.log(pc.green(`\nResult JSON written to ${opts.output}`));
         }
       } catch (err) {
         if (err instanceof RpcError) {
