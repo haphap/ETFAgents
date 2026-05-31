@@ -42,6 +42,13 @@ export interface AnalystConfig {
   reportSpec: AnalystReportSpec | null;
   /** Memory role configuration. */
   memoryRole: MemoryRoleConfig;
+  /**
+   * Optional explicit context block appended to the system message (e.g. the
+   * six analyst reports + opposing debate history for debators/managers).
+   * Mirrors the Python nodes that embed reports directly in the prompt rather
+   * than relying solely on accumulated message history.
+   */
+  buildContextBlock?: (state: SpineStateType) => string;
   /** Report acceptance check (return true when quality threshold is met). */
   acceptanceCheck?: (report: string) => boolean;
   /** Unexecuted-tool recovery configuration. */
@@ -77,9 +84,14 @@ export function createAnalystNode(
     const ctx = promptContext;
     const analystBody = config.buildSystemBody(ctx);
     const toolNames = config.tools.map((t) => t.name).join(", ");
+    // Explicit reports/debate context (debators & managers), built from state.
+    const contextBlock = config.buildContextBlock?.(state) ?? "";
 
     const buildSystemMessage = (phase: SystemMessagePhase): string => {
       let body = analystBody;
+      if (contextBlock) {
+        body = `${body}\n\n${contextBlock}`;
+      }
       if (phase.kind === "fallback") {
         body = `${body}${buildFinalReportFallback(ctx.language)}`;
       } else if (phase.kind === "recovery") {

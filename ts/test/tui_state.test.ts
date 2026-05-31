@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  analystSelectionUnsupported,
   appendTickerToInput,
   clampRound,
   extractPriceRows,
@@ -10,6 +9,7 @@ import {
   parseTickers,
   reducer,
   reportViewport,
+  selectedAnalystIds,
   sortByTicker,
   sortReports,
 } from "../src/tui/index.js";
@@ -237,10 +237,25 @@ describe("P1 analysis config", () => {
     expect(s.debateRounds).toBe(1);
   });
 
-  it("flags analyst deselection as unsupported by the graph", () => {
+  it("derives the selected analyst id list, reflecting toggles", () => {
+    expect(selectedAnalystIds(initState().selectedAnalysts)).toEqual([
+      "market_flow",
+      "catalyst_sentiment",
+      "macro_regime",
+      "meso_commodity",
+      "holdings_industry",
+      "top_holdings",
+    ]);
     const s = reducer(initState(), { type: "toggleAnalyst", id: "top_holdings" });
-    expect(analystSelectionUnsupported(initState().selectedAnalysts)).toBe(false);
-    expect(analystSelectionUnsupported(s.selectedAnalysts)).toBe(true);
+    expect(selectedAnalystIds(s.selectedAnalysts)).not.toContain("top_holdings");
+  });
+
+  it("hides a deselected analyst section from the dashboard tab", () => {
+    let s = reducer(initState(), { type: "toggleAnalyst", id: "macro_regime" });
+    s = reducer(s, { type: "startAnalysis" });
+    // The analysts tab should no longer surface the deselected section.
+    const onAnalysts = reducer(s, { type: "setTab", tab: "analysts" });
+    expect(onAnalysts.selectedSectionByTab.analysts).not.toBe("macro_regime");
   });
 });
 

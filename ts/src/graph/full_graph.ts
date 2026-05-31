@@ -39,6 +39,7 @@ import { createConservativeDebatorNode } from "../agents/nodes/conservative_deba
 import { createHoldingsIndustryNode } from "../agents/nodes/holdings_industry.js";
 import { createMacroRegimeNode } from "../agents/nodes/macro_regime.js";
 import { createMarketFlowNode } from "../agents/nodes/market_flow.js";
+import { createMemoryWriterNode, type PersistMemory } from "../agents/nodes/memory_writer.js";
 import { createMesoCommodityNode } from "../agents/nodes/meso_commodity.js";
 import { createNeutralDebatorNode } from "../agents/nodes/neutral_debator.js";
 import { createPortfolioManagerNode } from "../agents/nodes/portfolio_manager.js";
@@ -46,7 +47,12 @@ import { createResearchManagerNode } from "../agents/nodes/research_manager.js";
 import { createTopHoldingsNode } from "../agents/nodes/top_holdings.js";
 import { createTraderNode } from "../agents/nodes/trader.js";
 import type { PromptContext } from "../agents/prompts/shared.js";
-import { SpineState, type SpineStateType, type SpineStateUpdate } from "../agents/state.js";
+import {
+  type DebateState,
+  SpineState,
+  type SpineStateType,
+  type SpineStateUpdate,
+} from "../agents/state.js";
 import { routeAnalystTools, routeDebate, routeRiskDebate } from "./routing.js";
 
 // ===========================================================================
@@ -72,7 +78,30 @@ export interface BuildFullGraphOptions {
   maxDebateRounds?: number;
   /** Risk-debate rounds (default 1 = single pass, matching Python). */
   maxRiskRounds?: number;
+  /**
+   * Which of the six analysts run. Defaults to all. Deselected analysts are
+   * skipped (their node returns an empty update without an LLM call), matching
+   * Python's selected_analysts gating while keeping the graph topology static.
+   */
+  selectedAnalysts?: readonly string[];
+  /**
+   * Optional persistence callback for the Memory Writer node (graph end).
+   * When supplied, the node sends a state payload to it (wired to the bridge
+   * memory.append_analysis RPC) and records the returned entry. When omitted,
+   * the node is a no-op, matching a disabled memory store.
+   */
+  persistMemory?: PersistMemory;
 }
+
+/** Canonical analyst order, mirroring Python ETFGraphSetup.DEFAULT_SELECTED_ANALYSTS. */
+export const ALL_ANALYSTS = [
+  "market_flow",
+  "catalyst_sentiment",
+  "macro_regime",
+  "meso_commodity",
+  "holdings_industry",
+  "top_holdings",
+] as const;
 
 type NodeFn = (state: SpineStateType) => Promise<SpineStateUpdate>;
 
@@ -110,15 +139,52 @@ export function withDebateTurn(
     const response = typeof last?.content === "string" ? last.content : "";
     const prev = state[field];
     const turn = response ? `${speaker}: ${response}` : speaker;
+    const current = `${speaker}: ${response}`;
+    // Per-role history + latest-response fields, mirroring the Python debator
+    // nodes' investment_debate_state / risk_debate_state updates.
+    const roleFields: Record<string, Partial<DebateState>> = {
+      Bull: { bullHistory: append(prev.bullHistory, turn), currentBullResponse: current },
+      Bear: { bearHistory: append(prev.bearHistory, turn), currentBearResponse: current },
+      Aggressive: {
+        aggressiveHistory: append(prev.aggressiveHistory, turn),
+        currentAggressiveResponse: current,
+      },
+      Conservative: {
+        conservativeHistory: append(prev.conservativeHistory, turn),
+        currentConservativeResponse: current,
+      },
+      Neutral: {
+        neutralHistory: append(prev.neutralHistory, turn),
+        currentNeutralResponse: current,
+      },
+    };
     return {
       ...update,
       [field]: {
+        ...prev,
         count: prev.count + 1,
         latestSpeaker: speaker,
-        history: prev.history ? `${prev.history}\n\n${turn}` : turn,
+        history: append(prev.history, turn),
+        currentResponse: current,
+        ...(roleFields[speaker] ?? {}),
       },
     } as SpineStateUpdate;
   };
+}
+
+/** Append a turn to a running transcript with a blank-line separator. */
+function append(history: string, turn: string): string {
+  return history ? `${history}\n\n${turn}` : turn;
+}
+
+/**
+ * Wrap an analyst node so it is a no-op when its id is not in `selected`.
+ * A skipped analyst makes no LLM call and writes no report; the conditional
+ * tool router then advances to the next analyst (no pending tool calls).
+ */
+function skipIfDeselected(node: NodeFn, id: string, selected: ReadonlySet<string>): NodeFn {
+  if (selected.has(id)) return node;
+  return async () => ({}) as SpineStateUpdate;
 }
 
 // ===========================================================================
@@ -129,6 +195,7 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
   const ctx = opts.promptContext;
   const maxDebateRounds = opts.maxDebateRounds ?? 1;
   const maxRiskRounds = opts.maxRiskRounds ?? 1;
+  const selected = new Set(opts.selectedAnalysts ?? ALL_ANALYSTS);
 
   // --- Analyst nodes ---
   const marketFlow = createMarketFlowNode({
@@ -211,8 +278,14 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
   const conservativeTurn = withDebateTurn(conservativeDebator, "Conservative", "risk_debate_state");
   const neutralTurn = withDebateTurn(neutralDebator, "Neutral", "risk_debate_state");
 
+  const memoryWriter = createMemoryWriterNode({
+    ...(opts.persistMemory ? { persist: opts.persistMemory } : {}),
+    selectedAnalysts: opts.selectedAnalysts ?? ALL_ANALYSTS,
+  });
+
   // --- Tool nodes (one per analyst that calls tools) ---
   const mfTools = new ToolNode(opts.tools.marketFlow as StructuredToolInterface[]);
+  const catalystTools = new ToolNode(opts.tools.catalystSentiment as StructuredToolInterface[]);
   const macroTools = new ToolNode(opts.tools.macroRegime as StructuredToolInterface[]);
   const mesoTools = new ToolNode(opts.tools.mesoCommodity as StructuredToolInterface[]);
   const holdingsTools = new ToolNode(opts.tools.holdingsIndustry as StructuredToolInterface[]);
@@ -220,16 +293,20 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
 
   // --- Build graph ---
   const graph = new StateGraph(SpineState)
-    .addNode("market_flow", marketFlow)
+    .addNode("market_flow", skipIfDeselected(marketFlow, "market_flow", selected))
     .addNode("market_flow_tools", mfTools)
-    .addNode("macro_regime", macroRegime)
+    .addNode("macro_regime", skipIfDeselected(macroRegime, "macro_regime", selected))
     .addNode("macro_regime_tools", macroTools)
-    .addNode("meso_commodity", mesoCommodity)
+    .addNode("meso_commodity", skipIfDeselected(mesoCommodity, "meso_commodity", selected))
     .addNode("meso_commodity_tools", mesoTools)
-    .addNode("catalyst_sentiment", catalystSentiment)
-    .addNode("holdings_industry", holdingsIndustry)
+    .addNode(
+      "catalyst_sentiment",
+      skipIfDeselected(catalystSentiment, "catalyst_sentiment", selected),
+    )
+    .addNode("catalyst_sentiment_tools", catalystTools)
+    .addNode("holdings_industry", skipIfDeselected(holdingsIndustry, "holdings_industry", selected))
     .addNode("holdings_industry_tools", holdingsTools)
-    .addNode("top_holdings", topHoldings)
+    .addNode("top_holdings", skipIfDeselected(topHoldings, "top_holdings", selected))
     .addNode("top_holdings_tools", topTools)
     .addNode("bull_researcher", bullTurn)
     .addNode("bear_researcher", bearTurn)
@@ -239,6 +316,7 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
     .addNode("conservative_debator", conservativeTurn)
     .addNode("neutral_debator", neutralTurn)
     .addNode("portfolio_manager", portfolioManager)
+    .addNode("memory_writer", memoryWriter)
 
     // --- Analyst pipeline (each tool-using analyst gets a tool loop) ---
     // Order mirrors Python ETFGraphSetup.DEFAULT_SELECTED_ANALYSTS:
@@ -251,8 +329,16 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
     })
     .addEdge("market_flow_tools", "market_flow")
 
-    // catalyst_sentiment pre-fetches its data (no LLM tool loop).
-    .addEdge("catalyst_sentiment", "macro_regime")
+    // catalyst_sentiment runs its own tool loop, then continues to macro_regime.
+    .addConditionalEdges(
+      "catalyst_sentiment",
+      toolLoopRouter("catalyst_sentiment_tools", "macro_regime"),
+      {
+        catalyst_sentiment_tools: "catalyst_sentiment_tools",
+        macro_regime: "macro_regime",
+      },
+    )
+    .addEdge("catalyst_sentiment_tools", "catalyst_sentiment")
 
     .addConditionalEdges("macro_regime", toolLoopRouter("macro_regime_tools", "meso_commodity"), {
       macro_regime_tools: "macro_regime_tools",
@@ -316,7 +402,8 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
       (state: SpineStateType) => routeRiskDebate(state.risk_debate_state, maxRiskRounds),
       RISK_ROUTE_MAP,
     )
-    .addEdge("portfolio_manager", END)
+    .addEdge("portfolio_manager", "memory_writer")
+    .addEdge("memory_writer", END)
 
     .compile();
 

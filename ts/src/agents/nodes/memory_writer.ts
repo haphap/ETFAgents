@@ -1,0 +1,68 @@
+/**
+ * Memory Writer node — graph-end write-back, mirroring Python's
+ * ``create_memory_writer`` (Portfolio Manager → Memory Writer → END).
+ *
+ * The node assembles a Python-compatible state payload (snake_case keys, the
+ * shape ``build_analysis_memory_entry`` expects) and hands it to an optional
+ * ``persist`` callback — wired by the caller to the bridge
+ * ``memory.append_analysis`` RPC, which builds and stores the entry using the
+ * existing Python AnalysisMemoryStore. The returned entry dict is written to
+ * ``analysis_memory_entry`` so it is visible in the final state.
+ *
+ * When no ``persist`` callback is supplied (e.g. CLI / tests), the node is a
+ * no-op that leaves ``analysis_memory_entry`` empty — keeping the graph
+ * topology identical regardless of persistence wiring.
+ */
+
+import type { SpineStateType, SpineStateUpdate } from "../state.js";
+
+/** Persist callback: receives the Python-shaped state payload, returns the stored entry. */
+export type PersistMemory = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+/** Build the snake_case state payload that build_analysis_memory_entry reads. */
+export function buildMemoryPayload(state: SpineStateType): Record<string, unknown> {
+  const inv = state.investment_debate_state;
+  const risk = state.risk_debate_state;
+  return {
+    asset_of_interest: state.asset_of_interest,
+    trade_date: state.trade_date,
+    market_flow_report: state.market_flow_report,
+    catalyst_sentiment_report: state.catalyst_sentiment_report,
+    macro_regime_report: state.macro_regime_report,
+    meso_commodity_report: state.meso_commodity_report,
+    holdings_industry_report: state.holdings_industry_report,
+    top_holdings_report: state.top_holdings_report,
+    research_allocation_plan: state.research_allocation_plan,
+    trader_allocation_plan: state.trader_allocation_plan,
+    final_allocation_decision: state.final_allocation_decision,
+    trader_backtest_signal: state.trader_backtest_signal,
+    investment_debate_state: {
+      current_bull_response: inv.currentBullResponse,
+      current_bear_response: inv.currentBearResponse,
+    },
+    risk_debate_state: {
+      current_aggressive_response: risk.currentAggressiveResponse,
+      current_conservative_response: risk.currentConservativeResponse,
+      current_neutral_response: risk.currentNeutralResponse,
+    },
+  };
+}
+
+export function createMemoryWriterNode(opts: {
+  persist?: PersistMemory;
+  selectedAnalysts?: readonly string[];
+}) {
+  return async function memoryWriterNode(state: SpineStateType): Promise<SpineStateUpdate> {
+    if (!opts.persist) return {} as SpineStateUpdate;
+    try {
+      const entry = await opts.persist({
+        state: buildMemoryPayload(state),
+        selected_analysts: opts.selectedAnalysts ?? null,
+      });
+      return { analysis_memory_entry: entry } as SpineStateUpdate;
+    } catch {
+      // Persistence is best-effort: never fail the run because memory write failed.
+      return {} as SpineStateUpdate;
+    }
+  };
+}

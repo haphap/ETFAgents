@@ -8,6 +8,7 @@
  * Debators typically have no tools; pass an empty array.
  */
 
+import { buildConservativeContext } from "../helpers/debate_context.js";
 import {
   buildConservativeDebatorSystemMessage,
   CONSERVATIVE_DEBATOR_REPORT_SPEC,
@@ -26,6 +27,7 @@ export function createConservativeDebatorNode(opts: AnalystNodeOptions) {
       tools: opts.tools,
       reportSpec: CONSERVATIVE_DEBATOR_REPORT_SPEC,
       memoryRole: { role: "conservative" },
+      buildContextBlock: buildConservativeContext,
     },
     assembleSystemFrame,
   );

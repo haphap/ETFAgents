@@ -10,7 +10,11 @@
 
 import { Annotation, MessagesAnnotation } from "@langchain/langgraph";
 
-/** Accumulating debate accounting shared by the research and risk debates. */
+/**
+ * Accumulating debate accounting shared by the research and risk debates.
+ * Superset of the fields Python threads through investment_debate_state /
+ * risk_debate_state; unused role fields stay empty for the other debate.
+ */
 export interface DebateState {
   /** Number of completed debator turns. */
   count: number;
@@ -18,6 +22,43 @@ export interface DebateState {
   latestSpeaker: string;
   /** Concatenated debate transcript, appended one turn at a time. */
   history: string;
+  /** Latest visible response from any speaker. */
+  currentResponse: string;
+  /** Research-debate per-role histories + latest responses. */
+  bullHistory: string;
+  bearHistory: string;
+  currentBullResponse: string;
+  currentBearResponse: string;
+  /** Risk-debate per-role histories + latest responses. */
+  aggressiveHistory: string;
+  conservativeHistory: string;
+  neutralHistory: string;
+  currentAggressiveResponse: string;
+  currentConservativeResponse: string;
+  currentNeutralResponse: string;
+  /** Manager verdict (research_manager / portfolio_manager). */
+  judgeDecision: string;
+}
+
+/** Empty debate state used as the annotation default. */
+export function emptyDebateState(): DebateState {
+  return {
+    count: 0,
+    latestSpeaker: "",
+    history: "",
+    currentResponse: "",
+    bullHistory: "",
+    bearHistory: "",
+    currentBullResponse: "",
+    currentBearResponse: "",
+    aggressiveHistory: "",
+    conservativeHistory: "",
+    neutralHistory: "",
+    currentAggressiveResponse: "",
+    currentConservativeResponse: "",
+    currentNeutralResponse: "",
+    judgeDecision: "",
+  };
 }
 
 export const SpineState = Annotation.Root({
@@ -88,11 +129,11 @@ export const SpineState = Annotation.Root({
   // investment_debate_state / risk_debate_state used by ConditionalLogic.
   investment_debate_state: Annotation<DebateState>({
     reducer: (_prev, next) => next,
-    default: () => ({ count: 0, latestSpeaker: "", history: "" }),
+    default: () => emptyDebateState(),
   }),
   risk_debate_state: Annotation<DebateState>({
     reducer: (_prev, next) => next,
-    default: () => ({ count: 0, latestSpeaker: "", history: "" }),
+    default: () => emptyDebateState(),
   }),
   aggressive_debator_response: Annotation<string>({
     reducer: (_prev, next) => next,
@@ -109,6 +150,12 @@ export const SpineState = Annotation.Root({
   final_allocation_decision: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => "",
+  }),
+
+  // Memory write-back entry produced by the memory_writer node before END.
+  analysis_memory_entry: Annotation<Record<string, unknown>>({
+    reducer: (_prev, next) => next,
+    default: () => ({}),
   }),
 
   // Memory context (populated by Python AnalysisMemoryStore in sub-step 4).

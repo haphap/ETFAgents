@@ -85,13 +85,16 @@ describe("withDebateTurn accumulation", () => {
       ({ messages: [new AIMessage("bull argument")] }) as SpineStateUpdate;
     const wrapped = withDebateTurn(inner, "Bull", "investment_debate_state");
 
-    const update = (await wrapped(baseState)) as {
-      investment_debate_state: { count: number; latestSpeaker: string; history: string };
+    const update = (await wrapped(baseState)) as unknown as {
+      investment_debate_state: Record<string, unknown>;
     };
-    expect(update.investment_debate_state).toEqual({
+    expect(update.investment_debate_state).toMatchObject({
       count: 1,
       latestSpeaker: "Bull",
       history: "Bull: bull argument",
+      bullHistory: "Bull: bull argument",
+      currentBullResponse: "Bull: bull argument",
+      currentResponse: "Bull: bull argument",
     });
   });
 

@@ -232,4 +232,16 @@ export class BridgeApi {
   ): Promise<BacktestResult> {
     return this.client.call<BacktestResult>("backtest.run_candidate_pool", params, options);
   }
+
+  // memory.*
+  memoryAppendAnalysis(params: {
+    state: Record<string, unknown>;
+    selected_analysts?: readonly string[] | null;
+    config?: Record<string, unknown>;
+  }): Promise<{ written: boolean; entry: Record<string, unknown> }> {
+    return this.client.call<{ written: boolean; entry: Record<string, unknown> }>(
+      "memory.append_analysis",
+      params,
+    );
+  }
 }

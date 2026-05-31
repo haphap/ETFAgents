@@ -6,6 +6,7 @@
  * increasing ETF exposure.
  */
 
+import { buildBullContext } from "../helpers/debate_context.js";
 import { BULL_REPORT_SPEC, buildBullResearcherSystemMessage } from "../prompts/bull_researcher.js";
 import { createAnalystNode } from "./analyst_factory.js";
 import { type AnalystNodeOptions, assembleSystemFrame } from "./market_flow.js";
@@ -21,6 +22,7 @@ export function createBullResearcherNode(opts: AnalystNodeOptions) {
       tools: opts.tools,
       reportSpec: BULL_REPORT_SPEC,
       memoryRole: { role: "bull" },
+      buildContextBlock: buildBullContext,
     },
     assembleSystemFrame,
   );
