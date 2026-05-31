@@ -1,7 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { initState, parseTickers, reducer } from "../src/tui/index.js";
+import { extractPriceRows, initState, parseTickers, reducer } from "../src/tui/index.js";
 
 describe("TUI state model", () => {
+  it("parses bridge CSV price payloads and computes daily pct change", () => {
+    const rows = extractPriceRows(`# ETF price data
+Date,Open,High,Low,Close,Volume
+2026-05-28,3.800,3.900,3.700,3.850,1000
+2026-05-29,3.850,3.980,3.840,3.927,1250
+`);
+
+    expect(rows).toHaveLength(2);
+    expect(rows[1]).toMatchObject({
+      date: "2026-05-29",
+      close: 3.927,
+      high: 3.98,
+      low: 3.84,
+      volume: 1250,
+    });
+    expect(rows[1]?.pctChg).toBeCloseTo(2, 5);
+  });
+
+  it("keeps JSON row support for future bridge payloads", () => {
+    const rows = extractPriceRows(
+      JSON.stringify({
+        rows: [
+          { trade_date: "2026-05-28", close: 10, high: 11, low: 9, vol: 100 },
+          { trade_date: "2026-05-29", close: 11, high: 12, low: 10, vol: 120 },
+        ],
+      }),
+    );
+
+    expect(rows[1]?.pctChg).toBeCloseTo(10, 5);
+    expect(rows[1]?.volume).toBe(120);
+  });
+
   it("parses and deduplicates multi-ticker input for the research queue", () => {
     expect(parseTickers("510300.SH, 159915.SZ 510300.sh；SPY")).toEqual([
       "510300.SH",

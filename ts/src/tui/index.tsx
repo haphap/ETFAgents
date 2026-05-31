@@ -223,6 +223,16 @@ interface ExecutionSummary {
   riskControls: string[];
 }
 
+interface PriceRow {
+  date?: string;
+  name?: string;
+  close?: number;
+  pctChg?: number;
+  high?: number;
+  low?: number;
+  volume?: number;
+}
+
 interface AppState {
   phase: Phase;
   ticker: string;
@@ -359,12 +369,97 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-function extractPriceRows(text: string): Array<Record<string, unknown>> {
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      if (quoted && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current);
+  return cells.map((cell) => cell.trim());
+}
+
+function valueByKeys(row: Record<string, unknown>, keys: readonly string[]): unknown {
+  for (const key of keys) {
+    if (row[key] !== undefined) return row[key];
+  }
+  const lowerMap = new Map(Object.entries(row).map(([key, value]) => [key.toLowerCase(), value]));
+  for (const key of keys) {
+    const value = lowerMap.get(key.toLowerCase());
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
+function normalizePriceRows(rows: Array<Record<string, unknown>>): PriceRow[] {
+  const normalized = rows
+    .map((row) => {
+      const name = valueByKeys(row, ["name", "Name", "fund_name"]);
+      const close = asNumber(valueByKeys(row, ["Close", "close"]));
+      const pctChg = asNumber(valueByKeys(row, ["pct_chg", "PctChg", "ChangePct"]));
+      const high = asNumber(valueByKeys(row, ["High", "high"]));
+      const low = asNumber(valueByKeys(row, ["Low", "low"]));
+      const volume = asNumber(valueByKeys(row, ["Volume", "vol", "volume"]));
+      return {
+        date: String(valueByKeys(row, ["Date", "trade_date", "date"]) ?? ""),
+        ...(typeof name === "string" && name ? { name } : {}),
+        ...(close !== undefined ? { close } : {}),
+        ...(pctChg !== undefined ? { pctChg } : {}),
+        ...(high !== undefined ? { high } : {}),
+        ...(low !== undefined ? { low } : {}),
+        ...(volume !== undefined ? { volume } : {}),
+      };
+    })
+    .filter((row) => row.close !== undefined || row.high !== undefined || row.low !== undefined);
+
+  for (let i = 1; i < normalized.length; i += 1) {
+    const row = normalized[i];
+    const prev = normalized[i - 1];
+    if (
+      row?.pctChg === undefined &&
+      row?.close !== undefined &&
+      prev?.close !== undefined &&
+      prev.close !== 0
+    ) {
+      row.pctChg = ((row.close - prev.close) / prev.close) * 100;
+    }
+  }
+  return normalized;
+}
+
+export function extractPriceRows(text: string): PriceRow[] {
   try {
     const raw = JSON.parse(text) as { rows?: Array<Record<string, unknown>> };
-    return raw.rows ?? [];
+    return normalizePriceRows(raw.rows ?? []);
   } catch {
-    return [];
+    const lines = text
+      .replace(/\r\n/g, "\n")
+      .replace(/\r/g, "\n")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#"));
+    const headerLine = lines[0];
+    if (!headerLine) return [];
+    const headers = parseCsvLine(headerLine);
+    const rows = lines.slice(1).map((line) => {
+      const values = parseCsvLine(line);
+      return Object.fromEntries(headers.map((header, i) => [header, values[i] ?? ""]));
+    });
+    return normalizePriceRows(rows);
   }
 }
 
@@ -425,6 +520,18 @@ function buildExecutionSummary(finalState: Record<string, unknown>): ExecutionSu
   const delay = signal.execution_delay;
   if (typeof delay === "string" && delay) summary.executionDelay = delay;
   return summary;
+}
+
+function visibleReportLines(body: string, limit = 80): string[] {
+  const lines = body.split("\n");
+  if (lines.length <= limit) return lines;
+  const headCount = Math.floor(limit / 2);
+  const tailCount = limit - headCount - 1;
+  return [
+    ...lines.slice(0, headCount),
+    `… 省略 ${lines.length - limit + 1} 行，完整滚动阅读见下一步 P0 viewer …`,
+    ...lines.slice(-tailCount),
+  ];
 }
 
 export function initState(): AppState {
@@ -862,28 +969,26 @@ async function runAnalysis(
           const last = rows[rows.length - 1];
           const prev = rows[rows.length - 2];
           if (last) {
-            const close = asNumber(last.close);
-            const pctChg = asNumber(last.pct_chg);
-            const high = asNumber(last.high);
-            const low = asNumber(last.low);
-            const volume = asNumber(last.vol ?? last.volume);
-            const prevVolume = asNumber(prev?.vol ?? prev?.volume);
+            const close = last.close;
+            const pctChg = last.pctChg;
+            const high = last.high;
+            const low = last.low;
+            const volume = last.volume;
+            const prevVolume = prev?.volume;
             const volumeChangePct =
               volume !== undefined && prevVolume !== undefined && prevVolume !== 0
                 ? ((volume - prevVolume) / prevVolume) * 100
                 : undefined;
             dispatchIfCurrent({
               type: "etfDetailLoaded",
-              ...(typeof last.name === "string" ? { name: last.name } : { name: ticker }),
+              ...(last.name ? { name: last.name } : { name: ticker }),
               ...(close !== undefined ? { close } : {}),
               ...(pctChg !== undefined ? { pctChg } : {}),
               ...(high !== undefined ? { high } : {}),
               ...(low !== undefined ? { low } : {}),
               ...(volume !== undefined ? { volume } : {}),
               ...(volumeChangePct !== undefined ? { volumeChangePct } : {}),
-              history: rows
-                .map((row) => asNumber(row.close))
-                .filter((v): v is number => v !== undefined),
+              history: rows.map((row) => row.close).filter((v): v is number => v !== undefined),
             });
           } else {
             dispatchIfCurrent({ type: "etfDetailLoaded", name: ticker });
@@ -1088,6 +1193,7 @@ function App() {
           return;
         }
         d({ type: "closeSelect" });
+        return;
       }
       if (key.tab) {
         d({ type: "setFocus", focus: nextFocus(s.focus) });
@@ -1517,7 +1623,7 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
               : "完整流水线"}
         </Text>
         <Text color="green">
-          LLM {state.stats.llm_calls} · Tools {state.stats.tool_calls} · Reports {reportsDone}/
+          Nodes {state.stats.llm_calls} · Toolset {state.stats.tool_calls} · Reports {reportsDone}/
           {reportsTotal}
         </Text>
         <Text dimColor>{el} ←→/Tab 切换 · Enter 返回</Text>
@@ -1586,13 +1692,10 @@ function TabContent({ state, groups }: { state: AppState; groups: Record<string,
               <Text bold color="cyan">
                 ── {section.title} ──
               </Text>
-              {body
-                .split("\n")
-                .slice(0, 40)
-                .map((line, i) => (
-                  /* biome-ignore lint/suspicious/noArrayIndexKey: static report snapshot */
-                  <Text key={`${section.id}-${i}`}>{line.slice(0, 120)}</Text>
-                ))}
+              {visibleReportLines(body).map((line, i) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: static report snapshot */
+                <Text key={`${section.id}-${i}`}>{line.slice(0, 120)}</Text>
+              ))}
             </Box>
           ))}
         </Box>
