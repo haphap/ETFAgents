@@ -2,11 +2,15 @@
 /**
  * etfagents-ts TUI — Python-aligned analysis console.
  *
+ * Drives the full pipeline graph (buildFullGraph): 6 analysts → bull/bear
+ * debate → research manager → trader → risk debate → portfolio manager.
+ * Streams per-node updates so each team tab fills in live.
+ *
  * Layout matches cli/tui/screens/research.py AnalysisRunScreen:
  *   Left pane (22ch): ETF card, metadata, cancel, queue
- *   Right top: team tabs (分析团队|研究|风险|决策) with counts
- *   Right bottom: overall progress + scrollable report
- *   Stats bar: Agents | LLM · Tools | Reports | timer
+ *   Right top: team tabs (分析团队|研究|交易|风险|决策) with counts
+ *   Right bottom: selected tab's section checklist + reports / progress log
+ *   Stats bar: Stages | rating | Reports | timer
  */
 
 import { Box, render, Text, useInput } from "ink";
@@ -55,28 +59,144 @@ const MODELS_BY_PROVIDER: Record<string, string[]> = {
 };
 
 // ===========================================================================
-// Active mini-spine stages. Keep these aligned with buildMiniSpineGraph.
+// Pipeline section model — mirrors cli/tui/services.py SECTION_DEFINITIONS
+// and the node graph built by buildFullGraph (PR #86 full pipeline).
 // ===========================================================================
+
+type Team = "分析师" | "研究" | "交易" | "风险" | "决策";
 
 interface SectionDef {
   id: string;
   title: string;
-  team: "分析师" | "研究" | "风险" | "决策";
+  team: Team;
 }
 
 const DEFAULT_SECTIONS: SectionDef[] = [
-  { id: "market_flow", title: "行情数据综合分析", team: "分析师" },
-  { id: "trader", title: "交易信号生成", team: "决策" },
+  { id: "market_flow", title: "市场与资金流", team: "分析师" },
+  { id: "catalyst_sentiment", title: "舆情与事件", team: "分析师" },
+  { id: "macro_regime", title: "宏观框架", team: "分析师" },
+  { id: "meso_commodity", title: "中观大宗", team: "分析师" },
+  { id: "holdings_industry", title: "持仓行业", team: "分析师" },
+  { id: "top_holdings", title: "头部持仓", team: "分析师" },
+  { id: "research_debate", title: "多空辩论", team: "研究" },
+  { id: "research", title: "研究经理", team: "研究" },
+  { id: "trader", title: "交易员", team: "交易" },
+  { id: "risk_debate", title: "风险辩论", team: "风险" },
+  { id: "portfolio_manager", title: "投资组合经理", team: "决策" },
+];
+
+/** Tab groups rendered in the dashboard (order matters). */
+const TEAM_TABS: ReadonlyArray<{ key: string; team: Team; label: string }> = [
+  { key: "analysts", team: "分析师", label: "📊 分析团队" },
+  { key: "research", team: "研究", label: "📖 研究" },
+  { key: "trader", team: "交易", label: "💹 交易" },
+  { key: "risk", team: "风险", label: "⚠️ 风险" },
+  { key: "decision", team: "决策", label: "🎯 决策" },
 ];
 
 function sectionGroups(): Record<string, SectionDef[]> {
-  return {
-    analysts: DEFAULT_SECTIONS.filter((d) => d.team === "分析师"),
-    research: DEFAULT_SECTIONS.filter((d) => d.team === "研究"),
-    risk: DEFAULT_SECTIONS.filter((d) => d.team === "风险"),
-    decision: DEFAULT_SECTIONS.filter((d) => d.team === "决策"),
-  };
+  const groups: Record<string, SectionDef[]> = {};
+  for (const tab of TEAM_TABS) {
+    groups[tab.key] = DEFAULT_SECTIONS.filter((d) => d.team === tab.team);
+  }
+  return groups;
 }
+
+/**
+ * Maps each graph node to the UI section it advances, the state key it writes,
+ * and a progress label. `completes` marks the node that finishes a multi-node
+ * section (e.g. the debate group is "done" only after its last debator runs).
+ * Nodes absent here (e.g. the per-analyst `*_tools` ToolNodes) are tool rounds.
+ */
+const NODE_INFO: Record<
+  string,
+  { section: string; key: string; label: string; completes: boolean }
+> = {
+  market_flow: {
+    section: "market_flow",
+    key: "market_flow_report",
+    label: "市场与资金流",
+    completes: true,
+  },
+  macro_regime: {
+    section: "macro_regime",
+    key: "macro_regime_report",
+    label: "宏观框架",
+    completes: true,
+  },
+  meso_commodity: {
+    section: "meso_commodity",
+    key: "meso_commodity_report",
+    label: "中观大宗",
+    completes: true,
+  },
+  catalyst_sentiment: {
+    section: "catalyst_sentiment",
+    key: "catalyst_sentiment_report",
+    label: "舆情与事件",
+    completes: true,
+  },
+  holdings_industry: {
+    section: "holdings_industry",
+    key: "holdings_industry_report",
+    label: "持仓行业",
+    completes: true,
+  },
+  top_holdings: {
+    section: "top_holdings",
+    key: "top_holdings_report",
+    label: "头部持仓",
+    completes: true,
+  },
+  bull_researcher: {
+    section: "research_debate",
+    key: "bull_researcher_report",
+    label: "多空辩论 · 看多",
+    completes: false,
+  },
+  bear_researcher: {
+    section: "research_debate",
+    key: "bear_researcher_report",
+    label: "多空辩论 · 看空",
+    completes: true,
+  },
+  research_manager: {
+    section: "research",
+    key: "research_allocation_plan",
+    label: "研究经理",
+    completes: true,
+  },
+  trader: {
+    section: "trader",
+    key: "trader_allocation_plan",
+    label: "交易员",
+    completes: true,
+  },
+  aggressive_debator: {
+    section: "risk_debate",
+    key: "aggressive_debator_response",
+    label: "风险辩论 · 激进",
+    completes: false,
+  },
+  conservative_debator: {
+    section: "risk_debate",
+    key: "conservative_debator_response",
+    label: "风险辩论 · 保守",
+    completes: false,
+  },
+  neutral_debator: {
+    section: "risk_debate",
+    key: "neutral_debator_response",
+    label: "风险辩论 · 中性",
+    completes: true,
+  },
+  portfolio_manager: {
+    section: "portfolio_manager",
+    key: "final_allocation_decision",
+    label: "投资组合经理",
+    completes: true,
+  },
+};
 
 // ===========================================================================
 // State
@@ -102,6 +222,12 @@ interface AppState {
   logs: string[];
   /** Section completion tracking */
   sectionDone: Set<string>;
+  /** Per-section report bodies, keyed by section id (filled as nodes finish). */
+  reports: Record<string, string>;
+  /** Which team tab is focused in the dashboard. */
+  activeTab: string;
+  /** Final portfolio-manager rating extracted from the trader signal. */
+  rating: string;
   /** Stats from analysis runner */
   stats: { llm_calls: number; tool_calls: number; tokens: number };
   /** ETF detail loaded from bridge (basic info card) */
@@ -131,6 +257,9 @@ type Action =
   | { type: "startAnalysis" }
   | { type: "appendLog"; msg: string }
   | { type: "sectionDone"; sectionId: string }
+  | { type: "sectionReport"; sectionId: string; body: string }
+  | { type: "setRating"; rating: string }
+  | { type: "setTab"; tab: string }
   | { type: "analysisDone"; result: string }
   | { type: "analysisError"; msg: string }
   | { type: "backToTicker" }
@@ -165,6 +294,9 @@ function initState(): AppState {
     errorMsg: "",
     logs: [],
     sectionDone: new Set(),
+    reports: {},
+    activeTab: "analysts",
+    rating: "",
     stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
     etfDetail: null,
     vllmModels: null,
@@ -234,6 +366,9 @@ function reducer(state: AppState, action: Action): AppState {
         logs: [],
         result: "",
         sectionDone: new Set(),
+        reports: {},
+        activeTab: "analysts",
+        rating: "",
         stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
         etfDetail: null,
       };
@@ -303,6 +438,9 @@ function reducer(state: AppState, action: Action): AppState {
         errorMsg: "",
         logs: [],
         sectionDone: new Set(),
+        reports: {},
+        activeTab: "analysts",
+        rating: "",
         stats: { llm_calls: 0, tool_calls: 0, tokens: 0 },
         etfDetail: { loading: true },
       };
@@ -313,6 +451,15 @@ function reducer(state: AppState, action: Action): AppState {
       next.add(action.sectionId);
       return { ...state, sectionDone: next };
     }
+    case "sectionReport":
+      return {
+        ...state,
+        reports: { ...state.reports, [action.sectionId]: action.body },
+      };
+    case "setRating":
+      return { ...state, rating: action.rating };
+    case "setTab":
+      return { ...state, activeTab: action.tab };
     case "analysisDone": {
       // Mark all sections done
       const allDone = new Set(state.sectionDone);
@@ -381,7 +528,8 @@ async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: ()
   try {
     const [{ HumanMessage }] = await Promise.all([import("@langchain/core/messages")]);
     const { BridgeApi, BridgeClient, pickBridgeTools } = await import("../bridge/index.js");
-    const { buildMiniSpineGraph } = await import("../graph/mini_spine.js");
+    const { buildFullGraph } = await import("../graph/full_graph.js");
+    const { ANALYST_TOOLS } = await import("../cli/commands/shared_tools.js");
     const { createLlmFromConfig } = await import("../llm/factory.js");
 
     dispatchIfCurrent({ type: "appendLog", msg: "── 连接 Bridge…" });
@@ -389,9 +537,9 @@ async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: ()
     await client.start();
     try {
       if (!isCurrent()) return;
-      const config = await new BridgeApi(client).configGet();
-      if (!isCurrent()) return;
       const api = new BridgeApi(client);
+      const config = await api.configGet();
+      if (!isCurrent()) return;
       const llmOpts: LlmOptions = { tier: "deep" };
       if (state.provider) llmOpts.provider = state.provider;
       if (state.model) llmOpts.model = state.model;
@@ -401,14 +549,24 @@ async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: ()
       });
 
       const llmHandle = createLlmFromConfig(config, llmOpts);
-      const tools = await pickBridgeTools(api, [
-        "get_etf_price_data",
-        "get_etf_indicators",
-        "get_etf_share",
-        "get_etf_nav",
-      ]);
+
+      // Resolve each analyst's tool set (deduped) for the full pipeline.
+      const uniqueToolNames = Array.from(
+        new Set<string>([
+          ...ANALYST_TOOLS.marketFlow,
+          ...ANALYST_TOOLS.macroRegime,
+          ...ANALYST_TOOLS.mesoCommodity,
+          ...ANALYST_TOOLS.catalystSentiment,
+          ...ANALYST_TOOLS.holdingsIndustry,
+          ...ANALYST_TOOLS.topHoldings,
+        ]),
+      );
+      const allTools = await pickBridgeTools(api, uniqueToolNames);
       if (!isCurrent()) return;
-      dispatchIfCurrent({ type: "appendLog", msg: `── 已加载 ${tools.length} 个数据工具` });
+      const byName = new Map(allTools.map((t) => [t.name, t] as const));
+      const pick = (names: ReadonlyArray<string>) =>
+        names.map((n) => byName.get(n)).filter((t): t is NonNullable<typeof t> => t !== undefined);
+      dispatchIfCurrent({ type: "appendLog", msg: `── 已加载 ${allTools.length} 个数据工具` });
 
       const charLimit = Number(config.report_context_char_limit);
       const promptContext = {
@@ -418,10 +576,11 @@ async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: ()
           : {}),
       };
 
-      // Load ETF detail via the same bridge connection.
+      // Load the ETF basic-info card via the same bridge connection.
+      // NOTE: get_etf_price_data's parameter is `symbol`, not `ticker`.
       try {
         const detailResult = await api.toolsCall("get_etf_price_data", {
-          ticker: state.ticker,
+          symbol: state.ticker,
           start_date: state.date,
           end_date: state.date,
         });
@@ -443,24 +602,79 @@ async function runAnalysis(state: AppState, dispatch: AppDispatch, isCurrent: ()
       }
       if (!isCurrent()) return;
 
-      dispatchIfCurrent({ type: "appendLog", msg: "── 启动 market_flow → trader mini-spine…" });
+      dispatchIfCurrent({
+        type: "appendLog",
+        msg: "── 启动完整流水线：分析师 → 辩论 → 交易 → 风控 → 决策",
+      });
 
-      const graph = buildMiniSpineGraph({
+      const graph = buildFullGraph({
         llm: llmHandle.llm,
-        marketFlowTools: tools,
+        tools: {
+          marketFlow: pick(ANALYST_TOOLS.marketFlow),
+          macroRegime: pick(ANALYST_TOOLS.macroRegime),
+          mesoCommodity: pick(ANALYST_TOOLS.mesoCommodity),
+          catalystSentiment: pick(ANALYST_TOOLS.catalystSentiment),
+          holdingsIndustry: pick(ANALYST_TOOLS.holdingsIndustry),
+          topHoldings: pick(ANALYST_TOOLS.topHoldings),
+          bullBear: [],
+          riskDebate: [],
+        },
         promptContext,
       });
-      const final = await graph.invoke({
-        messages: [new HumanMessage(state.ticker)],
-        asset_of_interest: state.ticker,
-        trade_date: state.date,
-      });
 
-      dispatchIfCurrent({ type: "appendLog", msg: "✓ Mini-spine 完成" });
-      dispatchIfCurrent({
-        type: "analysisDone",
-        result: String(final.trader_allocation_plan ?? "(no plan)"),
-      });
+      // Stream the graph so the dashboard updates per node instead of waiting
+      // for the whole pipeline. Each chunk is { nodeName: stateUpdate }.
+      const stream = await graph.stream(
+        {
+          messages: [new HumanMessage(state.ticker)],
+          asset_of_interest: state.ticker,
+          trade_date: state.date,
+        },
+        { recursionLimit: 100 },
+      );
+
+      let finalState: Record<string, unknown> = {};
+      for await (const chunk of stream) {
+        if (!isCurrent()) return;
+        for (const [node, update] of Object.entries(chunk as Record<string, unknown>)) {
+          if (!update || typeof update !== "object") continue;
+          finalState = { ...finalState, ...(update as Record<string, unknown>) };
+          const info = NODE_INFO[node];
+          if (!info) continue; // tool-loop node (e.g. *_tools) — no UI section
+          const body = (update as Record<string, unknown>)[info.key];
+          const hasBody = typeof body === "string" && body.trim().length > 0;
+          // Analyst nodes re-enter via their ToolNode while fetching data; those
+          // intermediate passes only carry { messages } and no report body, so
+          // skip them — we only advance the UI once real output is produced.
+          if (!hasBody) continue;
+          dispatchIfCurrent({
+            type: "sectionReport",
+            sectionId: info.section,
+            body: body as string,
+          });
+          if (info.completes) {
+            dispatchIfCurrent({ type: "sectionDone", sectionId: info.section });
+          }
+          dispatchIfCurrent({ type: "appendLog", msg: `✓ ${info.label}` });
+          // Surface the trader rating as soon as the trader node lands.
+          if (node === "trader") {
+            const signal = (update as Record<string, unknown>).trader_backtest_signal as
+              | Record<string, unknown>
+              | undefined;
+            const rating = signal?.rating;
+            if (typeof rating === "string" && rating) {
+              dispatchIfCurrent({ type: "setRating", rating });
+            }
+          }
+        }
+      }
+
+      dispatchIfCurrent({ type: "appendLog", msg: "✓ 流水线完成" });
+      const decision =
+        (finalState.final_allocation_decision as string) ||
+        (finalState.trader_allocation_plan as string) ||
+        "(无最终决策)";
+      dispatchIfCurrent({ type: "analysisDone", result: decision });
     } finally {
       await client.close();
     }
@@ -606,6 +820,19 @@ function App() {
     }
 
     if (s.phase === "dashboard") {
+      // Cycle team tabs with Tab / arrow keys.
+      if (key.tab || key.rightArrow) {
+        const i = TEAM_TABS.findIndex((t) => t.key === s.activeTab);
+        const next = TEAM_TABS[(i + 1) % TEAM_TABS.length];
+        if (next) d({ type: "setTab", tab: next.key });
+        return;
+      }
+      if (key.leftArrow) {
+        const i = TEAM_TABS.findIndex((t) => t.key === s.activeTab);
+        const prev = TEAM_TABS[(i - 1 + TEAM_TABS.length) % TEAM_TABS.length];
+        if (prev) d({ type: "setTab", tab: prev.key });
+        return;
+      }
       if (key.return && (s.status === "done" || s.status === "error")) {
         runSeqRef.current += 1;
         d({ type: "backToTicker" });
@@ -792,11 +1019,11 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
   const groups = sectionGroups();
   const done = state.sectionDone;
 
-  function countDone(team: string): number {
-    return (groups[team] ?? []).filter((s) => done.has(s.id)).length;
+  function countDone(key: string): number {
+    return (groups[key] ?? []).filter((s) => done.has(s.id)).length;
   }
-  function total(team: string): number {
-    return (groups[team] ?? []).length;
+  function total(key: string): number {
+    return (groups[key] ?? []).length;
   }
 
   const el = fmtElapsed(elapsed);
@@ -929,48 +1156,21 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
         <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
           {/* Team tabs (top) */}
           <Box marginBottom={1}>
-            <TabButton label="📊 行情分析" done={countDone("analysts")} total={total("analysts")} />
-            <Text> </Text>
-            <TabButton label="🎯 交易信号" done={countDone("decision")} total={total("decision")} />
+            {TEAM_TABS.map((tab) => (
+              <Box key={tab.key} marginRight={1}>
+                <TabButton
+                  label={tab.label}
+                  done={countDone(tab.key)}
+                  total={total(tab.key)}
+                  active={state.activeTab === tab.key}
+                />
+              </Box>
+            ))}
           </Box>
 
-          {/* Report body (bottom) */}
+          {/* Tabbed section view + progress (bottom) */}
           <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1}>
-            <Text bold>整体进度</Text>
-            <Box flexDirection="column" marginTop={1}>
-              {state.logs.length > 0 ? (
-                state.logs.map((log, i) => (
-                  /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
-                  <Text key={`${i}`} dimColor={log.startsWith("──") || log.startsWith("✓")}>
-                    {log.startsWith("──") || log.startsWith("✓") ? `  ${log}` : `• ${log}`}
-                  </Text>
-                ))
-              ) : (
-                <Text dimColor>准备开始分析。</Text>
-              )}
-              {/* Results */}
-              {state.status === "done" && state.result ? (
-                <Box flexDirection="column" marginTop={1}>
-                  <Box>
-                    <Text bold color="green">
-                      ── 分析结果 ──
-                    </Text>
-                  </Box>
-                  {state.result
-                    .split("\n")
-                    .slice(0, 25)
-                    .map((line, i) => (
-                      /* biome-ignore lint/suspicious/noArrayIndexKey: static snapshot */
-                      <Text key={`r${i}`}>{line.slice(0, 120)}</Text>
-                    ))}
-                </Box>
-              ) : null}
-              {state.status === "error" && (
-                <Box marginTop={1}>
-                  <Text color="red">{state.errorMsg.slice(0, 120)}</Text>
-                </Box>
-              )}
-            </Box>
+            <TabContent state={state} groups={groups} />
           </Box>
         </Box>
       </Box>
@@ -987,21 +1187,112 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
                 ? "· 错误"
                 : "· 等待"}
         </Text>
-        <Text dimColor>Mini-spine · market_flow → trader</Text>
+        <Text dimColor>{state.rating ? `评级 ${state.rating}` : "完整流水线"}</Text>
         <Text color="green">
           Reports {reportsDone}/{reportsTotal}
         </Text>
-        <Text dimColor>{el} ?帮助 s设置 q退出</Text>
+        <Text dimColor>{el} ←→/Tab 切换 · Enter 返回</Text>
       </Box>
     </Box>
   );
 }
 
-function TabButton({ label, done, total }: { label: string; done: number; total: number }) {
+/**
+ * Right-pane body. Shows the progress log for the analysts tab while running,
+ * and the per-section report content for the selected team tab. Falls back to
+ * the progress log until a section has produced output.
+ */
+function TabContent({ state, groups }: { state: AppState; groups: Record<string, SectionDef[]> }) {
+  const sections = groups[state.activeTab] ?? [];
+  const tabMeta = TEAM_TABS.find((t) => t.key === state.activeTab);
+
+  // Collect available report bodies for the sections in this tab.
+  const available = sections
+    .map((s) => ({ section: s, body: state.reports[s.id] }))
+    .filter((x): x is { section: SectionDef; body: string } => Boolean(x.body?.trim()));
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      <Text bold>{tabMeta?.label ?? "整体进度"}</Text>
+
+      {/* Section status checklist for this tab */}
+      <Box flexDirection="column" marginTop={1}>
+        {sections.map((s) => {
+          const isDone = state.sectionDone.has(s.id);
+          const hasBody = Boolean(state.reports[s.id]?.trim());
+          const mark = isDone ? "✓" : hasBody ? "◐" : state.status === "running" ? "○" : "·";
+          const colorProps = isDone
+            ? { color: "green" as const }
+            : hasBody
+              ? { color: "yellow" as const }
+              : {};
+          return (
+            <Text key={s.id} dimColor={!isDone && !hasBody} {...colorProps}>
+              {mark} {s.title}
+            </Text>
+          );
+        })}
+      </Box>
+
+      {/* Report content for completed sections in this tab */}
+      {available.length > 0 ? (
+        <Box flexDirection="column" marginTop={1}>
+          {available.map(({ section, body }) => (
+            <Box key={section.id} flexDirection="column" marginBottom={1}>
+              <Text bold color="cyan">
+                ── {section.title} ──
+              </Text>
+              {body
+                .split("\n")
+                .slice(0, 20)
+                .map((line, i) => (
+                  /* biome-ignore lint/suspicious/noArrayIndexKey: static report snapshot */
+                  <Text key={`${section.id}-${i}`}>{line.slice(0, 120)}</Text>
+                ))}
+            </Box>
+          ))}
+        </Box>
+      ) : (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>整体进度</Text>
+          {state.logs.length > 0 ? (
+            state.logs.slice(-12).map((log, i) => (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
+              <Text key={`${i}`} dimColor={log.startsWith("──") || log.startsWith("✓")}>
+                {log.startsWith("──") || log.startsWith("✓") ? `  ${log}` : `• ${log}`}
+              </Text>
+            ))
+          ) : (
+            <Text dimColor>准备开始分析。</Text>
+          )}
+          {state.status === "error" && (
+            <Box marginTop={1}>
+              <Text color="red">{state.errorMsg.slice(0, 120)}</Text>
+            </Box>
+          )}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function TabButton({
+  label,
+  done,
+  total,
+  active,
+}: {
+  label: string;
+  done: number;
+  total: number;
+  active: boolean;
+}) {
   const allDone = done === total && total > 0;
   return (
-    <Box flexDirection="column" borderStyle="single" paddingX={1}>
-      <Text>{label} ▾</Text>
+    <Box flexDirection="column" borderStyle={active ? "round" : "single"} paddingX={1}>
+      <Text bold={active} {...(active ? { color: "cyan" as const } : {})}>
+        {label} {active ? "▾" : "▸"}
+      </Text>
       <Text color={allDone ? "green" : "yellow"}>
         {done}/{total}
       </Text>

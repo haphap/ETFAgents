@@ -34,5 +34,6 @@ jobs:
           cache: pnpm
           cache-dependency-path: ts/pnpm-lock.yaml
       - run: cd ts && pnpm install --frozen-lockfile
+      - run: cd ts && pnpm lint
       - run: cd ts && pnpm typecheck
       - run: cd ts && pnpm test
