@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { buildEffectiveMemoryConfig } from "../src/agents/nodes/memory_writer.js";
 import {
   appendTickerToInput,
-  buildEffectiveMemoryConfig,
   clampRound,
   extractPriceRows,
   initState,

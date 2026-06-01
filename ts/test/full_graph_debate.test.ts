@@ -1,7 +1,11 @@
 import { AIMessage } from "@langchain/core/messages";
 import { describe, expect, it } from "vitest";
 import type { SpineStateType, SpineStateUpdate } from "../src/agents/state.js";
-import { buildFullGraph, withDebateTurn } from "../src/graph/full_graph.js";
+import {
+  buildFullGraph,
+  normalizeAnalystSelection,
+  withDebateTurn,
+} from "../src/graph/full_graph.js";
 import { routeDebate, routeRiskDebate } from "../src/graph/routing.js";
 
 /**
@@ -122,5 +126,33 @@ describe("buildFullGraph analyst selection guard", () => {
       selectedAnalysts: [],
     } as unknown as Parameters<typeof buildFullGraph>[0];
     expect(() => buildFullGraph(opts)).toThrow(/at least one analyst/);
+  });
+});
+
+describe("normalizeAnalystSelection", () => {
+  it("returns all six in canonical order when undefined", () => {
+    expect(normalizeAnalystSelection(undefined)).toEqual([
+      "market_flow",
+      "catalyst_sentiment",
+      "macro_regime",
+      "meso_commodity",
+      "holdings_industry",
+      "top_holdings",
+    ]);
+  });
+
+  it("dedupes and restores canonical order", () => {
+    expect(normalizeAnalystSelection(["top_holdings", "market_flow", "market_flow"])).toEqual([
+      "market_flow",
+      "top_holdings",
+    ]);
+  });
+
+  it("throws on an unknown analyst id", () => {
+    expect(() => normalizeAnalystSelection(["bad_id"])).toThrow(/unknown analyst/);
+  });
+
+  it("throws on an empty selection", () => {
+    expect(() => normalizeAnalystSelection([])).toThrow(/at least one analyst/);
   });
 });

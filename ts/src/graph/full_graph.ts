@@ -107,6 +107,27 @@ export const ALL_ANALYSTS = [
   "top_holdings",
 ] as const;
 
+/**
+ * Validate, dedupe, and canonicalize an analyst selection. Returns all six in
+ * canonical order when undefined; throws on an empty selection or any unknown
+ * id (parity with Python GraphSetup, which rejects unsupported analysts and
+ * dedupes). Output preserves ALL_ANALYSTS order regardless of input order.
+ */
+export function normalizeAnalystSelection(selected: readonly string[] | undefined): string[] {
+  if (selected === undefined) return [...ALL_ANALYSTS];
+  if (selected.length === 0) {
+    throw new Error("buildFullGraph: selectedAnalysts must contain at least one analyst");
+  }
+  const allowed = new Set<string>(ALL_ANALYSTS);
+  for (const id of selected) {
+    if (!allowed.has(id)) {
+      throw new Error(`buildFullGraph: unknown analyst '${id}'`);
+    }
+  }
+  const chosen = new Set(selected);
+  return ALL_ANALYSTS.filter((id) => chosen.has(id));
+}
+
 type NodeFn = (state: SpineStateType) => Promise<SpineStateUpdate>;
 
 /** Maps routeDebate's display-name returns to the graph's node ids. */
@@ -199,12 +220,10 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
   const ctx = opts.promptContext;
   const maxDebateRounds = opts.maxDebateRounds ?? 1;
   const maxRiskRounds = opts.maxRiskRounds ?? 1;
-  // Reject an explicit empty analyst set (Python's GraphSetup raises here too):
-  // a run with no analysts produces a decision with no analyst reports.
-  if (opts.selectedAnalysts && opts.selectedAnalysts.length === 0) {
-    throw new Error("buildFullGraph: selectedAnalysts must contain at least one analyst");
-  }
-  const selected = new Set(opts.selectedAnalysts ?? ALL_ANALYSTS);
+  // Validate, dedupe, and canonicalize the analyst selection (Python's
+  // GraphSetup rejects unknown analysts and the graph dedupes the list).
+  const selectedList = normalizeAnalystSelection(opts.selectedAnalysts);
+  const selected = new Set(selectedList);
 
   // --- Analyst nodes ---
   const marketFlow = createMarketFlowNode({
@@ -289,7 +308,7 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
 
   const memoryWriter = createMemoryWriterNode({
     ...(opts.persistMemory ? { persist: opts.persistMemory } : {}),
-    selectedAnalysts: opts.selectedAnalysts ?? ALL_ANALYSTS,
+    selectedAnalysts: selectedList,
     ...(opts.memoryConfig ? { config: opts.memoryConfig } : {}),
   });
 

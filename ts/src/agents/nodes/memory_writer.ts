@@ -9,15 +9,34 @@
  * existing Python AnalysisMemoryStore. The returned entry dict is written to
  * ``analysis_memory_entry`` so it is visible in the final state.
  *
- * When no ``persist`` callback is supplied (e.g. CLI / tests), the node is a
- * no-op that leaves ``analysis_memory_entry`` empty — keeping the graph
- * topology identical regardless of persistence wiring.
+ * When no ``persist`` callback is supplied (e.g. tests, or a caller that opts
+ * out), the node is a no-op that leaves ``analysis_memory_entry`` empty —
+ * keeping the graph topology identical regardless of persistence wiring.
  */
 
 import type { SpineStateType, SpineStateUpdate } from "../state.js";
 
 /** Persist callback: receives the Python-shaped state payload, returns the stored entry. */
 export type PersistMemory = (payload: Record<string, unknown>) => Promise<Record<string, unknown>>;
+
+/**
+ * Overlay provider/model/round overrides onto the bridge config so memory
+ * write-back's config hash describes the run that actually executed. Mirrors
+ * the keys ETFAgents' config hash reads (llm_provider, deep_think_llm,
+ * max_debate_rounds, max_risk_discuss_rounds).
+ */
+export function buildEffectiveMemoryConfig(
+  config: Record<string, unknown>,
+  opts: { provider?: string; model?: string; debateRounds: number; riskRounds: number },
+): Record<string, unknown> {
+  return {
+    ...config,
+    ...(opts.provider ? { llm_provider: opts.provider } : {}),
+    ...(opts.model ? { deep_think_llm: opts.model } : {}),
+    max_debate_rounds: opts.debateRounds,
+    max_risk_discuss_rounds: opts.riskRounds,
+  };
+}
 
 /** Build the snake_case state payload that build_analysis_memory_entry reads. */
 export function buildMemoryPayload(state: SpineStateType): Record<string, unknown> {

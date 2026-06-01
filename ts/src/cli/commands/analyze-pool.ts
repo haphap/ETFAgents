@@ -9,6 +9,7 @@ import { HumanMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { Command } from "commander";
 import pc from "picocolors";
+import { buildEffectiveMemoryConfig } from "../../agents/nodes/memory_writer.js";
 import { BridgeApi, BridgeClient, pickBridgeTools, RpcError } from "../../bridge/index.js";
 import { buildFullGraph } from "../../graph/full_graph.js";
 import { createLlmFromConfig } from "../../llm/factory.js";
@@ -95,9 +96,33 @@ export function registerAnalyzeCandidatePool(program: Command): void {
           ),
         );
 
+        // Memory write-back (parity with Python's always-wired memory writer).
+        const memoryConfig = buildEffectiveMemoryConfig(config as Record<string, unknown>, {
+          ...(opts.provider ? { provider: opts.provider } : {}),
+          ...(opts.model ? { model: opts.model } : {}),
+          debateRounds: 1,
+          riskRounds: 1,
+        });
+        const persistMemory = async (payload: Record<string, unknown>) => {
+          const res = await api.memoryAppendAnalysis(
+            payload as {
+              state: Record<string, unknown>;
+              selected_analysts?: readonly string[] | null;
+              config?: Record<string, unknown>;
+            },
+          );
+          return res.entry;
+        };
+
         for (const ticker of tickers) {
           process.stdout.write(pc.yellow(`  ${ticker}... `));
-          const graph = buildFullGraph({ llm: llmHandle.llm, tools: toolSets, promptContext });
+          const graph = buildFullGraph({
+            llm: llmHandle.llm,
+            tools: toolSets,
+            promptContext,
+            memoryConfig,
+            persistMemory,
+          });
 
           const final = await graph.invoke({
             messages: [new HumanMessage(ticker)],

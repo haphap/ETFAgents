@@ -558,25 +558,6 @@ export function clampRound(n: number): number {
   return Math.max(1, Math.min(3, Math.round(n)));
 }
 
-/**
- * Overlay the TUI's provider/model/round overrides onto the bridge config so
- * memory write-back's config hash describes the run that actually executed.
- * Mirrors the keys ETFAgents' config hash reads (llm_provider, deep_think_llm,
- * max_debate_rounds, max_risk_discuss_rounds).
- */
-export function buildEffectiveMemoryConfig(
-  config: Record<string, unknown>,
-  opts: { provider?: string; model?: string; debateRounds: number; riskRounds: number },
-): Record<string, unknown> {
-  return {
-    ...config,
-    ...(opts.provider ? { llm_provider: opts.provider } : {}),
-    ...(opts.model ? { deep_think_llm: opts.model } : {}),
-    max_debate_rounds: opts.debateRounds,
-    max_risk_discuss_rounds: opts.riskRounds,
-  };
-}
-
 /** P0/P5: the analyst section ids that are currently selected. */
 export function selectedAnalystIds(selected: Record<string, boolean>): string[] {
   return ANALYST_IDS.filter((id) => selected[id] !== false);
@@ -1422,6 +1403,7 @@ async function runAnalysis(
     const [{ HumanMessage }] = await Promise.all([import("@langchain/core/messages")]);
     const { BridgeApi, BridgeClient, pickBridgeTools } = await import("../bridge/index.js");
     const { buildFullGraph } = await import("../graph/full_graph.js");
+    const { buildEffectiveMemoryConfig } = await import("../agents/nodes/memory_writer.js");
     const { ANALYST_TOOLS } = await import("../cli/commands/shared_tools.js");
     const { createLlmFromConfig } = await import("../llm/factory.js");
 
