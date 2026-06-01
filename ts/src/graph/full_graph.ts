@@ -165,9 +165,11 @@ export function withDebateTurn(
   return async (state) => {
     const update = await node(state);
     const response = String((update as Record<string, unknown>)[reportKey] ?? "");
-    if (!response.trim()) return update; // skipped / empty turn — don't advance
     const prev = state[field];
-    const turn = `${speaker}: ${response}`;
+    // Always advance count + latestSpeaker (Python increments unconditionally),
+    // so the conditional router progresses and the debate always terminates even
+    // if a turn returns an empty report; fall back to the speaker label as text.
+    const turn = response ? `${speaker}: ${response}` : speaker;
     const current = turn;
     // Per-role history + latest-response fields, mirroring the Python debator
     // nodes' investment_debate_state / risk_debate_state updates.

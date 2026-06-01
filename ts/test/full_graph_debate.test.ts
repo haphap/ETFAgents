@@ -106,7 +106,7 @@ describe("withDebateTurn accumulation", () => {
     });
   });
 
-  it("does not advance the counter when the report is empty (skipped turn)", async () => {
+  it("still advances count on an empty report so the debate terminates", async () => {
     const inner = async (): Promise<SpineStateUpdate> => ({}) as SpineStateUpdate;
     const wrapped = withDebateTurn(
       inner,
@@ -115,11 +115,13 @@ describe("withDebateTurn accumulation", () => {
       "aggressive_debator_response",
     );
 
-    const update = (await wrapped(baseState)) as {
-      risk_debate_state?: { count: number };
+    const update = (await wrapped(baseState)) as unknown as {
+      risk_debate_state: { count: number; latestSpeaker: string };
     };
-    // The wrapper returns the inner update unchanged (no debate-state advance).
-    expect(update.risk_debate_state).toBeUndefined();
+    // Even with no report text, count + latestSpeaker advance (Python parity)
+    // so the conditional router can progress instead of looping forever.
+    expect(update.risk_debate_state.count).toBe(1);
+    expect(update.risk_debate_state.latestSpeaker).toBe("Aggressive");
   });
 });
 
