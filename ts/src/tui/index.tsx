@@ -1458,11 +1458,16 @@ async function runAnalysis(
         maxDebateRounds: state.debateRounds,
         maxRiskRounds: state.riskRounds,
         selectedAnalysts: ANALYST_IDS.filter((id) => state.selectedAnalysts[id] !== false),
+        // Forward the already-loaded runtime config so memory write-back honours
+        // the active memory settings (memory_mode, results_dir, …) instead of
+        // the bridge's DEFAULT_CONFIG.
+        memoryConfig: config as Record<string, unknown>,
         persistMemory: async (payload) => {
           const res = await api.memoryAppendAnalysis(
             payload as {
               state: Record<string, unknown>;
               selected_analysts?: readonly string[] | null;
+              config?: Record<string, unknown>;
             },
           );
           return res.entry;

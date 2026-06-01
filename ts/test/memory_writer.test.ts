@@ -80,4 +80,17 @@ describe("memory writer", () => {
     });
     expect(await boom(fakeState())).toEqual({});
   });
+
+  it("forwards the runtime config to the persist callback", async () => {
+    let captured: Record<string, unknown> | undefined;
+    const node = createMemoryWriterNode({
+      persist: async (payload) => {
+        captured = payload;
+        return {};
+      },
+      config: { memory_mode: "disabled", results_dir: "/tmp/custom" },
+    });
+    await node(fakeState());
+    expect(captured?.config).toEqual({ memory_mode: "disabled", results_dir: "/tmp/custom" });
+  });
 });

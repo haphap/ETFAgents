@@ -51,6 +51,8 @@ export function buildMemoryPayload(state: SpineStateType): Record<string, unknow
 export function createMemoryWriterNode(opts: {
   persist?: PersistMemory;
   selectedAnalysts?: readonly string[];
+  /** Effective runtime config forwarded to the store (memory_mode, results_dir, …). */
+  config?: Record<string, unknown>;
 }) {
   return async function memoryWriterNode(state: SpineStateType): Promise<SpineStateUpdate> {
     if (!opts.persist) return {} as SpineStateUpdate;
@@ -58,6 +60,7 @@ export function createMemoryWriterNode(opts: {
       const entry = await opts.persist({
         state: buildMemoryPayload(state),
         selected_analysts: opts.selectedAnalysts ?? null,
+        ...(opts.config ? { config: opts.config } : {}),
       });
       return { analysis_memory_entry: entry } as SpineStateUpdate;
     } catch {

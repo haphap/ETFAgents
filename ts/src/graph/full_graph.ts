@@ -91,6 +91,9 @@ export interface BuildFullGraphOptions {
    * the node is a no-op, matching a disabled memory store.
    */
   persistMemory?: PersistMemory;
+  /** Effective runtime config forwarded to the memory store (so user/runtime
+   * memory settings reach AnalysisMemoryStore instead of DEFAULT_CONFIG). */
+  memoryConfig?: Record<string, unknown>;
 }
 
 /** Canonical analyst order, mirroring Python ETFGraphSetup.DEFAULT_SELECTED_ANALYSTS. */
@@ -281,6 +284,7 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
   const memoryWriter = createMemoryWriterNode({
     ...(opts.persistMemory ? { persist: opts.persistMemory } : {}),
     selectedAnalysts: opts.selectedAnalysts ?? ALL_ANALYSTS,
+    ...(opts.memoryConfig ? { config: opts.memoryConfig } : {}),
   });
 
   // --- Tool nodes (one per analyst that calls tools) ---
