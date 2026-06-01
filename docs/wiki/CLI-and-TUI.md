@@ -1,0 +1,62 @@
+# CLI & TUI
+
+## TypeScript front-end
+
+Run from `ts/` with `pnpm dev <command>` (development) or `etfagents <command>`
+after `pnpm build`.
+
+| Command | Purpose |
+| --- | --- |
+| `analyze-mini <ticker>` | Minimal 1-analyst pipeline (fastest smoke test) |
+| `analyze <ticker>` | Full 6-analyst pipeline → debate → trader → risk → decision |
+| `analyze-pool <tickers...>` | Multi-ticker analysis ranked by rating / target weight |
+| `backtest <ticker> --start-date … --end-date …` | Backtrader candidate-pool backtest |
+| `paper <account\|positions\|trades\|buy\|sell\|…>` | Paper-trading account management |
+| `detail <ticker>` | ETF info lookup |
+| `cache <stats\|cleanup\|clear>` | Cache management |
+| `tui` | Interactive Ink terminal dashboard |
+
+Developer utilities: `bridge-ping`, `tool-call`, `tool-loop`.
+
+```bash
+cd ts
+pnpm dev analyze 510300.SH
+pnpm dev analyze-pool 510300.SH 159915.SZ
+pnpm dev backtest 510300.SH --start-date 2024-01-01 --end-date 2024-06-01
+pnpm dev tui
+```
+
+## Python CLI
+
+`pip install .` provides the `etfagents` console script (Typer/Rich):
+
+```bash
+python -m cli.main            # or: etfagents  (interactive CLI)
+etfagents cache stats
+etfagents cache cleanup --days 30
+etfagents backtest --tickers 510300.SH,159915.SZ --benchmark-tickers equal_weight_pool \
+  --start-date 2026-01-02 --end-date 2026-03-31
+```
+
+## TUI screens (Ink)
+
+The TUI (`pnpm dev tui`) provides a single-screen app with several phases:
+
+- **Research dashboard** — ticker input → config → live dashboard. Team tabs
+  (analysts / research / trader / risk / decision), a per-section reader with
+  scroll (`↑↓` select section, `PgUp/PgDn` scroll), an ETF info card, a
+  multi-ticker queue, and a stats bar.
+- **Config screen** — date, provider, model (incl. vLLM model discovery),
+  research depth, analyst selection (toggle individual analysts), and
+  debate/risk round steppers.
+- **Report library** (`Ctrl+L`) — browse historical reports from the results
+  directory and read them with the same scroll viewer.
+- **Watchlist** — quick-select recent tickers on the entry screen.
+- **Backtest viewer** (`Ctrl+B`) — NAV sparkline, metrics, benchmark
+  comparison, and health warnings from saved backtest artifacts.
+- **Paper trading** (`Ctrl+P`) — account snapshot, positions, recent trades.
+- **Error detail overlay** (`e`) — structured failure detail (ticker, message,
+  stack, timestamp).
+
+> Output language is set by the `output_language` config (中文 / English).
+> Always preserve full exchange-suffixed tickers (`510300.SH`, `159915.SZ`).
