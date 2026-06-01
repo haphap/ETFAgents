@@ -9,5 +9,6 @@ from __future__ import annotations
 from . import backtest  # noqa: F401
 from . import cache  # noqa: F401
 from . import config  # noqa: F401
+from . import memory  # noqa: F401
 from . import paper  # noqa: F401
 from . import tools  # noqa: F401

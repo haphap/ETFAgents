@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { buildEffectiveMemoryConfig } from "../src/agents/nodes/memory_writer.js";
 import {
-  analystSelectionUnsupported,
   appendTickerToInput,
   clampRound,
   extractPriceRows,
@@ -10,6 +10,7 @@ import {
   parseTickers,
   reducer,
   reportViewport,
+  selectedAnalystIds,
   sortByTicker,
   sortReports,
 } from "../src/tui/index.js";
@@ -237,10 +238,79 @@ describe("P1 analysis config", () => {
     expect(s.debateRounds).toBe(1);
   });
 
-  it("flags analyst deselection as unsupported by the graph", () => {
+  it("overlays provider/model/rounds overrides into the effective memory config", () => {
+    const base = {
+      llm_provider: "openai",
+      deep_think_llm: "gpt-x",
+      quick_think_llm: "gpt-x-mini",
+      max_debate_rounds: 1,
+      results_dir: "/d",
+    };
+    const eff = buildEffectiveMemoryConfig(base, {
+      provider: "deepseek",
+      model: "deepseek-chat",
+      baseUrl: "https://api.example/v1",
+      debateRounds: 2,
+      riskRounds: 3,
+    });
+    expect(eff).toMatchObject({
+      llm_provider: "deepseek",
+      // A model override applies to both tiers, so both keys must reflect it.
+      deep_think_llm: "deepseek-chat",
+      quick_think_llm: "deepseek-chat",
+      backend_url: "https://api.example/v1",
+      max_debate_rounds: 2,
+      max_risk_discuss_rounds: 3,
+      results_dir: "/d", // untouched runtime keys preserved
+    });
+    // Empty provider/model leave the base values intact.
+    const eff2 = buildEffectiveMemoryConfig(base, {
+      provider: "",
+      model: "",
+      debateRounds: 1,
+      riskRounds: 1,
+    });
+    expect(eff2.llm_provider).toBe("openai");
+    expect(eff2.deep_think_llm).toBe("gpt-x");
+  });
+
+  it("derives the selected analyst id list, reflecting toggles", () => {
+    expect(selectedAnalystIds(initState().selectedAnalysts)).toEqual([
+      "market_flow",
+      "catalyst_sentiment",
+      "macro_regime",
+      "meso_commodity",
+      "holdings_industry",
+      "top_holdings",
+    ]);
     const s = reducer(initState(), { type: "toggleAnalyst", id: "top_holdings" });
-    expect(analystSelectionUnsupported(initState().selectedAnalysts)).toBe(false);
-    expect(analystSelectionUnsupported(s.selectedAnalysts)).toBe(true);
+    expect(selectedAnalystIds(s.selectedAnalysts)).not.toContain("top_holdings");
+  });
+
+  it("refuses to toggle off the last remaining analyst", () => {
+    // Turn every analyst off except market_flow.
+    let s = initState();
+    for (const id of [
+      "catalyst_sentiment",
+      "macro_regime",
+      "meso_commodity",
+      "holdings_industry",
+      "top_holdings",
+    ]) {
+      s = reducer(s, { type: "toggleAnalyst", id });
+    }
+    expect(selectedAnalystIds(s.selectedAnalysts)).toEqual(["market_flow"]);
+    // The last one cannot be turned off.
+    const blocked = reducer(s, { type: "toggleAnalyst", id: "market_flow" });
+    expect(selectedAnalystIds(blocked.selectedAnalysts)).toEqual(["market_flow"]);
+  });
+
+  it("hides a deselected analyst section from the dashboard tab", () => {
+    let s = reducer(initState(), { type: "toggleAnalyst", id: "macro_regime" });
+    s = reducer(s, { type: "startAnalysis" });
+    // The analysts tab should no longer surface the deselected section.
+    const onAnalysts = reducer(s, { type: "setTab", tab: "analysts" });
+    expect(onAnalysts.selectedSectionByTab.analysts).not.toBe("macro_regime");
   });
 });
 

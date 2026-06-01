@@ -1,9 +1,10 @@
 /**
- * Verbatim port of the system message used by ``create_social_media_analyst``.
+ * System message for ``create_social_media_analyst`` (catalyst & sentiment).
  * Keep Chinese text and numbering rules identical to the Python source.
  *
- * This analyst receives pre-fetched data blocks (ETF info, holdings, news)
- * and performs a single LLM call — no tool-calling in the LLM loop.
+ * Deterministic pre-fetch analyst (no LLM tool loop): the caller fetches ETF
+ * info, holdings, and ticker/holdings/global news up front and embeds them as
+ * data blocks, matching the Python flow.
  */
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
@@ -29,11 +30,10 @@ export const CATALYST_SENTIMENT_REPORT_SPEC: AnalystReportSpec = {
 };
 
 /**
- * Build the catalyst_sentiment analyst system message.
- *
- * In the Python source this is assembled in ``_build_system_message()`` with
- * pre-fetched data blocks injected via f-strings.  The TS caller provides the
- * data blocks through the ``data`` parameter.
+ * Build the catalyst_sentiment analyst system message from pre-fetched data
+ * blocks. Mirrors the Python ``create_social_media_analyst`` deterministic
+ * pre-fetch flow (ETF info/holdings + ticker/holdings/global news, no LLM
+ * tool loop) — the caller supplies the data via the ``data`` parameter.
  */
 export interface CatalystSentimentData {
   etfInfo: string;

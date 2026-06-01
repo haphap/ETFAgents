@@ -1,7 +1,10 @@
-import { AIMessage } from "@langchain/core/messages";
 import { describe, expect, it } from "vitest";
 import type { SpineStateType, SpineStateUpdate } from "../src/agents/state.js";
-import { withDebateTurn } from "../src/graph/full_graph.js";
+import {
+  buildFullGraph,
+  normalizeAnalystSelection,
+  withDebateTurn,
+} from "../src/graph/full_graph.js";
 import { routeDebate, routeRiskDebate } from "../src/graph/routing.js";
 
 /**
@@ -82,30 +85,82 @@ describe("withDebateTurn accumulation", () => {
 
   it("increments count, records the speaker, and appends history per turn", async () => {
     const inner = async (): Promise<SpineStateUpdate> =>
-      ({ messages: [new AIMessage("bull argument")] }) as SpineStateUpdate;
-    const wrapped = withDebateTurn(inner, "Bull", "investment_debate_state");
+      ({ bull_researcher_report: "bull argument" }) as unknown as SpineStateUpdate;
+    const wrapped = withDebateTurn(
+      inner,
+      "Bull",
+      "investment_debate_state",
+      "bull_researcher_report",
+    );
 
-    const update = (await wrapped(baseState)) as {
-      investment_debate_state: { count: number; latestSpeaker: string; history: string };
+    const update = (await wrapped(baseState)) as unknown as {
+      investment_debate_state: Record<string, unknown>;
     };
-    expect(update.investment_debate_state).toEqual({
+    expect(update.investment_debate_state).toMatchObject({
       count: 1,
       latestSpeaker: "Bull",
       history: "Bull: bull argument",
+      bullHistory: "Bull: bull argument",
+      currentBullResponse: "Bull: bull argument",
+      currentResponse: "Bull: bull argument",
     });
   });
 
-  it("does not advance the counter on a tool round", async () => {
-    const toolMsg = new AIMessage("");
-    toolMsg.tool_calls = [{ name: "t", args: {}, id: "1" }];
-    const inner = async (): Promise<SpineStateUpdate> =>
-      ({ messages: [toolMsg] }) as SpineStateUpdate;
-    const wrapped = withDebateTurn(inner, "Aggressive", "risk_debate_state");
+  it("still advances count on an empty report so the debate terminates", async () => {
+    const inner = async (): Promise<SpineStateUpdate> => ({}) as SpineStateUpdate;
+    const wrapped = withDebateTurn(
+      inner,
+      "Aggressive",
+      "risk_debate_state",
+      "aggressive_debator_response",
+    );
 
-    const update = (await wrapped(baseState)) as {
-      risk_debate_state?: { count: number };
+    const update = (await wrapped(baseState)) as unknown as {
+      risk_debate_state: { count: number; latestSpeaker: string };
     };
-    // The wrapper returns the inner update unchanged (no debate-state advance).
-    expect(update.risk_debate_state).toBeUndefined();
+    // Even with no report text, count + latestSpeaker advance (Python parity)
+    // so the conditional router can progress instead of looping forever.
+    expect(update.risk_debate_state.count).toBe(1);
+    expect(update.risk_debate_state.latestSpeaker).toBe("Aggressive");
+  });
+});
+
+describe("buildFullGraph analyst selection guard", () => {
+  it("throws when selectedAnalysts is explicitly empty", () => {
+    const opts = {
+      llm: {},
+      tools: {},
+      promptContext: { language: "Chinese" },
+      selectedAnalysts: [],
+    } as unknown as Parameters<typeof buildFullGraph>[0];
+    expect(() => buildFullGraph(opts)).toThrow(/at least one analyst/);
+  });
+});
+
+describe("normalizeAnalystSelection", () => {
+  it("returns all six in canonical order when undefined", () => {
+    expect(normalizeAnalystSelection(undefined)).toEqual([
+      "market_flow",
+      "catalyst_sentiment",
+      "macro_regime",
+      "meso_commodity",
+      "holdings_industry",
+      "top_holdings",
+    ]);
+  });
+
+  it("dedupes and restores canonical order", () => {
+    expect(normalizeAnalystSelection(["top_holdings", "market_flow", "market_flow"])).toEqual([
+      "market_flow",
+      "top_holdings",
+    ]);
+  });
+
+  it("throws on an unknown analyst id", () => {
+    expect(() => normalizeAnalystSelection(["bad_id"])).toThrow(/unknown analyst/);
+  });
+
+  it("throws on an empty selection", () => {
+    expect(() => normalizeAnalystSelection([])).toThrow(/at least one analyst/);
   });
 });

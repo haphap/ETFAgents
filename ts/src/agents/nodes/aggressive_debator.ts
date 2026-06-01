@@ -8,6 +8,7 @@
  * Debators typically have no tools; pass an empty array.
  */
 
+import { buildAggressiveContext } from "../helpers/debate_context.js";
 import {
   AGGRESSIVE_DEBATOR_REPORT_SPEC,
   buildAggressiveDebatorSystemMessage,
@@ -26,6 +27,8 @@ export function createAggressiveDebatorNode(opts: AnalystNodeOptions) {
       tools: opts.tools,
       reportSpec: AGGRESSIVE_DEBATOR_REPORT_SPEC,
       memoryRole: { role: "aggressive" },
+      buildContextBlock: buildAggressiveContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

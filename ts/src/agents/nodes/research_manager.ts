@@ -6,6 +6,7 @@
  * full Bull vs Bear debate and produces the ``research_allocation_plan``.
  */
 
+import { buildResearchManagerContext } from "../helpers/debate_context.js";
 import {
   buildResearchManagerSystemMessage,
   RESEARCH_MANAGER_REPORT_SPEC,
@@ -24,6 +25,8 @@ export function createResearchManagerNode(opts: AnalystNodeOptions) {
       tools: opts.tools,
       reportSpec: RESEARCH_MANAGER_REPORT_SPEC,
       memoryRole: { role: "research_manager" },
+      buildContextBlock: buildResearchManagerContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

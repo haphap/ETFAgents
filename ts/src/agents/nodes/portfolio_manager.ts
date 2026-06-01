@@ -7,6 +7,7 @@
  * allocation decision (``final_allocation_decision``).
  */
 
+import { buildPortfolioManagerContext } from "../helpers/debate_context.js";
 import {
   buildPortfolioManagerSystemMessage,
   PORTFOLIO_MANAGER_REPORT_SPEC,
@@ -25,6 +26,8 @@ export function createPortfolioManagerNode(opts: AnalystNodeOptions) {
       tools: opts.tools,
       reportSpec: PORTFOLIO_MANAGER_REPORT_SPEC,
       memoryRole: { role: "portfolio_manager" },
+      buildContextBlock: buildPortfolioManagerContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

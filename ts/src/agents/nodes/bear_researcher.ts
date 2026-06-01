@@ -6,6 +6,7 @@
  * against increasing ETF exposure.
  */
 
+import { buildBearContext } from "../helpers/debate_context.js";
 import { BEAR_REPORT_SPEC, buildBearResearcherSystemMessage } from "../prompts/bear_researcher.js";
 import { createAnalystNode } from "./analyst_factory.js";
 import { type AnalystNodeOptions, assembleSystemFrame } from "./market_flow.js";
@@ -21,6 +22,8 @@ export function createBearResearcherNode(opts: AnalystNodeOptions) {
       tools: opts.tools,
       reportSpec: BEAR_REPORT_SPEC,
       memoryRole: { role: "bear" },
+      buildContextBlock: buildBearContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

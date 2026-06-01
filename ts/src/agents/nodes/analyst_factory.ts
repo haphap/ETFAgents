@@ -42,6 +42,19 @@ export interface AnalystConfig {
   reportSpec: AnalystReportSpec | null;
   /** Memory role configuration. */
   memoryRole: MemoryRoleConfig;
+  /**
+   * Optional explicit context block appended to the system message (e.g. the
+   * six analyst reports + opposing debate history for debators/managers).
+   * Mirrors the Python nodes that embed reports directly in the prompt rather
+   * than relying solely on accumulated message history.
+   */
+  buildContextBlock?: (state: SpineStateType) => string;
+  /**
+   * Whether to append the report to the message history (default true). Debate
+   * and manager nodes set this false: they read explicit context blocks and
+   * must not grow the shared message history (Python parity).
+   */
+  appendMessage?: boolean;
   /** Report acceptance check (return true when quality threshold is met). */
   acceptanceCheck?: (report: string) => boolean;
   /** Unexecuted-tool recovery configuration. */
@@ -77,9 +90,14 @@ export function createAnalystNode(
     const ctx = promptContext;
     const analystBody = config.buildSystemBody(ctx);
     const toolNames = config.tools.map((t) => t.name).join(", ");
+    // Explicit reports/debate context (debators & managers), built from state.
+    const contextBlock = config.buildContextBlock?.(state) ?? "";
 
     const buildSystemMessage = (phase: SystemMessagePhase): string => {
       let body = analystBody;
+      if (contextBlock) {
+        body = `${body}\n\n${contextBlock}`;
+      }
       if (phase.kind === "fallback") {
         body = `${body}${buildFinalReportFallback(ctx.language)}`;
       } else if (phase.kind === "recovery") {
@@ -137,7 +155,13 @@ export function createAnalystNode(
 
     const stateUpdate: Record<string, unknown> = {};
     stateUpdate[config.stateKey as string] = processedReport;
-    stateUpdate.messages = [new AIMessage(processedReport)];
+    // Analysts append their report to the message history so the next analyst /
+    // tool round sees it; debate & manager nodes opt out (appendMessage: false)
+    // since they read explicit context blocks instead, matching Python (their
+    // nodes return only debate-state / plan fields, not chat messages).
+    if (config.appendMessage !== false) {
+      stateUpdate.messages = [new AIMessage(processedReport)];
+    }
 
     return stateUpdate as SpineStateUpdate;
   };

@@ -9,6 +9,7 @@
  * Debators typically have no tools; pass an empty array.
  */
 
+import { buildNeutralContext } from "../helpers/debate_context.js";
 import {
   buildNeutralDebatorSystemMessage,
   NEUTRAL_DEBATOR_REPORT_SPEC,
@@ -27,6 +28,8 @@ export function createNeutralDebatorNode(opts: AnalystNodeOptions) {
       tools: opts.tools,
       reportSpec: NEUTRAL_DEBATOR_REPORT_SPEC,
       memoryRole: { role: "neutral" },
+      buildContextBlock: buildNeutralContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

@@ -121,10 +121,15 @@ const TEAM_TABS: ReadonlyArray<{ key: string; team: Team; label: string }> = [
   { key: "decision", team: "决策", label: "🎯 决策" },
 ];
 
-function sectionGroups(): Record<string, SectionDef[]> {
+function sectionGroups(selected?: Record<string, boolean>): Record<string, SectionDef[]> {
   const groups: Record<string, SectionDef[]> = {};
   for (const tab of TEAM_TABS) {
-    groups[tab.key] = DEFAULT_SECTIONS.filter((d) => d.team === tab.team);
+    groups[tab.key] = DEFAULT_SECTIONS.filter(
+      (d) =>
+        d.team === tab.team &&
+        // Hide analyst sections that the user deselected in the config.
+        (d.team !== "分析师" || !selected || selected[d.id] !== false),
+    );
   }
   return groups;
 }
@@ -497,8 +502,8 @@ function initSelectedAnalysts(): Record<string, boolean> {
 }
 
 /** Section ids belonging to a team tab, in pipeline order. */
-function sectionsForTab(tab: string): string[] {
-  return (sectionGroups()[tab] ?? []).map((s) => s.id);
+function sectionsForTab(tab: string, selected?: Record<string, boolean>): string[] {
+  return (sectionGroups(selected)[tab] ?? []).map((s) => s.id);
 }
 
 /** P0: move section selection within a tab, wrapping at the ends. */
@@ -546,15 +551,16 @@ export function reportViewport(
   };
 }
 
-/** P1: rounds clamp to the supported range (graph is single-pass: max 1 active). */
+/** P1: clamp debate/risk rounds to the supported range (1–3); the graph loops
+ * the debates for the chosen count via routeDebate / routeRiskDebate. */
 export function clampRound(n: number): number {
   if (!Number.isFinite(n)) return 1;
   return Math.max(1, Math.min(3, Math.round(n)));
 }
 
-/** P1: deselecting analysts is not honoured by the single-pass graph yet. */
-export function analystSelectionUnsupported(selected: Record<string, boolean>): boolean {
-  return ANALYST_IDS.some((id) => selected[id] === false);
+/** P0/P5: the analyst section ids that are currently selected. */
+export function selectedAnalystIds(selected: Record<string, boolean>): string[] {
+  return ANALYST_IDS.filter((id) => selected[id] !== false);
 }
 
 /**
@@ -1136,7 +1142,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, executionSummary: action.summary };
     case "setTab": {
       // P0: when entering a tab with no prior selection, select its first section.
-      const ids = sectionsForTab(action.tab);
+      const ids = sectionsForTab(action.tab, state.selectedAnalysts);
       const selectedSectionByTab =
         state.selectedSectionByTab[action.tab] || ids.length === 0
           ? state.selectedSectionByTab
@@ -1177,14 +1183,22 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, vllmModels: [] };
 
     // --- P1 config ---
-    case "toggleAnalyst":
+    case "toggleAnalyst": {
+      const currentlyOn = state.selectedAnalysts[action.id] !== false;
+      // Refuse to turn off the last enabled analyst — the graph (and Python)
+      // require at least one analyst; a 0-analyst run yields a decision with no
+      // analyst reports. Keeping >=1 selected avoids that pseudo-result.
+      if (currentlyOn && selectedAnalystIds(state.selectedAnalysts).length <= 1) {
+        return state;
+      }
       return {
         ...state,
         selectedAnalysts: {
           ...state.selectedAnalysts,
-          [action.id]: !state.selectedAnalysts[action.id],
+          [action.id]: !currentlyOn,
         },
       };
+    }
     case "moveAnalystCursor": {
       const n = ANALYST_IDS.length;
       return { ...state, analystCursor: (state.analystCursor + action.delta + n) % n };
@@ -1196,7 +1210,7 @@ export function reducer(state: AppState, action: Action): AppState {
 
     // --- P0 report reader ---
     case "selectSection": {
-      const ids = sectionsForTab(state.activeTab);
+      const ids = sectionsForTab(state.activeTab, state.selectedAnalysts);
       const current = state.selectedSectionByTab[state.activeTab];
       const next = nextSectionId(ids, current, action.delta);
       if (next === undefined) return state;
@@ -1389,7 +1403,8 @@ async function runAnalysis(
     const [{ HumanMessage }] = await Promise.all([import("@langchain/core/messages")]);
     const { BridgeApi, BridgeClient, pickBridgeTools } = await import("../bridge/index.js");
     const { buildFullGraph } = await import("../graph/full_graph.js");
-    const { ANALYST_TOOLS } = await import("../cli/commands/shared_tools.js");
+    const { buildEffectiveMemoryConfig } = await import("../agents/nodes/memory_writer.js");
+    const { ANALYST_TOOLS, fetchMemoryContext } = await import("../cli/commands/shared_tools.js");
     const { createLlmFromConfig } = await import("../llm/factory.js");
 
     dispatchIfCurrent({ type: "appendLog", msg: "── 连接 Bridge…" });
@@ -1409,6 +1424,23 @@ async function runAnalysis(
       });
 
       const llmHandle = createLlmFromConfig(config, llmOpts);
+      // Quick-tier LLM for analysts/researchers/risk debators. Reuse an explicit
+      // model override for both tiers (single-model setups like vLLM); otherwise
+      // the quick tier uses the config's quick_think_llm.
+      const quickOpts: LlmOptions = { tier: "quick" };
+      if (state.provider) quickOpts.provider = state.provider;
+      if (state.model) quickOpts.model = state.model;
+      const quickHandle = createLlmFromConfig(config, quickOpts);
+
+      // Effective config for memory write-back: overlay the TUI's provider/
+      // model/round overrides so the stored entry's config hash describes the
+      // run that actually executed (not the unmodified bridge config).
+      const effectiveConfig = buildEffectiveMemoryConfig(config as Record<string, unknown>, {
+        provider: state.provider,
+        model: state.model,
+        debateRounds: state.debateRounds,
+        riskRounds: state.riskRounds,
+      });
 
       // Resolve each analyst's tool set (deduped) for the full pipeline.
       const uniqueToolNames = Array.from(
@@ -1437,8 +1469,11 @@ async function runAnalysis(
           : {}),
       };
 
+      const selectedAnalystList = ANALYST_IDS.filter((id) => state.selectedAnalysts[id] !== false);
+
       const graph = buildFullGraph({
         llm: llmHandle.llm,
+        quickLlm: quickHandle.llm,
         tools: {
           marketFlow: pick(ANALYST_TOOLS.marketFlow),
           macroRegime: pick(ANALYST_TOOLS.macroRegime),
@@ -1452,6 +1487,20 @@ async function runAnalysis(
         promptContext,
         maxDebateRounds: state.debateRounds,
         maxRiskRounds: state.riskRounds,
+        selectedAnalysts: selectedAnalystList,
+        // Forward the effective runtime config (with TUI provider/model/round
+        // overrides) so memory write-back's config hash matches the actual run.
+        memoryConfig: effectiveConfig,
+        persistMemory: async (payload) => {
+          const res = await api.memoryAppendAnalysis(
+            payload as {
+              state: Record<string, unknown>;
+              selected_analysts?: readonly string[] | null;
+              config?: Record<string, unknown>;
+            },
+          );
+          return res.entry;
+        },
       });
 
       let lastDecision = "";
@@ -1508,11 +1557,19 @@ async function runAnalysis(
 
         // Stream the graph so the dashboard updates per node instead of waiting
         // for the whole pipeline. Each chunk is { nodeName: stateUpdate }.
+        const memCtx = await fetchMemoryContext(
+          api,
+          ticker,
+          state.date,
+          effectiveConfig,
+          selectedAnalystList,
+        );
         const stream = await graph.stream(
           {
             messages: [new HumanMessage(ticker)],
             asset_of_interest: ticker,
             trade_date: state.date,
+            ...memCtx,
           },
           { recursionLimit: 100, signal } as { recursionLimit: number; signal: AbortSignal },
         );
@@ -2322,11 +2379,6 @@ function ConfigModal({ state }: { state: AppState }) {
           <Text dimColor>{state.backendUrl || "(默认 / 由 bridge 配置)"}</Text>
         </Box>
 
-        {/* P1: analyst deselection is still not wired into the TS graph. */}
-        {analystSelectionUnsupported(state.selectedAnalysts) && (
-          <Text color="yellow">⚠ 取消分析师尚未接入 TS 图，当前仍会运行全部分析师。</Text>
-        )}
-
         <Box marginTop={1} justifyContent="center">
           <Text color="green">Tab 切换字段 · Enter 开始分析</Text>
         </Box>
@@ -2474,7 +2526,7 @@ function SelectFieldRow({
 // ===========================================================================
 
 function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
-  const groups = sectionGroups();
+  const groups = sectionGroups(state.selectedAnalysts);
   const done = state.sectionDone;
 
   function countDone(key: string): number {
@@ -2486,10 +2538,12 @@ function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
 
   const el = fmtElapsed(elapsed);
 
-  const agentsTotal = DEFAULT_SECTIONS.length;
-  const agentsDone = done.size;
-  const reportsTotal = DEFAULT_SECTIONS.length;
-  const reportsDone = done.size;
+  // Totals reflect only the sections active for the current analyst selection.
+  const activeSectionIds = Object.values(groups).flat();
+  const agentsTotal = activeSectionIds.length;
+  const agentsDone = activeSectionIds.filter((s) => done.has(s.id)).length;
+  const reportsTotal = agentsTotal;
+  const reportsDone = agentsDone;
 
   return (
     <Box flexDirection="column" flexGrow={1}>
