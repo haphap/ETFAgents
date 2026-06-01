@@ -24,4 +24,12 @@ code,name,weight
     expect(extractHoldingNames("No ETF holdings found.")).toEqual([]);
     expect(extractHoldingNames("code,weight\n600519.SH,5.1\n")).toEqual([]);
   });
+
+  it("handles quoted fields with embedded commas (CSV-safe parity)", () => {
+    const csv = `code,name,weight
+1,"Foo, Inc.",5.1
+2,"Bar, Ltd.",3.2
+`;
+    expect(extractHoldingNames(csv)).toEqual(["Foo, Inc.", "Bar, Ltd."]);
+  });
 });

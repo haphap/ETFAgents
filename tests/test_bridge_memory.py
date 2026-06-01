@@ -69,6 +69,15 @@ class MemoryAppendAnalysisConfigTests(unittest.TestCase):
             # Distinct selections must yield distinct config hashes.
             self.assertNotEqual(empty["entry"]["config_hash"], full["entry"]["config_hash"])
 
+    def test_non_list_selected_analysts_is_rejected(self) -> None:
+        """A string (or other non-list) selected_analysts must raise INVALID_PARAMS."""
+        from etfagents.bridge.protocol import INVALID_PARAMS, RpcError
+
+        for bad in ("market_flow", 123, ["market_flow", 5]):
+            with self.assertRaises(RpcError) as cm:
+                memory_append_analysis({"state": _STATE, "selected_analysts": bad})
+            self.assertEqual(cm.exception.code, INVALID_PARAMS)
+
 
 if __name__ == "__main__":
     unittest.main()

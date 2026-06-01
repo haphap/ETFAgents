@@ -551,7 +551,8 @@ export function reportViewport(
   };
 }
 
-/** P1: rounds clamp to the supported range (graph is single-pass: max 1 active). */
+/** P1: clamp debate/risk rounds to the supported range (1–3); the graph loops
+ * the debates for the chosen count via routeDebate / routeRiskDebate. */
 export function clampRound(n: number): number {
   if (!Number.isFinite(n)) return 1;
   return Math.max(1, Math.min(3, Math.round(n)));

@@ -34,6 +34,8 @@ def memory_append_analysis(params: dict[str, Any]) -> dict[str, Any]:
     selected = params.get("selected_analysts")
     if selected is None:
         selected = list(_DEFAULT_ANALYSTS)
+    elif not isinstance(selected, list) or not all(isinstance(x, str) for x in selected):
+        raise RpcError(INVALID_PARAMS, "'selected_analysts' must be a list of strings")
 
     from etfagents.agents.utils.analysis_memory import (
         AnalysisMemoryStore,

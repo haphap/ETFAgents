@@ -6,6 +6,14 @@
  * opposing side's debate history and latest response. The TS analysts append
  * their reports to the message history, but the debaters/managers additionally
  * receive them explicitly here so the prompt construction matches Python.
+ *
+ * Scope: this is *history* parity, not *snapshot* parity. Each speaker gets the
+ * full own + opponent histories and latest responses (the substantive content),
+ * but Python's per-round feedback snapshots, snapshot file paths, rolling debate
+ * brief, and manager-side side-report synthesis are intentionally NOT ported —
+ * that compression layer is a separate follow-up. At maxDebateRounds /
+ * maxRiskRounds > 1 the model sees the same content Python compresses, just
+ * uncompressed.
  */
 
 import type { DebateState, SpineStateType } from "../state.js";

@@ -54,17 +54,41 @@ export function extractHoldingNames(holdingsCsv: string, maxNames = 3): string[]
     .filter((l) => l && !l.startsWith("#"));
   const header = lines[0];
   if (!header) return [];
-  const cols = header.split(",").map((c) => c.trim());
-  const nameIdx = cols.findIndex((c) => HOLDING_NAME_COLUMNS.includes(c.toLowerCase()));
+  const cols = parseCsvLine(header).map((c) => c.toLowerCase());
+  const nameIdx = cols.findIndex((c) => HOLDING_NAME_COLUMNS.includes(c));
   if (nameIdx < 0) return [];
   const names: string[] = [];
   for (const line of lines.slice(1)) {
-    const cells = line.split(",");
-    const name = cells[nameIdx]?.trim();
+    const name = parseCsvLine(line)[nameIdx]?.trim();
     if (name && !names.includes(name)) names.push(name);
     if (names.length >= maxNames) break;
   }
   return names;
+}
+
+/** Parse one CSV line, honouring double-quoted fields with embedded commas. */
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const char = line[i];
+    if (char === '"') {
+      if (quoted && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (char === "," && !quoted) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current);
+  return cells.map((cell) => cell.trim());
 }
 
 /** Replicate Python get_news_for_queries: get_news per query, concatenated with labels. */
