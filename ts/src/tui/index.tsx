@@ -558,6 +558,25 @@ export function clampRound(n: number): number {
   return Math.max(1, Math.min(3, Math.round(n)));
 }
 
+/**
+ * Overlay the TUI's provider/model/round overrides onto the bridge config so
+ * memory write-back's config hash describes the run that actually executed.
+ * Mirrors the keys ETFAgents' config hash reads (llm_provider, deep_think_llm,
+ * max_debate_rounds, max_risk_discuss_rounds).
+ */
+export function buildEffectiveMemoryConfig(
+  config: Record<string, unknown>,
+  opts: { provider?: string; model?: string; debateRounds: number; riskRounds: number },
+): Record<string, unknown> {
+  return {
+    ...config,
+    ...(opts.provider ? { llm_provider: opts.provider } : {}),
+    ...(opts.model ? { deep_think_llm: opts.model } : {}),
+    max_debate_rounds: opts.debateRounds,
+    max_risk_discuss_rounds: opts.riskRounds,
+  };
+}
+
 /** P0/P5: the analyst section ids that are currently selected. */
 export function selectedAnalystIds(selected: Record<string, boolean>): string[] {
   return ANALYST_IDS.filter((id) => selected[id] !== false);
@@ -1424,6 +1443,16 @@ async function runAnalysis(
 
       const llmHandle = createLlmFromConfig(config, llmOpts);
 
+      // Effective config for memory write-back: overlay the TUI's provider/
+      // model/round overrides so the stored entry's config hash describes the
+      // run that actually executed (not the unmodified bridge config).
+      const effectiveConfig = buildEffectiveMemoryConfig(config as Record<string, unknown>, {
+        provider: state.provider,
+        model: state.model,
+        debateRounds: state.debateRounds,
+        riskRounds: state.riskRounds,
+      });
+
       // Resolve each analyst's tool set (deduped) for the full pipeline.
       const uniqueToolNames = Array.from(
         new Set<string>([
@@ -1467,10 +1496,9 @@ async function runAnalysis(
         maxDebateRounds: state.debateRounds,
         maxRiskRounds: state.riskRounds,
         selectedAnalysts: ANALYST_IDS.filter((id) => state.selectedAnalysts[id] !== false),
-        // Forward the already-loaded runtime config so memory write-back honours
-        // the active memory settings (memory_mode, results_dir, …) instead of
-        // the bridge's DEFAULT_CONFIG.
-        memoryConfig: config as Record<string, unknown>,
+        // Forward the effective runtime config (with TUI provider/model/round
+        // overrides) so memory write-back's config hash matches the actual run.
+        memoryConfig: effectiveConfig,
         persistMemory: async (payload) => {
           const res = await api.memoryAppendAnalysis(
             payload as {

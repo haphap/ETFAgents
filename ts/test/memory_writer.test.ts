@@ -49,6 +49,9 @@ describe("memory writer", () => {
     const payload = buildMemoryPayload(fakeState());
     expect(payload.asset_of_interest).toBe("510300.SH");
     expect(payload.final_allocation_decision).toBe("fad");
+    // trader_backtest_signal is intentionally omitted so build_state_backtest_signal
+    // falls through to the PM's final_allocation_decision instead of the trader view.
+    expect(payload).not.toHaveProperty("trader_backtest_signal");
     expect(payload.investment_debate_state).toEqual({
       current_bull_response: "Bull: up",
       current_bear_response: "Bear: down",

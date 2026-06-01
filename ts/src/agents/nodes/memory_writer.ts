@@ -35,7 +35,11 @@ export function buildMemoryPayload(state: SpineStateType): Record<string, unknow
     research_allocation_plan: state.research_allocation_plan,
     trader_allocation_plan: state.trader_allocation_plan,
     final_allocation_decision: state.final_allocation_decision,
-    trader_backtest_signal: state.trader_backtest_signal,
+    // Intentionally NOT sending trader_backtest_signal: the TS portfolio
+    // manager produces no structured signal, and build_state_backtest_signal
+    // prefers trader_backtest_signal over final_allocation_decision. Omitting it
+    // lets Python derive the stored signal from the PM's final decision (the
+    // actual outcome) instead of the trader's earlier view.
     investment_debate_state: {
       current_bull_response: inv.currentBullResponse,
       current_bear_response: inv.currentBearResponse,

@@ -133,7 +133,11 @@ export function createCatalystSentimentNode(opts: AnalystNodeOptions) {
     const [tickerNews, holdingsNews, globalNews] = await Promise.all([
       prefetchTool(byName, "get_news", { ticker, start_date: newsStart, end_date: tradeDate }),
       fetchHoldingsNews(byName, holdingNames, newsStart, tradeDate),
-      prefetchTool(byName, "get_global_news", { curr_date: tradeDate, look_back_days: 7 }),
+      prefetchTool(byName, "get_global_news", {
+        curr_date: tradeDate,
+        look_back_days: 7,
+        limit: 10,
+      }),
     ]);
 
     const data: CatalystSentimentData = {

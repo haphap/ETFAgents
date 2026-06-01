@@ -1,7 +1,7 @@
 import { AIMessage } from "@langchain/core/messages";
 import { describe, expect, it } from "vitest";
 import type { SpineStateType, SpineStateUpdate } from "../src/agents/state.js";
-import { withDebateTurn } from "../src/graph/full_graph.js";
+import { buildFullGraph, withDebateTurn } from "../src/graph/full_graph.js";
 import { routeDebate, routeRiskDebate } from "../src/graph/routing.js";
 
 /**
@@ -110,5 +110,17 @@ describe("withDebateTurn accumulation", () => {
     };
     // The wrapper returns the inner update unchanged (no debate-state advance).
     expect(update.risk_debate_state).toBeUndefined();
+  });
+});
+
+describe("buildFullGraph analyst selection guard", () => {
+  it("throws when selectedAnalysts is explicitly empty", () => {
+    const opts = {
+      llm: {},
+      tools: {},
+      promptContext: { language: "Chinese" },
+      selectedAnalysts: [],
+    } as unknown as Parameters<typeof buildFullGraph>[0];
+    expect(() => buildFullGraph(opts)).toThrow(/at least one analyst/);
   });
 });

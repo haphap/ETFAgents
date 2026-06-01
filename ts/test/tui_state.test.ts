@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   appendTickerToInput,
+  buildEffectiveMemoryConfig,
   clampRound,
   extractPriceRows,
   initState,
@@ -235,6 +236,37 @@ describe("P1 analysis config", () => {
     expect(clampRound(99)).toBe(3);
     const s = reducer(initState(), { type: "stepRounds", field: "debateRounds", delta: -5 });
     expect(s.debateRounds).toBe(1);
+  });
+
+  it("overlays provider/model/rounds overrides into the effective memory config", () => {
+    const base = {
+      llm_provider: "openai",
+      deep_think_llm: "gpt-x",
+      max_debate_rounds: 1,
+      results_dir: "/d",
+    };
+    const eff = buildEffectiveMemoryConfig(base, {
+      provider: "deepseek",
+      model: "deepseek-chat",
+      debateRounds: 2,
+      riskRounds: 3,
+    });
+    expect(eff).toMatchObject({
+      llm_provider: "deepseek",
+      deep_think_llm: "deepseek-chat",
+      max_debate_rounds: 2,
+      max_risk_discuss_rounds: 3,
+      results_dir: "/d", // untouched runtime keys preserved
+    });
+    // Empty provider/model leave the base values intact.
+    const eff2 = buildEffectiveMemoryConfig(base, {
+      provider: "",
+      model: "",
+      debateRounds: 1,
+      riskRounds: 1,
+    });
+    expect(eff2.llm_provider).toBe("openai");
+    expect(eff2.deep_think_llm).toBe("gpt-x");
   });
 
   it("derives the selected analyst id list, reflecting toggles", () => {

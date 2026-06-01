@@ -199,6 +199,11 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
   const ctx = opts.promptContext;
   const maxDebateRounds = opts.maxDebateRounds ?? 1;
   const maxRiskRounds = opts.maxRiskRounds ?? 1;
+  // Reject an explicit empty analyst set (Python's GraphSetup raises here too):
+  // a run with no analysts produces a decision with no analyst reports.
+  if (opts.selectedAnalysts && opts.selectedAnalysts.length === 0) {
+    throw new Error("buildFullGraph: selectedAnalysts must contain at least one analyst");
+  }
   const selected = new Set(opts.selectedAnalysts ?? ALL_ANALYSTS);
 
   // --- Analyst nodes ---
