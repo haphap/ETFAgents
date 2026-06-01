@@ -28,7 +28,7 @@
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import type { AIMessage, BaseMessage } from "@langchain/core/messages";
+import type { BaseMessage } from "@langchain/core/messages";
 import { HumanMessage, RemoveMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { END, START, StateGraph } from "@langchain/langgraph";
@@ -152,23 +152,23 @@ const RISK_ROUTE_MAP = {
 /**
  * Wrap a debator/researcher node so each completed turn advances the debate
  * accounting (`count`, `latestSpeaker`, appended `history`) that the
- * conditional routers read. Tool rounds (the model emitted tool calls instead
- * of an argument) do not count. `field` selects the research vs risk debate.
+ * conditional routers read. The response text is read from the node's report
+ * state key (`reportKey`) since debators no longer append chat messages. An
+ * empty report (skipped/failed turn) does not advance the count.
  */
 export function withDebateTurn(
   node: NodeFn,
   speaker: string,
   field: "investment_debate_state" | "risk_debate_state",
+  reportKey: string,
 ): NodeFn {
   return async (state) => {
     const update = await node(state);
-    const messages = (update as { messages?: BaseMessage[] }).messages ?? [];
-    const last = messages[messages.length - 1] as AIMessage | undefined;
-    if (last && (last.tool_calls?.length ?? 0) > 0) return update; // tool round
-    const response = typeof last?.content === "string" ? last.content : "";
+    const response = String((update as Record<string, unknown>)[reportKey] ?? "");
+    if (!response.trim()) return update; // skipped / empty turn — don't advance
     const prev = state[field];
-    const turn = response ? `${speaker}: ${response}` : speaker;
-    const current = `${speaker}: ${response}`;
+    const turn = `${speaker}: ${response}`;
+    const current = turn;
     // Per-role history + latest-response fields, mirroring the Python debator
     // nodes' investment_debate_state / risk_debate_state updates.
     const roleFields: Record<string, Partial<DebateState>> = {
@@ -351,11 +351,36 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
 
   // Wrap debators so each completed turn advances the debate accounting that
   // routeDebate / routeRiskDebate read to decide whether to loop.
-  const bullTurn = withDebateTurn(bullResearcher, "Bull", "investment_debate_state");
-  const bearTurn = withDebateTurn(bearResearcher, "Bear", "investment_debate_state");
-  const aggressiveTurn = withDebateTurn(aggressiveDebator, "Aggressive", "risk_debate_state");
-  const conservativeTurn = withDebateTurn(conservativeDebator, "Conservative", "risk_debate_state");
-  const neutralTurn = withDebateTurn(neutralDebator, "Neutral", "risk_debate_state");
+  const bullTurn = withDebateTurn(
+    bullResearcher,
+    "Bull",
+    "investment_debate_state",
+    "bull_researcher_report",
+  );
+  const bearTurn = withDebateTurn(
+    bearResearcher,
+    "Bear",
+    "investment_debate_state",
+    "bear_researcher_report",
+  );
+  const aggressiveTurn = withDebateTurn(
+    aggressiveDebator,
+    "Aggressive",
+    "risk_debate_state",
+    "aggressive_debator_response",
+  );
+  const conservativeTurn = withDebateTurn(
+    conservativeDebator,
+    "Conservative",
+    "risk_debate_state",
+    "conservative_debator_response",
+  );
+  const neutralTurn = withDebateTurn(
+    neutralDebator,
+    "Neutral",
+    "risk_debate_state",
+    "neutral_debator_response",
+  );
 
   // Wrap managers so their decision is recorded in the debate state.
   const researchManagerNode = withManagerJudge(

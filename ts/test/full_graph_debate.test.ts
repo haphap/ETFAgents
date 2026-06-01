@@ -1,4 +1,3 @@
-import { AIMessage } from "@langchain/core/messages";
 import { describe, expect, it } from "vitest";
 import type { SpineStateType, SpineStateUpdate } from "../src/agents/state.js";
 import {
@@ -86,8 +85,13 @@ describe("withDebateTurn accumulation", () => {
 
   it("increments count, records the speaker, and appends history per turn", async () => {
     const inner = async (): Promise<SpineStateUpdate> =>
-      ({ messages: [new AIMessage("bull argument")] }) as SpineStateUpdate;
-    const wrapped = withDebateTurn(inner, "Bull", "investment_debate_state");
+      ({ bull_researcher_report: "bull argument" }) as unknown as SpineStateUpdate;
+    const wrapped = withDebateTurn(
+      inner,
+      "Bull",
+      "investment_debate_state",
+      "bull_researcher_report",
+    );
 
     const update = (await wrapped(baseState)) as unknown as {
       investment_debate_state: Record<string, unknown>;
@@ -102,12 +106,14 @@ describe("withDebateTurn accumulation", () => {
     });
   });
 
-  it("does not advance the counter on a tool round", async () => {
-    const toolMsg = new AIMessage("");
-    toolMsg.tool_calls = [{ name: "t", args: {}, id: "1" }];
-    const inner = async (): Promise<SpineStateUpdate> =>
-      ({ messages: [toolMsg] }) as SpineStateUpdate;
-    const wrapped = withDebateTurn(inner, "Aggressive", "risk_debate_state");
+  it("does not advance the counter when the report is empty (skipped turn)", async () => {
+    const inner = async (): Promise<SpineStateUpdate> => ({}) as SpineStateUpdate;
+    const wrapped = withDebateTurn(
+      inner,
+      "Aggressive",
+      "risk_debate_state",
+      "aggressive_debator_response",
+    );
 
     const update = (await wrapped(baseState)) as {
       risk_debate_state?: { count: number };

@@ -26,6 +26,7 @@ export function createResearchManagerNode(opts: AnalystNodeOptions) {
       reportSpec: RESEARCH_MANAGER_REPORT_SPEC,
       memoryRole: { role: "research_manager" },
       buildContextBlock: buildResearchManagerContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

@@ -23,6 +23,7 @@ export function createBearResearcherNode(opts: AnalystNodeOptions) {
       reportSpec: BEAR_REPORT_SPEC,
       memoryRole: { role: "bear" },
       buildContextBlock: buildBearContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

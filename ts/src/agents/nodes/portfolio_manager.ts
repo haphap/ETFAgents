@@ -27,6 +27,7 @@ export function createPortfolioManagerNode(opts: AnalystNodeOptions) {
       reportSpec: PORTFOLIO_MANAGER_REPORT_SPEC,
       memoryRole: { role: "portfolio_manager" },
       buildContextBlock: buildPortfolioManagerContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

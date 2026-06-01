@@ -28,6 +28,7 @@ export function createAggressiveDebatorNode(opts: AnalystNodeOptions) {
       reportSpec: AGGRESSIVE_DEBATOR_REPORT_SPEC,
       memoryRole: { role: "aggressive" },
       buildContextBlock: buildAggressiveContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

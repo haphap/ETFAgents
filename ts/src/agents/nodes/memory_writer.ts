@@ -38,7 +38,9 @@ export function buildEffectiveMemoryConfig(
   return {
     ...config,
     ...(opts.provider ? { llm_provider: opts.provider } : {}),
-    ...(opts.model ? { deep_think_llm: opts.model } : {}),
+    // A model override is applied to BOTH tiers (see CLI/TUI), so reflect it in
+    // both hash keys; otherwise quick_think_llm would describe the wrong model.
+    ...(opts.model ? { deep_think_llm: opts.model, quick_think_llm: opts.model } : {}),
     ...(opts.baseUrl ? { backend_url: opts.baseUrl } : {}),
     max_debate_rounds: opts.debateRounds,
     max_risk_discuss_rounds: opts.riskRounds,

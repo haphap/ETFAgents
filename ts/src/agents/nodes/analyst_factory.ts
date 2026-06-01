@@ -49,6 +49,12 @@ export interface AnalystConfig {
    * than relying solely on accumulated message history.
    */
   buildContextBlock?: (state: SpineStateType) => string;
+  /**
+   * Whether to append the report to the message history (default true). Debate
+   * and manager nodes set this false: they read explicit context blocks and
+   * must not grow the shared message history (Python parity).
+   */
+  appendMessage?: boolean;
   /** Report acceptance check (return true when quality threshold is met). */
   acceptanceCheck?: (report: string) => boolean;
   /** Unexecuted-tool recovery configuration. */
@@ -149,7 +155,13 @@ export function createAnalystNode(
 
     const stateUpdate: Record<string, unknown> = {};
     stateUpdate[config.stateKey as string] = processedReport;
-    stateUpdate.messages = [new AIMessage(processedReport)];
+    // Analysts append their report to the message history so the next analyst /
+    // tool round sees it; debate & manager nodes opt out (appendMessage: false)
+    // since they read explicit context blocks instead, matching Python (their
+    // nodes return only debate-state / plan fields, not chat messages).
+    if (config.appendMessage !== false) {
+      stateUpdate.messages = [new AIMessage(processedReport)];
+    }
 
     return stateUpdate as SpineStateUpdate;
   };

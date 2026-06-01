@@ -29,6 +29,7 @@ export function createNeutralDebatorNode(opts: AnalystNodeOptions) {
       reportSpec: NEUTRAL_DEBATOR_REPORT_SPEC,
       memoryRole: { role: "neutral" },
       buildContextBlock: buildNeutralContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

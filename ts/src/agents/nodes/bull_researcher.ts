@@ -23,6 +23,7 @@ export function createBullResearcherNode(opts: AnalystNodeOptions) {
       reportSpec: BULL_REPORT_SPEC,
       memoryRole: { role: "bull" },
       buildContextBlock: buildBullContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );

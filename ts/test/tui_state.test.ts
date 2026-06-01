@@ -242,18 +242,23 @@ describe("P1 analysis config", () => {
     const base = {
       llm_provider: "openai",
       deep_think_llm: "gpt-x",
+      quick_think_llm: "gpt-x-mini",
       max_debate_rounds: 1,
       results_dir: "/d",
     };
     const eff = buildEffectiveMemoryConfig(base, {
       provider: "deepseek",
       model: "deepseek-chat",
+      baseUrl: "https://api.example/v1",
       debateRounds: 2,
       riskRounds: 3,
     });
     expect(eff).toMatchObject({
       llm_provider: "deepseek",
+      // A model override applies to both tiers, so both keys must reflect it.
       deep_think_llm: "deepseek-chat",
+      quick_think_llm: "deepseek-chat",
+      backend_url: "https://api.example/v1",
       max_debate_rounds: 2,
       max_risk_discuss_rounds: 3,
       results_dir: "/d", // untouched runtime keys preserved

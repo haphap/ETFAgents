@@ -28,6 +28,7 @@ export function createConservativeDebatorNode(opts: AnalystNodeOptions) {
       reportSpec: CONSERVATIVE_DEBATOR_REPORT_SPEC,
       memoryRole: { role: "conservative" },
       buildContextBlock: buildConservativeContext,
+      appendMessage: false,
     },
     assembleSystemFrame,
   );
