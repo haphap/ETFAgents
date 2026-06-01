@@ -13,7 +13,7 @@ import { buildEffectiveMemoryConfig } from "../../agents/nodes/memory_writer.js"
 import { BridgeApi, BridgeClient, pickBridgeTools, RpcError } from "../../bridge/index.js";
 import { buildFullGraph } from "../../graph/full_graph.js";
 import { createLlmFromConfig } from "../../llm/factory.js";
-import { ANALYST_TOOLS } from "./shared_tools.js";
+import { ANALYST_TOOLS, fetchMemoryContext } from "./shared_tools.js";
 
 interface CandidateResult {
   ticker: string;
@@ -43,6 +43,14 @@ export function registerAnalyzeCandidatePool(program: Command): void {
         const config = await api.configGet();
         const llmHandle = createLlmFromConfig(config, {
           tier: "deep",
+          ...(opts.model ? { model: opts.model } : {}),
+          ...(opts.provider ? { provider: opts.provider } : {}),
+          ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
+          ...(opts.maxTokens ? { maxTokens: Number(opts.maxTokens) } : {}),
+        });
+        // Quick-tier LLM for analysts/researchers/risk debators.
+        const quickHandle = createLlmFromConfig(config, {
+          tier: "quick",
           ...(opts.model ? { model: opts.model } : {}),
           ...(opts.provider ? { provider: opts.provider } : {}),
           ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
@@ -100,6 +108,7 @@ export function registerAnalyzeCandidatePool(program: Command): void {
         const memoryConfig = buildEffectiveMemoryConfig(config as Record<string, unknown>, {
           ...(opts.provider ? { provider: opts.provider } : {}),
           ...(opts.model ? { model: opts.model } : {}),
+          ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
           debateRounds: 1,
           riskRounds: 1,
         });
@@ -118,16 +127,19 @@ export function registerAnalyzeCandidatePool(program: Command): void {
           process.stdout.write(pc.yellow(`  ${ticker}... `));
           const graph = buildFullGraph({
             llm: llmHandle.llm,
+            quickLlm: quickHandle.llm,
             tools: toolSets,
             promptContext,
             memoryConfig,
             persistMemory,
           });
 
+          const memCtx = await fetchMemoryContext(api, ticker, tradeDate, memoryConfig);
           const final = await graph.invoke({
             messages: [new HumanMessage(ticker)],
             asset_of_interest: ticker,
             trade_date: tradeDate,
+            ...memCtx,
           });
 
           const signal = (final.trader_backtest_signal ?? {}) as Record<string, unknown>;

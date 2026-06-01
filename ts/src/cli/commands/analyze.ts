@@ -11,7 +11,7 @@ import { buildEffectiveMemoryConfig } from "../../agents/nodes/memory_writer.js"
 import { BridgeApi, BridgeClient, pickBridgeTools, RpcError } from "../../bridge/index.js";
 import { buildFullGraph } from "../../graph/full_graph.js";
 import { createLlmFromConfig } from "../../llm/factory.js";
-import { ANALYST_TOOLS } from "./shared_tools.js";
+import { ANALYST_TOOLS, fetchMemoryContext } from "./shared_tools.js";
 
 interface AnalyzeOptions {
   date?: string;
@@ -44,6 +44,15 @@ export function registerAnalyze(program: Command): void {
           ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
           ...(opts.maxTokens ? { maxTokens: Number(opts.maxTokens) } : {}),
         });
+        // Quick-tier LLM for analysts/researchers/risk debators (deep stays for
+        // research manager, trader, PM). An explicit --model applies to both.
+        const quickHandle = createLlmFromConfig(config, {
+          tier: "quick",
+          ...(opts.model ? { model: opts.model } : {}),
+          ...(opts.provider ? { provider: opts.provider } : {}),
+          ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
+          ...(opts.maxTokens ? { maxTokens: Number(opts.maxTokens) } : {}),
+        });
 
         // Pick tools for each analyst.
         const toolSets = {
@@ -65,17 +74,22 @@ export function registerAnalyze(program: Command): void {
             : {}),
         };
 
+        // Effective config drives both memory write-back and the read-side
+        // context build, so both describe the same run.
+        const memoryConfig = buildEffectiveMemoryConfig(config as Record<string, unknown>, {
+          ...(opts.provider ? { provider: opts.provider } : {}),
+          ...(opts.model ? { model: opts.model } : {}),
+          ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
+          debateRounds: 1,
+          riskRounds: 1,
+        });
+
         const graph = buildFullGraph({
           llm: llmHandle.llm,
+          quickLlm: quickHandle.llm,
           tools: toolSets,
           promptContext,
-          // Persist analysis memory like the Python graph's always-wired writer.
-          memoryConfig: buildEffectiveMemoryConfig(config as Record<string, unknown>, {
-            ...(opts.provider ? { provider: opts.provider } : {}),
-            ...(opts.model ? { model: opts.model } : {}),
-            debateRounds: 1,
-            riskRounds: 1,
-          }),
+          memoryConfig,
           persistMemory: async (payload) => {
             const res = await api.memoryAppendAnalysis(
               payload as {
@@ -95,10 +109,14 @@ export function registerAnalyze(program: Command): void {
         );
         console.log(pc.yellow("Running full pipeline: analysts → debate → trader → risk → PM"));
 
+        // Read side of memory: hydrate continuity/lesson/method context.
+        const memCtx = await fetchMemoryContext(api, ticker, tradeDate, memoryConfig);
+
         const final = await graph.invoke({
           messages: [new HumanMessage(ticker)],
           asset_of_interest: ticker,
           trade_date: tradeDate,
+          ...memCtx,
         });
 
         if (final.research_allocation_plan) {

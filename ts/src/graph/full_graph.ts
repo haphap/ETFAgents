@@ -29,6 +29,7 @@
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { AIMessage, BaseMessage } from "@langchain/core/messages";
+import { HumanMessage, RemoveMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
@@ -72,7 +73,10 @@ export interface FullGraphToolSets {
 }
 
 export interface BuildFullGraphOptions {
+  /** Deep-tier LLM: research manager, trader, portfolio manager. */
   llm: BaseChatModel;
+  /** Quick-tier LLM for analysts/researchers/risk debators (defaults to `llm`). */
+  quickLlm?: BaseChatModel;
   tools: FullGraphToolSets;
   promptContext: PromptContext;
   /** Bull/bear debate rounds (default 1 = single pass, matching Python). */
@@ -212,6 +216,47 @@ function skipIfDeselected(node: NodeFn, id: string, selected: ReadonlySet<string
   return async () => ({}) as SpineStateUpdate;
 }
 
+/**
+ * Clear the accumulated message history between analysts (Python's "Msg Clear"
+ * nodes via create_msg_delete). Prevents one analyst's tool chatter / report
+ * from bloating the next analyst's context. Report content survives in the
+ * dedicated *_report state keys, and debators/managers read explicit context
+ * blocks, so clearing messages here is safe. A placeholder keeps providers
+ * (e.g. Anthropic) that require a non-empty history happy.
+ */
+function createMsgDeleteNode(): NodeFn {
+  return async (state) => {
+    const removals = (state.messages ?? [])
+      .filter((m): m is BaseMessage & { id: string } => typeof m.id === "string")
+      .map((m) => new RemoveMessage({ id: m.id }));
+    return { messages: [...removals, new HumanMessage("Continue")] } as SpineStateUpdate;
+  };
+}
+
+/**
+ * Wrap a manager node so its decision is recorded into the debate state's
+ * judgeDecision + latestSpeaker (mirrors Python's research/portfolio managers,
+ * which update investment_debate_state / risk_debate_state on top of writing
+ * their plan field).
+ */
+function withManagerJudge(
+  node: NodeFn,
+  planKey: "research_allocation_plan" | "final_allocation_decision",
+  field: "investment_debate_state" | "risk_debate_state",
+  speaker: string,
+): NodeFn {
+  return async (state) => {
+    const update = await node(state);
+    const plan = (update as Record<string, unknown>)[planKey];
+    if (typeof plan !== "string" || !plan.trim()) return update;
+    const prev = state[field];
+    return {
+      ...update,
+      [field]: { ...prev, judgeDecision: plan, latestSpeaker: speaker },
+    } as SpineStateUpdate;
+  };
+}
+
 // ===========================================================================
 // Graph builder
 // ===========================================================================
@@ -224,50 +269,56 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
   // GraphSetup rejects unknown analysts and the graph dedupes the list).
   const selectedList = normalizeAnalystSelection(opts.selectedAnalysts);
   const selected = new Set(selectedList);
+  // Quick LLM for analysts/researchers/risk-debators; deep LLM (opts.llm) for
+  // research manager, trader, and portfolio manager — matching Python's tier
+  // split. Falls back to the single deep LLM when no quick LLM is supplied.
+  const quick = opts.quickLlm ?? opts.llm;
 
-  // --- Analyst nodes ---
+  // --- Analyst nodes (quick tier) ---
   const marketFlow = createMarketFlowNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.marketFlow,
     promptContext: ctx,
   });
   const macroRegime = createMacroRegimeNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.macroRegime,
     promptContext: ctx,
   });
   const mesoCommodity = createMesoCommodityNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.mesoCommodity,
     promptContext: ctx,
   });
   const catalystSentiment = createCatalystSentimentNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.catalystSentiment,
     promptContext: ctx,
   });
   const holdingsIndustry = createHoldingsIndustryNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.holdingsIndustry,
     promptContext: ctx,
   });
   const topHoldings = createTopHoldingsNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.topHoldings,
     promptContext: ctx,
   });
 
-  // --- Debate / research-manager nodes (no tools) ---
+  // --- Researchers (quick tier) ---
   const bullResearcher = createBullResearcherNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.bullBear,
     promptContext: ctx,
   });
   const bearResearcher = createBearResearcherNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.bullBear,
     promptContext: ctx,
   });
+
+  // --- Research manager + trader (deep tier) ---
   const researchManager = createResearchManagerNode({
     llm: opts.llm,
     tools: opts.tools.bullBear,
@@ -276,19 +327,19 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
 
   const trader = createTraderNode({ llm: opts.llm, promptContext: ctx });
 
-  // --- Risk-debate / portfolio-manager nodes (no tools) ---
+  // --- Risk debators (quick tier) + portfolio manager (deep tier) ---
   const aggressiveDebator = createAggressiveDebatorNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.riskDebate,
     promptContext: ctx,
   });
   const conservativeDebator = createConservativeDebatorNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.riskDebate,
     promptContext: ctx,
   });
   const neutralDebator = createNeutralDebatorNode({
-    llm: opts.llm,
+    llm: quick,
     tools: opts.tools.riskDebate,
     promptContext: ctx,
   });
@@ -305,6 +356,20 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
   const aggressiveTurn = withDebateTurn(aggressiveDebator, "Aggressive", "risk_debate_state");
   const conservativeTurn = withDebateTurn(conservativeDebator, "Conservative", "risk_debate_state");
   const neutralTurn = withDebateTurn(neutralDebator, "Neutral", "risk_debate_state");
+
+  // Wrap managers so their decision is recorded in the debate state.
+  const researchManagerNode = withManagerJudge(
+    researchManager,
+    "research_allocation_plan",
+    "investment_debate_state",
+    "Research Manager",
+  );
+  const portfolioManagerNode = withManagerJudge(
+    portfolioManager,
+    "final_allocation_decision",
+    "risk_debate_state",
+    "Portfolio Manager",
+  );
 
   const memoryWriter = createMemoryWriterNode({
     ...(opts.persistMemory ? { persist: opts.persistMemory } : {}),
@@ -323,73 +388,95 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
   const graph = new StateGraph(SpineState)
     .addNode("market_flow", skipIfDeselected(marketFlow, "market_flow", selected))
     .addNode("market_flow_tools", mfTools)
+    .addNode("market_flow_clear", createMsgDeleteNode())
     .addNode("macro_regime", skipIfDeselected(macroRegime, "macro_regime", selected))
     .addNode("macro_regime_tools", macroTools)
+    .addNode("macro_regime_clear", createMsgDeleteNode())
     .addNode("meso_commodity", skipIfDeselected(mesoCommodity, "meso_commodity", selected))
     .addNode("meso_commodity_tools", mesoTools)
+    .addNode("meso_commodity_clear", createMsgDeleteNode())
     .addNode(
       "catalyst_sentiment",
       skipIfDeselected(catalystSentiment, "catalyst_sentiment", selected),
     )
+    .addNode("catalyst_sentiment_clear", createMsgDeleteNode())
     .addNode("holdings_industry", skipIfDeselected(holdingsIndustry, "holdings_industry", selected))
     .addNode("holdings_industry_tools", holdingsTools)
+    .addNode("holdings_industry_clear", createMsgDeleteNode())
     .addNode("top_holdings", skipIfDeselected(topHoldings, "top_holdings", selected))
     .addNode("top_holdings_tools", topTools)
+    .addNode("top_holdings_clear", createMsgDeleteNode())
     .addNode("bull_researcher", bullTurn)
     .addNode("bear_researcher", bearTurn)
-    .addNode("research_manager", researchManager)
+    .addNode("research_manager", researchManagerNode)
     .addNode("trader", trader)
     .addNode("aggressive_debator", aggressiveTurn)
     .addNode("conservative_debator", conservativeTurn)
     .addNode("neutral_debator", neutralTurn)
-    .addNode("portfolio_manager", portfolioManager)
+    .addNode("portfolio_manager", portfolioManagerNode)
     .addNode("memory_writer", memoryWriter)
 
-    // --- Analyst pipeline (each tool-using analyst gets a tool loop) ---
+    // --- Analyst pipeline (each analyst clears messages before the next) ---
     // Order mirrors Python ETFGraphSetup.DEFAULT_SELECTED_ANALYSTS:
     // market_flow → catalyst_sentiment → macro_regime → meso_commodity →
-    // holdings_industry → top_holdings.
+    // holdings_industry → top_holdings. After each analyst (and its tool loop),
+    // a Msg Clear node resets the message history so the next analyst starts
+    // clean (Python parity, prevents cross-analyst token bloat).
     .addEdge(START, "market_flow")
-    .addConditionalEdges("market_flow", toolLoopRouter("market_flow_tools", "catalyst_sentiment"), {
+    .addConditionalEdges("market_flow", toolLoopRouter("market_flow_tools", "market_flow_clear"), {
       market_flow_tools: "market_flow_tools",
-      catalyst_sentiment: "catalyst_sentiment",
+      market_flow_clear: "market_flow_clear",
     })
     .addEdge("market_flow_tools", "market_flow")
+    .addEdge("market_flow_clear", "catalyst_sentiment")
 
     // catalyst_sentiment pre-fetches its data deterministically (no tool loop).
-    .addEdge("catalyst_sentiment", "macro_regime")
+    .addEdge("catalyst_sentiment", "catalyst_sentiment_clear")
+    .addEdge("catalyst_sentiment_clear", "macro_regime")
 
-    .addConditionalEdges("macro_regime", toolLoopRouter("macro_regime_tools", "meso_commodity"), {
-      macro_regime_tools: "macro_regime_tools",
-      meso_commodity: "meso_commodity",
-    })
+    .addConditionalEdges(
+      "macro_regime",
+      toolLoopRouter("macro_regime_tools", "macro_regime_clear"),
+      {
+        macro_regime_tools: "macro_regime_tools",
+        macro_regime_clear: "macro_regime_clear",
+      },
+    )
     .addEdge("macro_regime_tools", "macro_regime")
+    .addEdge("macro_regime_clear", "meso_commodity")
 
     .addConditionalEdges(
       "meso_commodity",
-      toolLoopRouter("meso_commodity_tools", "holdings_industry"),
+      toolLoopRouter("meso_commodity_tools", "meso_commodity_clear"),
       {
         meso_commodity_tools: "meso_commodity_tools",
-        holdings_industry: "holdings_industry",
+        meso_commodity_clear: "meso_commodity_clear",
       },
     )
     .addEdge("meso_commodity_tools", "meso_commodity")
+    .addEdge("meso_commodity_clear", "holdings_industry")
 
     .addConditionalEdges(
       "holdings_industry",
-      toolLoopRouter("holdings_industry_tools", "top_holdings"),
+      toolLoopRouter("holdings_industry_tools", "holdings_industry_clear"),
       {
         holdings_industry_tools: "holdings_industry_tools",
-        top_holdings: "top_holdings",
+        holdings_industry_clear: "holdings_industry_clear",
       },
     )
     .addEdge("holdings_industry_tools", "holdings_industry")
+    .addEdge("holdings_industry_clear", "top_holdings")
 
-    .addConditionalEdges("top_holdings", toolLoopRouter("top_holdings_tools", "bull_researcher"), {
-      top_holdings_tools: "top_holdings_tools",
-      bull_researcher: "bull_researcher",
-    })
+    .addConditionalEdges(
+      "top_holdings",
+      toolLoopRouter("top_holdings_tools", "top_holdings_clear"),
+      {
+        top_holdings_tools: "top_holdings_tools",
+        top_holdings_clear: "top_holdings_clear",
+      },
+    )
     .addEdge("top_holdings_tools", "top_holdings")
+    .addEdge("top_holdings_clear", "bull_researcher")
 
     // --- Bull/Bear debate (loops until 2*maxDebateRounds turns) → manager ---
     .addConditionalEdges(

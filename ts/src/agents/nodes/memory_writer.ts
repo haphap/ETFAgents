@@ -27,12 +27,19 @@ export type PersistMemory = (payload: Record<string, unknown>) => Promise<Record
  */
 export function buildEffectiveMemoryConfig(
   config: Record<string, unknown>,
-  opts: { provider?: string; model?: string; debateRounds: number; riskRounds: number },
+  opts: {
+    provider?: string;
+    model?: string;
+    baseUrl?: string;
+    debateRounds: number;
+    riskRounds: number;
+  },
 ): Record<string, unknown> {
   return {
     ...config,
     ...(opts.provider ? { llm_provider: opts.provider } : {}),
     ...(opts.model ? { deep_think_llm: opts.model } : {}),
+    ...(opts.baseUrl ? { backend_url: opts.baseUrl } : {}),
     max_debate_rounds: opts.debateRounds,
     max_risk_discuss_rounds: opts.riskRounds,
   };

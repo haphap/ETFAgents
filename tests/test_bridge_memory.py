@@ -78,6 +78,26 @@ class MemoryAppendAnalysisConfigTests(unittest.TestCase):
                 memory_append_analysis({"state": _STATE, "selected_analysts": bad})
             self.assertEqual(cm.exception.code, INVALID_PARAMS)
 
+    def test_build_context_returns_per_role_bundle(self) -> None:
+        """build_context returns continuity/lesson/method dicts keyed by the run's roles."""
+        from etfagents.bridge.handlers.memory import memory_build_context
+
+        with tempfile.TemporaryDirectory() as tmp:
+            result = memory_build_context(
+                {
+                    "ticker": "510300.SH",
+                    "trade_date": "2026-05-29",
+                    "selected_analysts": ["market_flow"],
+                    "config": {"results_dir": tmp, "memory_mode": "full"},
+                }
+            )
+            for key in ("continuity_context", "lesson_context", "method_context"):
+                self.assertIn(key, result)
+                # Roles include the selected analyst plus the managers/trader.
+                self.assertIn("market_flow", result[key])
+                self.assertIn("portfolio_manager", result[key])
+            self.assertIn("past_context", result)
+
 
 if __name__ == "__main__":
     unittest.main()

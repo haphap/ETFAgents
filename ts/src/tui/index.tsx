@@ -1404,7 +1404,7 @@ async function runAnalysis(
     const { BridgeApi, BridgeClient, pickBridgeTools } = await import("../bridge/index.js");
     const { buildFullGraph } = await import("../graph/full_graph.js");
     const { buildEffectiveMemoryConfig } = await import("../agents/nodes/memory_writer.js");
-    const { ANALYST_TOOLS } = await import("../cli/commands/shared_tools.js");
+    const { ANALYST_TOOLS, fetchMemoryContext } = await import("../cli/commands/shared_tools.js");
     const { createLlmFromConfig } = await import("../llm/factory.js");
 
     dispatchIfCurrent({ type: "appendLog", msg: "── 连接 Bridge…" });
@@ -1424,6 +1424,13 @@ async function runAnalysis(
       });
 
       const llmHandle = createLlmFromConfig(config, llmOpts);
+      // Quick-tier LLM for analysts/researchers/risk debators. Reuse an explicit
+      // model override for both tiers (single-model setups like vLLM); otherwise
+      // the quick tier uses the config's quick_think_llm.
+      const quickOpts: LlmOptions = { tier: "quick" };
+      if (state.provider) quickOpts.provider = state.provider;
+      if (state.model) quickOpts.model = state.model;
+      const quickHandle = createLlmFromConfig(config, quickOpts);
 
       // Effective config for memory write-back: overlay the TUI's provider/
       // model/round overrides so the stored entry's config hash describes the
@@ -1462,8 +1469,11 @@ async function runAnalysis(
           : {}),
       };
 
+      const selectedAnalystList = ANALYST_IDS.filter((id) => state.selectedAnalysts[id] !== false);
+
       const graph = buildFullGraph({
         llm: llmHandle.llm,
+        quickLlm: quickHandle.llm,
         tools: {
           marketFlow: pick(ANALYST_TOOLS.marketFlow),
           macroRegime: pick(ANALYST_TOOLS.macroRegime),
@@ -1477,7 +1487,7 @@ async function runAnalysis(
         promptContext,
         maxDebateRounds: state.debateRounds,
         maxRiskRounds: state.riskRounds,
-        selectedAnalysts: ANALYST_IDS.filter((id) => state.selectedAnalysts[id] !== false),
+        selectedAnalysts: selectedAnalystList,
         // Forward the effective runtime config (with TUI provider/model/round
         // overrides) so memory write-back's config hash matches the actual run.
         memoryConfig: effectiveConfig,
@@ -1547,11 +1557,19 @@ async function runAnalysis(
 
         // Stream the graph so the dashboard updates per node instead of waiting
         // for the whole pipeline. Each chunk is { nodeName: stateUpdate }.
+        const memCtx = await fetchMemoryContext(
+          api,
+          ticker,
+          state.date,
+          effectiveConfig,
+          selectedAnalystList,
+        );
         const stream = await graph.stream(
           {
             messages: [new HumanMessage(ticker)],
             asset_of_interest: ticker,
             trade_date: state.date,
+            ...memCtx,
           },
           { recursionLimit: 100, signal } as { recursionLimit: number; signal: AbortSignal },
         );

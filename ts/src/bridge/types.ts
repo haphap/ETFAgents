@@ -244,4 +244,18 @@ export class BridgeApi {
       params,
     );
   }
+
+  memoryBuildContext(params: {
+    ticker: string;
+    trade_date: string;
+    selected_analysts?: readonly string[] | null;
+    config?: Record<string, unknown>;
+  }): Promise<{
+    continuity_context: Record<string, string>;
+    lesson_context: Record<string, string>;
+    method_context: Record<string, string>;
+    past_context: string;
+  }> {
+    return this.client.call("memory.build_context", params);
+  }
 }
