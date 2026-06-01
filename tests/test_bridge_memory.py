@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from etfagents.bridge.handlers.memory import memory_append_analysis
+from etfagents.bridge.handlers.memory import _DEFAULT_ANALYSTS, memory_append_analysis
 
 
 _STATE = {"asset_of_interest": "510300.SH", "trade_date": "2026-05-29"}
@@ -45,6 +45,29 @@ class MemoryAppendAnalysisConfigTests(unittest.TestCase):
             self.assertFalse(result["written"])
             self.assertEqual(result["entry"], {})
             self.assertFalse((Path(tmp) / "memory").exists())
+
+    def test_empty_selected_analysts_is_preserved_not_defaulted(self) -> None:
+        """An explicit empty selected_analysts must NOT be coerced to the full default.
+
+        The config hash is derived from selected_analysts, so coercing [] to the
+        full set would make the stored entry disagree with what the graph ran.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = {"results_dir": tmp, "memory_mode": "full"}
+            empty = memory_append_analysis(
+                {"state": _STATE, "selected_analysts": [], "config": cfg}
+            )
+            full = memory_append_analysis(
+                {
+                    "state": _STATE,
+                    "selected_analysts": list(_DEFAULT_ANALYSTS),
+                    "config": cfg,
+                }
+            )
+            self.assertTrue(empty["written"])
+            self.assertTrue(full["written"])
+            # Distinct selections must yield distinct config hashes.
+            self.assertNotEqual(empty["entry"]["config_hash"], full["entry"]["config_hash"])
 
 
 if __name__ == "__main__":

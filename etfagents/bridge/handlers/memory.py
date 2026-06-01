@@ -28,7 +28,12 @@ def memory_append_analysis(params: dict[str, Any]) -> dict[str, Any]:
     state = params.get("state")
     if not isinstance(state, dict):
         raise RpcError(INVALID_PARAMS, "'state' must be an object")
-    selected = params.get("selected_analysts") or list(_DEFAULT_ANALYSTS)
+    # Only default when the key is absent / null; an explicit empty list means
+    # "no analysts selected" and must be preserved so the stored entry's
+    # config hash matches what the graph actually ran.
+    selected = params.get("selected_analysts")
+    if selected is None:
+        selected = list(_DEFAULT_ANALYSTS)
 
     from etfagents.agents.utils.analysis_memory import (
         AnalysisMemoryStore,
