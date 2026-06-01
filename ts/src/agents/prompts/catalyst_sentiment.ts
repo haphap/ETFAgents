@@ -2,8 +2,9 @@
  * System message for ``create_social_media_analyst`` (catalyst & sentiment).
  * Keep Chinese text and numbering rules identical to the Python source.
  *
- * Tool-loop analyst: the model gathers ETF info, holdings, and news via its
- * bound tools before writing the report (matching the Python tool flow).
+ * Deterministic pre-fetch analyst (no LLM tool loop): the caller fetches ETF
+ * info, holdings, and ticker/holdings/global news up front and embeds them as
+ * data blocks, matching the Python flow.
  */
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
@@ -29,23 +30,34 @@ export const CATALYST_SENTIMENT_REPORT_SPEC: AnalystReportSpec = {
 };
 
 /**
- * System message for the catalyst_sentiment analyst, tool-loop variant.
- *
- * Mirrors the Python ``create_social_media_analyst`` tool flow: the model
- * gathers ETF info, holdings, and news via its bound tools (get_etf_info,
- * get_etf_holdings, get_news, get_global_news) before writing the report,
- * rather than receiving pre-fetched data blocks. The analytical instructions
- * and section layout are unchanged.
+ * Build the catalyst_sentiment analyst system message from pre-fetched data
+ * blocks. Mirrors the Python ``create_social_media_analyst`` deterministic
+ * pre-fetch flow (ETF info/holdings + ticker/holdings/global news, no LLM
+ * tool loop) — the caller supplies the data via the ``data`` parameter.
  */
-export function buildCatalystSentimentSystemMessage(ctx: PromptContext): string {
+export interface CatalystSentimentData {
+  etfInfo: string;
+  etfHoldings: string;
+  tickerNews: string;
+  holdingsNews: string;
+  globalNews: string;
+}
+
+export function buildCatalystSentimentSystemMessage(
+  ctx: PromptContext,
+  data: CatalystSentimentData,
+): string {
   return (
     "你是一名ETF催化剂与情绪分析师。你的工作不限于ETF产品本身：" +
     "必须分析公众讨论、近期新闻和宏观事件如何通过基准暴露、主导行业和高权重持仓影响ETF价格支撑或拖累。\n\n" +
-    "先调用 get_etf_info 和 get_etf_holdings 识别基准、主导行业和最高权重持仓；" +
-    "再调用 get_news（针对该ETF及其重仓股，过去7天）和 get_global_news 获取相关新闻与宏观情绪。" +
-    "完成取数后再撰写分析，不要复述取数、整理或下一步过程。\n\n" +
+    "以下材料已提供，直接据此分析；不要复述取数、整理或下一步过程。\n\n" +
+    `### ETF基本信息\n<etf_info>\n${data.etfInfo}\n</etf_info>\n\n` +
+    `### ETF持仓构成\n<etf_holdings>\n${data.etfHoldings}\n</etf_holdings>\n\n` +
+    `### ETF相关新闻（过去7天）\n<ticker_news>\n${data.tickerNews}\n</ticker_news>\n\n` +
+    `### 重仓股相关新闻（过去7天）\n<holdings_news>\n${data.holdingsNews}\n</holdings_news>\n\n` +
+    `### 宏观新闻与市场情绪\n<global_news>\n${data.globalNews}\n</global_news>\n\n` +
     "分析要求：\n\n" +
-    "基于已获取的数据，完成以下分析：\n\n" +
+    "基于上述已提供的数据，完成以下分析：\n\n" +
     "1. 从ETF持仓构成中识别基准、主导行业和最高权重持仓。\n" +
     "2. 分析新闻和情绪数据如何影响这些持仓和行业。\n" +
     "3. 判断每个事件可能支撑、压制还是拖累ETF价格，解释传导路径：新闻/情绪/宏观事件 → 持仓/行业影响 → ETF价格含义。\n" +

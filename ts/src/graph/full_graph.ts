@@ -1,29 +1,30 @@
 /**
  * Full analysis graph: 6 analysts → bull/bear debate → research manager →
- * trader → risk debate → portfolio manager.
+ * trader → risk debate → portfolio manager → memory writer.
  *
- * Sequential single-pass pipeline (parallel analyst fan-out deferred to a
- * future phase when the Ink TUI needs per-analyst streaming progress):
+ * Analyst order mirrors Python ETFGraphSetup.DEFAULT_SELECTED_ANALYSTS:
  *
- *   START → market_flow → macro_regime → meso_commodity →
- *           catalyst_sentiment → holdings_industry → top_holdings →
- *           bull_researcher → bear_researcher → research_manager →
+ *   START → market_flow → catalyst_sentiment → macro_regime → meso_commodity →
+ *           holdings_industry → top_holdings →
+ *           bull_researcher ⇄ bear_researcher → research_manager →
  *           trader →
  *           aggressive_debator → conservative_debator → neutral_debator →
- *           portfolio_manager → END
+ *           portfolio_manager → memory_writer → END
  *
- * Every analyst that is given tools runs its own tool loop (analyst →
- * ToolNode → analyst) via the shared ``routeAnalystTools`` router. The
- * researchers, debators, research manager and portfolio manager read the
- * accumulated message history / state keys and produce their reports in a
- * single pass — matching the contracts of their node factories, which write
- * flat string state keys (research_allocation_plan, final_allocation_decision,
- * …) rather than an accumulating debate-state object.
+ * Tool-using analysts run their own tool loop (analyst → ToolNode → analyst)
+ * via ``routeAnalystTools``. catalyst_sentiment is a deterministic pre-fetch
+ * analyst (no tool loop), matching Python's create_social_media_analyst.
  *
- * Multi-round debate looping (``routeDebate`` / ``routeRiskDebate`` honouring
- * ``max_debate_rounds`` > 1) is a follow-up: it requires the debator nodes to
- * accumulate a debate-state structure with round counts and a latest-speaker
- * marker, which the current single-pass factory nodes do not emit.
+ * The bull/bear and aggressive/conservative/neutral debates loop via
+ * ``routeDebate`` / ``routeRiskDebate`` honouring ``maxDebateRounds`` /
+ * ``maxRiskRounds`` (default 1 = single pass). Each debator turn is wrapped by
+ * ``withDebateTurn`` to advance the investment_debate_state / risk_debate_state
+ * accounting (count, latestSpeaker, per-role histories, current responses)
+ * that the routers and downstream nodes read.
+ *
+ * ``selectedAnalysts`` gates which analysts execute (deselected ones are
+ * skipped). The memory_writer node persists an analysis entry via the optional
+ * ``persistMemory`` callback before END.
  */
 
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
@@ -289,7 +290,6 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
 
   // --- Tool nodes (one per analyst that calls tools) ---
   const mfTools = new ToolNode(opts.tools.marketFlow as StructuredToolInterface[]);
-  const catalystTools = new ToolNode(opts.tools.catalystSentiment as StructuredToolInterface[]);
   const macroTools = new ToolNode(opts.tools.macroRegime as StructuredToolInterface[]);
   const mesoTools = new ToolNode(opts.tools.mesoCommodity as StructuredToolInterface[]);
   const holdingsTools = new ToolNode(opts.tools.holdingsIndustry as StructuredToolInterface[]);
@@ -307,7 +307,6 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
       "catalyst_sentiment",
       skipIfDeselected(catalystSentiment, "catalyst_sentiment", selected),
     )
-    .addNode("catalyst_sentiment_tools", catalystTools)
     .addNode("holdings_industry", skipIfDeselected(holdingsIndustry, "holdings_industry", selected))
     .addNode("holdings_industry_tools", holdingsTools)
     .addNode("top_holdings", skipIfDeselected(topHoldings, "top_holdings", selected))
@@ -333,16 +332,8 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
     })
     .addEdge("market_flow_tools", "market_flow")
 
-    // catalyst_sentiment runs its own tool loop, then continues to macro_regime.
-    .addConditionalEdges(
-      "catalyst_sentiment",
-      toolLoopRouter("catalyst_sentiment_tools", "macro_regime"),
-      {
-        catalyst_sentiment_tools: "catalyst_sentiment_tools",
-        macro_regime: "macro_regime",
-      },
-    )
-    .addEdge("catalyst_sentiment_tools", "catalyst_sentiment")
+    // catalyst_sentiment pre-fetches its data deterministically (no tool loop).
+    .addEdge("catalyst_sentiment", "macro_regime")
 
     .addConditionalEdges("macro_regime", toolLoopRouter("macro_regime_tools", "meso_commodity"), {
       macro_regime_tools: "macro_regime_tools",

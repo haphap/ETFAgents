@@ -250,6 +250,24 @@ describe("P1 analysis config", () => {
     expect(selectedAnalystIds(s.selectedAnalysts)).not.toContain("top_holdings");
   });
 
+  it("refuses to toggle off the last remaining analyst", () => {
+    // Turn every analyst off except market_flow.
+    let s = initState();
+    for (const id of [
+      "catalyst_sentiment",
+      "macro_regime",
+      "meso_commodity",
+      "holdings_industry",
+      "top_holdings",
+    ]) {
+      s = reducer(s, { type: "toggleAnalyst", id });
+    }
+    expect(selectedAnalystIds(s.selectedAnalysts)).toEqual(["market_flow"]);
+    // The last one cannot be turned off.
+    const blocked = reducer(s, { type: "toggleAnalyst", id: "market_flow" });
+    expect(selectedAnalystIds(blocked.selectedAnalysts)).toEqual(["market_flow"]);
+  });
+
   it("hides a deselected analyst section from the dashboard tab", () => {
     let s = reducer(initState(), { type: "toggleAnalyst", id: "macro_regime" });
     s = reducer(s, { type: "startAnalysis" });

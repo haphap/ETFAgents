@@ -1182,14 +1182,22 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, vllmModels: [] };
 
     // --- P1 config ---
-    case "toggleAnalyst":
+    case "toggleAnalyst": {
+      const currentlyOn = state.selectedAnalysts[action.id] !== false;
+      // Refuse to turn off the last enabled analyst — the graph (and Python)
+      // require at least one analyst; a 0-analyst run yields a decision with no
+      // analyst reports. Keeping >=1 selected avoids that pseudo-result.
+      if (currentlyOn && selectedAnalystIds(state.selectedAnalysts).length <= 1) {
+        return state;
+      }
       return {
         ...state,
         selectedAnalysts: {
           ...state.selectedAnalysts,
-          [action.id]: !state.selectedAnalysts[action.id],
+          [action.id]: !currentlyOn,
         },
       };
+    }
     case "moveAnalystCursor": {
       const n = ANALYST_IDS.length;
       return { ...state, analystCursor: (state.analystCursor + action.delta + n) % n };
