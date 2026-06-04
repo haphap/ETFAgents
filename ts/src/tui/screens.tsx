@@ -733,6 +733,8 @@ function TabButton({
       flexBasis={0}
       marginRight={marginRight}
       borderStyle={active ? "round" : "single"}
+      borderColor={active ? "cyan" : undefined}
+      borderDimColor={!active}
       paddingX={1}
       justifyContent="center"
       overflow="hidden"
