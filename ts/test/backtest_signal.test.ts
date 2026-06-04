@@ -104,6 +104,33 @@ describe("buildTraderBacktestSignal", () => {
     expect(signal.position_sizing_inputs?.flow_regime).toBe("DISTRIBUTION");
   });
 
+  it("does not scale above the trader target under favorable regimes", () => {
+    const signal = buildTraderBacktestSignal(
+      "510300.SH",
+      "2024-06-01",
+      "**输出Schema**\nagent: trader\nrisk_control_state: NORMAL\nconfidence: 0.90",
+      makePlan({ target_weight_pct: 20, confidence: 0.9 }),
+      {
+        maxDrawdownBudget: 0.25,
+        agentSignals: {
+          market_flow: {
+            source: "market_flow",
+            agent: "market_flow",
+            fields: {
+              agent: "market_flow",
+              volatility_regime: "CONTRACTING",
+              flow_regime: "ACCUMULATION",
+            },
+            raw: "",
+          },
+        },
+      },
+    );
+    expect(signal.raw_target_weight_pct).toBe(20);
+    expect(signal.target_weight_pct).toBe(20);
+    expect(signal.position_sizing_multiplier).toBe(1);
+  });
+
   it("extracts target weight from structured target_weight_band", () => {
     const signal = buildTraderBacktestSignal(
       "510300.SH",

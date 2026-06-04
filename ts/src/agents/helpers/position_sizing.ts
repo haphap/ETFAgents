@@ -102,7 +102,6 @@ function volatilityMultiplier(volatilityRegime: string | undefined, reasons: str
     reasons.push("波动状态 EXPANDING，仓位降至80%");
     return 0.8;
   }
-  if (volatilityRegime === "CONTRACTING") return 1.05;
   return 1;
 }
 
@@ -115,10 +114,12 @@ function flowMultiplier(flowRegime: string | undefined, reasons: string[]): numb
     reasons.push("资金流 CROWDED，仓位降至85%");
     return 0.85;
   }
-  if (flowRegime === "ACCUMULATION") return 1.05;
   return 1;
 }
 
+// This is an asset/regime drawdown proxy, not a portfolio-contribution estimate.
+// Target weight is applied later via the multiplier; supportive regimes may
+// reduce the proxy, but they never raise the trader's stated target size.
 function estimateDrawdown(args: {
   volatilityRegime?: string;
   flowRegime?: string;
