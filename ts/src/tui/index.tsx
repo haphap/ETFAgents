@@ -200,6 +200,30 @@ function App() {
     }
 
     if (key.escape) {
+      if (s.phase === "home") {
+        quitApp();
+        return;
+      }
+      if (s.phase === "config") {
+        d(s.selectOpen !== null ? { type: "closeSelect" } : { type: "backToTicker" });
+        return;
+      }
+      if (s.phase === "dashboard") {
+        abortRef.current?.abort();
+        abortRef.current = null;
+        runSeqRef.current += 1;
+        d({ type: "goPhase", phase: "home" });
+        return;
+      }
+      if (
+        s.phase === "ticker" ||
+        s.phase === "library" ||
+        s.phase === "backtest" ||
+        s.phase === "paper"
+      ) {
+        d({ type: "goPhase", phase: "home" });
+        return;
+      }
       quitApp();
       return;
     }
