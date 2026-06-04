@@ -139,8 +139,8 @@ const AGENT_OUTPUT_SCHEMAS: Record<AgentOutputSchemaId, ReadonlyArray<string>> =
     "allocation_action: BUY | OVERWEIGHT | HOLD | UNDERWEIGHT | SELL",
     'target_weight_band: "<low-high pct or UNKNOWN>"',
     "execution_timing: SAME_CLOSE | NEXT_OPEN | NEXT_CLOSE | WAIT_FOR_TRIGGER",
-    "add_trigger_state: READY | WAIT | BLOCKED",
-    "risk_control_state: NORMAL | ELEVATED | BREACHED",
+    "execution_trigger_state: READY | WAIT | BLOCKED",
+    "risk_control_state: NORMAL | ELEVATED",
     'key_drivers: ["<3-5 条关键证据>"]',
     "confidence: <0-1>",
   ],
@@ -218,19 +218,28 @@ export function getAgentOutputSchemaFieldNames(schemaId: AgentOutputSchemaId): s
 export function getAgentOutputSchemaInstruction(
   schemaId: AgentOutputSchemaId,
   ctx: PromptContext,
+  placement: "afterDecisionSummary" | "afterExecutionBias" = "afterDecisionSummary",
 ): string {
   const lines = AGENT_OUTPUT_SCHEMAS[schemaId].join("\n");
   if (isChinese(ctx.language)) {
+    const anchor =
+      placement === "afterExecutionBias"
+        ? "在执行倾向行之后附加 **输出Schema**"
+        : "在 **决策信号摘要** 之后附加 **输出Schema**";
     return (
       "\n## 输出Schema要求\n" +
-      "在 **决策信号摘要** 之后附加 **输出Schema**，参考 MOSAIC-Agents 风格，用普通文本逐行填写以下字段；不要使用代码块、JSON对象或额外字段。" +
+      `${anchor}，参考 MOSAIC-Agents 风格，用普通文本逐行填写以下字段；不要使用代码块、JSON对象或额外字段。` +
       "枚举字段必须从给定枚举中选择；key_drivers 保持3-5条；confidence 使用0到1之间的小数。\n" +
       `${lines}\n`
     );
   }
+  const anchor =
+    placement === "afterExecutionBias"
+      ? "After the execution-bias line, append **Output Schema**"
+      : "After **Decision Signal Summary**, append **Output Schema**";
   return (
     "\n## Output Schema Requirement\n" +
-    "After **Decision Signal Summary**, append **Output Schema** in MOSAIC-Agents style as plain text field lines. Do not use code fences, JSON objects, or extra fields. " +
+    `${anchor} in MOSAIC-Agents style as plain text field lines. Do not use code fences, JSON objects, or extra fields. ` +
     "Choose enum values from the allowed options; keep key_drivers to 3-5 items; use a 0-1 decimal for confidence.\n" +
     `${lines}\n`
   );

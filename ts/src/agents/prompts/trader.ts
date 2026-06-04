@@ -16,7 +16,7 @@ import {
 
 export const STRUCTURED_FIELD_POPULATION_INSTRUCTION =
   "In addition to the prose sections, populate the structured fields " +
-  "target_weight_pct, target_weight_band, execution_timing, add_triggers, " +
+  "key_drivers, confidence, target_weight_pct, target_weight_band, execution_timing, add_triggers, " +
   "reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls " +
   "whenever the evidence supports them; use null or empty lists only when " +
   "the reports truly do not justify reliable values.";
@@ -87,7 +87,7 @@ export function buildTraderSystemMessage(ctx: PromptContext): string {
     `${STRUCTURED_FIELD_VISIBILITY_INSTRUCTION} ` +
     `${traderDetailInstruction(ctx)} ` +
     `${getLocalizedExecutionBiasInstruction(ctx)}` +
-    getAgentOutputSchemaInstruction("trader", ctx) +
+    getAgentOutputSchemaInstruction("trader", ctx, "afterExecutionBias") +
     getLanguageInstruction(ctx)
   );
 }

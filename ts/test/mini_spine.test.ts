@@ -81,6 +81,7 @@ class FakeChatModel {
       execution_plan: "目标仓位 30%，回踩 50 日均线加仓",
       risk_management: "跌破 2.05 元减仓",
       rating: "Buy",
+      key_drivers: ["趋势改善", "量能确认", "风险可控"],
       add_triggers: [],
       reduce_triggers: [],
       exit_triggers: [],

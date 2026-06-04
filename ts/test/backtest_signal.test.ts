@@ -41,6 +41,28 @@ describe("buildTraderBacktestSignal", () => {
     expect(signal.rating).toBe("BUY");
   });
 
+  it("uses parsed trader output schema when structured plan is unavailable", () => {
+    const rendered =
+      "一、配置逻辑\n结构转弱。\n\n" +
+      "四、执行倾向\n**减持**\n\n" +
+      "**输出Schema**\n" +
+      "agent: trader\n" +
+      "allocation_action: UNDERWEIGHT\n" +
+      'target_weight_band: "5-10%"\n' +
+      "execution_timing: NEXT_CLOSE\n" +
+      "execution_trigger_state: READY\n" +
+      "risk_control_state: ELEVATED\n" +
+      'key_drivers: ["资金流转弱", "支撑破位", "风险预算收紧"]\n' +
+      "confidence: 0.66";
+    const signal = buildTraderBacktestSignal("510300.SH", "2024-06-01", rendered, null);
+    expect(signal.rating).toBe("UNDERWEIGHT");
+    expect(signal.target_weight_pct).toBe(7.5);
+    expect(signal.target_weight_min_pct).toBe(5);
+    expect(signal.target_weight_max_pct).toBe(10);
+    expect(signal.weight_source).toBe("schema_field");
+    expect(signal.execution_delay).toBe("next_close");
+  });
+
   it("extracts target weight from structured target_weight_pct", () => {
     const signal = buildTraderBacktestSignal(
       "510300.SH",

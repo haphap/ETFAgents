@@ -73,7 +73,7 @@ const TRADER_SCHEMA_FIELDS = [
   "allocation_action",
   "target_weight_band",
   "execution_timing",
-  "add_trigger_state",
+  "execution_trigger_state",
   "risk_control_state",
   "key_drivers",
   "confidence",
@@ -101,8 +101,9 @@ function schemaDrivers(
   text: string,
   language: string,
 ): string[] {
+  const explicitDrivers = (plan?.key_drivers ?? []).map((driver) => driver.trim()).filter(Boolean);
   const candidates = plan
-    ? [plan.thesis, plan.execution_plan, plan.risk_management]
+    ? [...explicitDrivers, plan.thesis, plan.execution_plan, plan.risk_management]
     : text.split(/\n{2,}/).slice(0, 5);
   const drivers: string[] = [];
   const seen = new Set<string>();
@@ -147,6 +148,9 @@ function targetWeightBand(plan: TraderProposal | null | undefined): string {
 
 function schemaConfidence(plan: TraderProposal | null | undefined): string {
   if (!plan) return "0.50";
+  if (typeof plan.confidence === "number" && Number.isFinite(plan.confidence)) {
+    return Math.min(Math.max(plan.confidence, 0), 1).toFixed(2);
+  }
   let score = 0.6;
   if (typeof plan.target_weight_pct === "number" || plan.target_weight_band) score += 0.08;
   if (plan.execution_timing) score += 0.06;
@@ -164,6 +168,21 @@ function schemaRiskControlState(plan: TraderProposal | null | undefined): string
     return "ELEVATED";
   }
   return "NORMAL";
+}
+
+function schemaExecutionTriggerState(plan: TraderProposal | null | undefined): string {
+  if (!plan) return "WAIT";
+  if (plan.rating === "Buy" || plan.rating === "Overweight") {
+    if (plan.add_triggers.length > 0) return "READY";
+    return plan.risk_controls.some((rule) => rule.action === "cap" || rule.action === "exit")
+      ? "BLOCKED"
+      : "WAIT";
+  }
+  if (plan.rating === "Sell") return plan.exit_triggers.length > 0 ? "READY" : "WAIT";
+  if (plan.rating === "Underweight") {
+    return plan.reduce_triggers.length + plan.exit_triggers.length > 0 ? "READY" : "WAIT";
+  }
+  return plan.rebalance_triggers.length > 0 ? "READY" : "WAIT";
 }
 
 function hasSchemaField(text: string, field: string): boolean {
@@ -194,14 +213,13 @@ export function appendTraderOutputSchema(
   const timing = plan?.execution_timing
     ? EXECUTION_TIMING_SCHEMA_VALUE[plan.execution_timing]
     : "WAIT_FOR_TRIGGER";
-  const addTriggerState = plan?.add_triggers.length ? "READY" : "WAIT";
   const block =
     `${heading}\n` +
     "agent: trader\n" +
     `allocation_action: ${allocationAction}\n` +
     `target_weight_band: "${targetWeightBand(plan)}"\n` +
     `execution_timing: ${timing}\n` +
-    `add_trigger_state: ${addTriggerState}\n` +
+    `execution_trigger_state: ${schemaExecutionTriggerState(plan)}\n` +
     `risk_control_state: ${schemaRiskControlState(plan)}\n` +
     `key_drivers: ${JSON.stringify(schemaDrivers(plan, text, language))}\n` +
     `confidence: ${schemaConfidence(plan)}`;

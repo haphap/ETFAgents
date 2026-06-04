@@ -31,6 +31,19 @@ export const TraderProposalSchema = z.object({
       "Risk controls, rebalance or invalidation signals, monitoring thresholds, and the actions to take when those thresholds are breached.",
     ),
   rating: PortfolioRatingSchema.describe("Trader recommendation for ETF exposure."),
+  key_drivers: z
+    .array(z.string())
+    .default([])
+    .describe(
+      "Three to five concise evidence points that directly justify the ETF allocation action.",
+    ),
+  confidence: z
+    .number()
+    .min(0)
+    .max(1)
+    .nullable()
+    .optional()
+    .describe("Trader confidence in the allocation action as a 0-1 decimal."),
   target_weight_pct: z
     .number()
     .nullable()

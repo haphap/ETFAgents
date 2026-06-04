@@ -12,6 +12,7 @@
  */
 
 import type { TraderProposal } from "../schemas/trader_proposal.js";
+import { type AgentOutputSignal, parseAgentOutputSchema } from "./output_schema.js";
 
 // ===========================================================================
 // Types
@@ -188,8 +189,11 @@ export function buildTraderBacktestSignal(
   renderedText: string,
   structuredPlan: TraderProposal | null = null,
 ): BacktestSignal {
+  const schemaSignal = structuredPlan ? null : parseAgentOutputSchema(renderedText, "trader");
   const rating = normalizeRating(
-    (structuredPlan?.rating as string | undefined) ?? parseRating(renderedText),
+    (structuredPlan?.rating as string | undefined) ??
+      schemaFieldString(schemaSignal, "allocation_action") ??
+      parseRating(renderedText),
   );
   const actionText =
     normalizeText(structuredPlan?.execution_plan ?? "") ||
@@ -207,6 +211,7 @@ export function buildTraderBacktestSignal(
     primaryText: actionText,
     secondaryText: riskText,
     structuredPlan,
+    schemaSignal,
   });
 }
 
@@ -223,6 +228,7 @@ interface BuildSignalOptions {
   primaryText: string;
   secondaryText: string;
   structuredPlan: TraderProposal | null;
+  schemaSignal: AgentOutputSignal | null;
 }
 
 function buildSignal(opts: BuildSignalOptions): BacktestSignal {
@@ -235,14 +241,20 @@ function buildSignal(opts: BuildSignalOptions): BacktestSignal {
     primaryText,
     secondaryText,
     structuredPlan,
+    schemaSignal,
   } = opts;
 
-  // Target weight: structured → prose → rating defaults
+  // Target weight: structured plan → parsed Output Schema → prose → rating defaults
   let targetRange = extractStructuredTargetWeight(structuredPlan);
   let weightSource: string;
   if (targetRange === null) {
-    targetRange = extractTargetWeight(primaryText, secondaryText);
-    weightSource = targetRange ? targetRange[1] : "unknown";
+    targetRange = extractSchemaTargetWeight(schemaSignal);
+    if (targetRange === null) {
+      targetRange = extractTargetWeight(primaryText, secondaryText);
+      weightSource = targetRange ? targetRange[1] : "unknown";
+    } else {
+      weightSource = targetRange[1];
+    }
   } else {
     weightSource = targetRange[1];
   }
@@ -278,7 +290,7 @@ function buildSignal(opts: BuildSignalOptions): BacktestSignal {
     target_weight_min_pct: targetWeightMinPct,
     target_weight_max_pct: targetWeightMaxPct,
     weight_source: weightSource,
-    execution_delay: extractExecutionTiming(structuredPlan),
+    execution_delay: extractExecutionTiming(structuredPlan, schemaSignal),
     starter_size_text: extractSentenceWithHints(primaryText, INITIAL_HINTS),
     add_triggers: structuredTriggers.add_triggers,
     reduce_triggers: structuredTriggers.reduce_triggers,
@@ -314,6 +326,29 @@ function extractStructuredTargetWeight(
     if (low !== null && high !== null) {
       return [[Math.min(low, high), Math.max(low, high)], "structured_field"];
     }
+  }
+  return null;
+}
+
+function extractSchemaTargetWeight(
+  signal: AgentOutputSignal | null,
+): [[number, number], string] | null {
+  const raw = signal?.fields.target_weight_band;
+  if (raw === undefined || Array.isArray(raw)) return null;
+  if (typeof raw === "number") return [[raw, raw], "schema_field"];
+  const text = raw.trim();
+  if (!text || /^unknown$/i.test(text)) return null;
+  const rangeMatch =
+    /(\d+(?:\.\d+)?)\s*(?:%|％)?\s*(?:-|–|—|~|～|至|到)\s*(\d+(?:\.\d+)?)\s*(?:%|％)?/.exec(text);
+  if (rangeMatch) {
+    const low = Number.parseFloat(rangeMatch[1] ?? "0");
+    const high = Number.parseFloat(rangeMatch[2] ?? "0");
+    return [[Math.min(low, high), Math.max(low, high)], "schema_field"];
+  }
+  const singleMatch = /(\d+(?:\.\d+)?)\s*(?:%|％)?/.exec(text);
+  if (singleMatch) {
+    const value = Number.parseFloat(singleMatch[1] ?? "0");
+    return [[value, value], "schema_field"];
   }
   return null;
 }
@@ -446,10 +481,16 @@ function coerceThreshold(value: unknown): number | [number, number] | null {
   return coercePct(value);
 }
 
-function extractExecutionTiming(plan: TraderProposal | null): string {
-  const raw = plan?.execution_timing ?? null;
+function extractExecutionTiming(
+  plan: TraderProposal | null,
+  signal: AgentOutputSignal | null = null,
+): string {
+  const raw = plan?.execution_timing ?? schemaFieldString(signal, "execution_timing") ?? null;
   if (raw === null || raw === undefined) return "next_open";
   const normalized = String(raw).trim().toLowerCase();
+  if (normalized === "same_close") return "same_close";
+  if (normalized === "next_open") return "next_open";
+  if (normalized === "next_close") return "next_close";
   return ["same_close", "next_open", "next_close"].includes(normalized) ? normalized : "next_open";
 }
 
@@ -549,6 +590,11 @@ function normalizeRating(rating: unknown): string {
     return parseRating(String((rating as Record<string, unknown>).value ?? "HOLD"));
   }
   return parseRating(String(rating ?? "HOLD"));
+}
+
+function schemaFieldString(signal: AgentOutputSignal | null, field: string): string | null {
+  const value = signal?.fields[field];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 // ===========================================================================
