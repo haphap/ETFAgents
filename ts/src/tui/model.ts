@@ -4,6 +4,21 @@
 
 export const HOME_TITLE = "ETFAgents";
 export const HOME_SUBTITLE = "TypeScript terminal workspace";
+export const HOME_BANNER_LINES = [
+  "███████╗████████╗███████╗",
+  "██╔════╝╚══██╔══╝██╔════╝",
+  "█████╗     ██║   █████╗",
+  "██╔══╝     ██║   ██╔══╝",
+  "███████╗   ██║   ██║",
+  "╚══════╝   ╚═╝   ╚═╝",
+  " █████╗  ██████╗ ███████╗███╗   ██╗████████╗███████╗",
+  "██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██╔════╝",
+  "███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ███████╗",
+  "██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ╚════██║",
+  "██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ███████║",
+  "╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚══════╝",
+] as const;
+export const HOME_BANNER_FOOTER = "Multi-agent ETF research terminal";
 
 export const HOME_OPTIONS = [
   { key: "ticker", label: "Research", description: "创建 ETF 研究任务" },

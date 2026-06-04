@@ -14,9 +14,10 @@ import {
   DEFAULT_SECTIONS,
   DEPTH_LABELS,
   DEPTH_OPTIONS,
+  HOME_BANNER_FOOTER,
+  HOME_BANNER_LINES,
   HOME_OPTIONS,
   HOME_SUBTITLE,
-  HOME_TITLE,
   MODELS_BY_PROVIDER,
   modelHasOptions,
   PROVIDERS,
@@ -36,13 +37,8 @@ import {
 export function HomeScreen({ state }: { state: AppState }) {
   return (
     <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
-      <Box flexDirection="column" width={64}>
-        <Box flexDirection="column" marginBottom={2}>
-          <Text bold color="cyan">
-            {HOME_TITLE}
-          </Text>
-          <Text dimColor>{HOME_SUBTITLE}</Text>
-        </Box>
+      <Box flexDirection="column" width={78}>
+        <HomeBanner />
         <Box flexDirection="column">
           {HOME_OPTIONS.map((item, i) => {
             const active = i === state.homeIdx;
@@ -61,12 +57,44 @@ export function HomeScreen({ state }: { state: AppState }) {
             );
           })}
         </Box>
-        <Box marginTop={2} justifyContent="space-between">
-          <Text dimColor>↑↓ move</Text>
-          <Text dimColor>Enter open</Text>
-          <Text dimColor>? help</Text>
-          <Text dimColor>Esc quit</Text>
+        <Box marginTop={2} justifyContent="center">
+          <Box marginX={2}>
+            <Text dimColor>↑↓ move</Text>
+          </Box>
+          <Box marginX={2}>
+            <Text dimColor>Enter open</Text>
+          </Box>
+          <Box marginX={2}>
+            <Text dimColor>? help</Text>
+          </Box>
+          <Box marginX={2}>
+            <Text dimColor>Esc quit</Text>
+          </Box>
         </Box>
+      </Box>
+    </Box>
+  );
+}
+
+function HomeBanner() {
+  return (
+    <Box
+      flexDirection="column"
+      alignItems="center"
+      borderStyle="single"
+      borderColor="cyan"
+      paddingX={2}
+      paddingY={1}
+      marginBottom={2}
+    >
+      {HOME_BANNER_LINES.map((line, i) => (
+        <Text key={line} bold color={i < 6 ? "cyan" : "green"}>
+          {line}
+        </Text>
+      ))}
+      <Box marginTop={1} flexDirection="column" alignItems="center">
+        <Text bold>{HOME_BANNER_FOOTER}</Text>
+        <Text dimColor>{HOME_SUBTITLE}</Text>
       </Box>
     </Box>
   );
