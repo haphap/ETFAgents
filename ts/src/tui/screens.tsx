@@ -39,18 +39,18 @@ export function HomeScreen({ state }: { state: AppState }) {
     <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
       <Box flexDirection="column" width={78}>
         <HomeBanner />
-        <Box flexDirection="column">
+        <Box flexDirection="column" alignItems="center">
           {HOME_OPTIONS.map((item, i) => {
             const active = i === state.homeIdx;
             const shortcut = homeShortcut(item.key);
             return (
-              <Box key={item.key}>
+              <Box key={item.key} flexDirection="column" alignItems="center" width={36}>
                 <Text
                   key={item.key}
                   bold={active}
                   {...(active ? { color: "cyan" as const } : { dimColor: true })}
                 >
-                  {active ? ">" : " "} [{shortcut}] {item.label.padEnd(14)}
+                  {active ? ">" : " "} [{shortcut}] {item.label}
                 </Text>
                 <Text dimColor>{item.description}</Text>
               </Box>
