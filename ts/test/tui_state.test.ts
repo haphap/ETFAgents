@@ -257,6 +257,21 @@ describe("P0 report reader", () => {
     expect(view.lines[4]?.kind).toBe("subheading");
   });
 
+  it("treats standalone bold Chinese numbered lines as headings", () => {
+    const view = reportDisplayViewport(
+      "**一、宏观暴露适配：从“金融溢价”向“真实需求”的切换**\n正文段落。",
+      0,
+      10,
+      80,
+    );
+
+    expect(view.lines[0]).toMatchObject({
+      kind: "subheading",
+      text: "一、宏观暴露适配：从“金融溢价”向“真实需求”的切换",
+    });
+    expect(view.lines[1]?.text).toBe("正文段落。");
+  });
+
   it("wraps list items with continuation indentation", () => {
     const view = reportDisplayViewport(
       "- 资金流连续改善但仍需要等待成交量确认后再提高仓位",

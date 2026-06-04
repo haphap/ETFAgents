@@ -586,6 +586,18 @@ function stripInlineMarkdown(text: string): string {
     .trimEnd();
 }
 
+function emphasizedHeadingText(text: string): string | null {
+  const emphasized = text.match(/^(?:\*\*|__)(.+?)(?:\*\*|__)$/);
+  if (!emphasized) return null;
+  const inner = stripInlineMarkdown(emphasized[1] ?? "").trim();
+  if (
+    /^([一二三四五六七八九十]+[、.)]|[（(][一二三四五六七八九十]+[）)]|\d+[.)、])\s*\S+/.test(inner)
+  ) {
+    return inner;
+  }
+  return null;
+}
+
 function classifyReportLine(line: string): {
   text: string;
   kind: ReportDisplayLineKind;
@@ -600,6 +612,11 @@ function classifyReportLine(line: string): {
     const level = heading[1]?.length ?? 3;
     const text = stripInlineMarkdown(heading[2] ?? "");
     return { text, kind: level <= 2 ? "heading" : "subheading", level };
+  }
+
+  const emphasizedHeading = emphasizedHeadingText(trimmed);
+  if (emphasizedHeading) {
+    return { text: emphasizedHeading, kind: "subheading", level: 4 };
   }
 
   if (
