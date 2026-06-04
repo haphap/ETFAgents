@@ -516,16 +516,16 @@ export function Dashboard({
         {/* Right pane */}
         <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
           {/* Team tabs (top) */}
-          <Box marginBottom={1}>
-            {TEAM_TABS.map((tab) => (
-              <Box key={tab.key} marginRight={1}>
-                <TabButton
-                  label={tab.label}
-                  done={countDone(tab.key)}
-                  total={total(tab.key)}
-                  active={state.activeTab === tab.key}
-                />
-              </Box>
+          <Box marginBottom={1} flexDirection="row" width="100%">
+            {TEAM_TABS.map((tab, index) => (
+              <TabButton
+                key={tab.key}
+                label={tab.label}
+                done={countDone(tab.key)}
+                total={total(tab.key)}
+                active={state.activeTab === tab.key}
+                marginRight={index === TEAM_TABS.length - 1 ? 0 : 1}
+              />
             ))}
           </Box>
 
@@ -664,14 +664,24 @@ function TabButton({
   done,
   total,
   active,
+  marginRight,
 }: {
   label: string;
   done: number;
   total: number;
   active: boolean;
+  marginRight: number;
 }) {
   return (
-    <Box borderStyle={active ? "round" : "single"} paddingX={1}>
+    <Box
+      flexGrow={1}
+      flexBasis={0}
+      marginRight={marginRight}
+      borderStyle={active ? "round" : "single"}
+      paddingX={1}
+      justifyContent="center"
+      overflow="hidden"
+    >
       <Text bold={active} {...(active ? { color: "cyan" as const } : {})}>
         {label}{" "}
         <Text color={done === total && total > 0 ? "green" : "yellow"}>
