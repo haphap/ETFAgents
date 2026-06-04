@@ -959,7 +959,13 @@ function fmtElapsed(s: number): string {
 // P2: Report library screen
 // ===========================================================================
 
-export function ReportLibrary({ state }: { state: AppState }) {
+export function ReportLibrary({
+  state,
+  screenRows = 28,
+}: {
+  state: AppState;
+  screenRows?: number;
+}) {
   const { reports, selectedIdx, loading, error, pane, cardOffset } = state.library;
   const tickers = libraryTickers(reports);
   const selected = reports[selectedIdx];
@@ -971,7 +977,21 @@ export function ReportLibrary({ state }: { state: AppState }) {
   );
   const tickerIndex = Math.max(0, tickers.indexOf(selectedTicker ?? ""));
   const tickerOffset = Math.max(0, Math.min(Math.max(0, tickerIndex - 8), tickers.length - 18));
-  const visibleReports = tickerReports.slice(cardOffset, cardOffset + LIBRARY_CARD_VIEWPORT);
+  const cardLimit = Math.max(
+    1,
+    Math.min(LIBRARY_CARD_VIEWPORT, Math.floor(Math.max(8, screenRows - 7) / 8)),
+  );
+  const boundedCardOffset = Math.max(
+    0,
+    Math.min(cardOffset, Math.max(0, tickerReports.length - cardLimit)),
+  );
+  const visibleOffset =
+    selectedWithin < boundedCardOffset
+      ? selectedWithin
+      : selectedWithin >= boundedCardOffset + cardLimit
+        ? Math.max(0, selectedWithin - cardLimit + 1)
+        : boundedCardOffset;
+  const visibleReports = tickerReports.slice(visibleOffset, visibleOffset + cardLimit);
 
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
@@ -992,21 +1012,29 @@ export function ReportLibrary({ state }: { state: AppState }) {
             tickers.slice(tickerOffset, tickerOffset + 18).map((ticker) => {
               const active = ticker === selectedTicker;
               const count = reportsForTicker(reports, ticker).length;
+              const textProps = active ? { color: "cyan" as const, bold: true } : {};
               return (
-                <Text
-                  key={ticker}
-                  {...(active ? { color: "cyan" as const, bold: true } : {})}
-                  dimColor={!active}
-                >
-                  {active ? "▶ " : "  "}
-                  {ticker.padEnd(12)} {String(count).padStart(2)} 份
-                </Text>
+                <Box key={ticker} width={24} justifyContent="space-between">
+                  <Box width={17}>
+                    <Text {...textProps} dimColor={!active}>
+                      {active ? "▶ " : "  "}
+                      {fitText(ticker, 14)}
+                    </Text>
+                  </Box>
+                  <Box width={6} justifyContent="flex-end">
+                    <Text {...textProps} dimColor={!active} wrap="truncate-end">
+                      {count}份
+                    </Text>
+                  </Box>
+                </Box>
               );
             })
           )}
           <Box marginTop={1}>
-            <Text dimColor>←→ 切换区域 · ↑↓ 选择 · r 刷新 · Esc 返回首页</Text>
+            <Text dimColor>←→ 区域 · ↑↓ 选择</Text>
           </Box>
+          <Text dimColor>Enter 阅读 · r 刷新</Text>
+          <Text dimColor>Esc 返回首页</Text>
         </Box>
 
         {/* Right: report cards */}
@@ -1025,11 +1053,10 @@ export function ReportLibrary({ state }: { state: AppState }) {
                   key={report.path}
                   report={report}
                   active={report.path === selected?.path}
-                  focused={pane === "reports"}
                 />
               ))}
               <Text dimColor>
-                {tickerReports.length > LIBRARY_CARD_VIEWPORT
+                {tickerReports.length > cardLimit
                   ? `${selectedWithin + 1}/${tickerReports.length} · PgUp/PgDn 快速移动 · `
                   : ""}
                 Enter 阅读全文 · Esc 返回首页
@@ -1042,49 +1069,49 @@ export function ReportLibrary({ state }: { state: AppState }) {
   );
 }
 
-function ReportCard({
-  report,
-  active,
-  focused,
-}: {
-  report: ReportMeta;
-  active: boolean;
-  focused: boolean;
-}) {
+function ReportCard({ report, active }: { report: ReportMeta; active: boolean }) {
   const color = active ? "cyan" : undefined;
   const rating = ratingLabel(report.rating);
   const ratingTextColor = reportRatingColor(report.rating);
+  const analysisDate = report.analysisDate ?? report.date;
   return (
     <Box
       flexDirection="column"
       borderStyle={active ? "round" : "single"}
       borderColor={color}
       borderDimColor={!active}
+      height={7}
       paddingX={1}
       marginTop={1}
     >
       <Box justifyContent="space-between">
-        <Text bold={active} {...(color ? { color } : {})}>
+        <Text bold={active} {...(color ? { color } : {})} wrap="truncate-end">
           {active ? "▶ " : "  "}
-          {report.date}
+          报告 {report.date}
         </Text>
-        <Text bold={active} {...(ratingTextColor ? { color: ratingTextColor } : {})}>
+        <Text
+          bold={active}
+          {...(ratingTextColor ? { color: ratingTextColor } : {})}
+          wrap="truncate-end"
+        >
           {rating}
         </Text>
       </Box>
-      <Text>
-        <Text dimColor>分析师建议: </Text>
-        {fitText(report.recommendation, 104)}
+      <Text dimColor wrap="truncate-end">
+        分析时点: {analysisDate}
       </Text>
-      <Text>
-        <Text dimColor>操作策略: </Text>
-        {fitText(report.strategy, 106)}
+      <Text wrap="truncate-end">
+        <Text dimColor>建议: </Text>
+        {fitText(report.recommendation, 72)}
       </Text>
-      <Text>
+      <Text wrap="truncate-end">
+        <Text dimColor>策略: </Text>
+        {fitText(report.strategy, 72)}
+      </Text>
+      <Text wrap="truncate-end">
         <Text dimColor>风控: </Text>
-        {fitText(report.riskControls, 110)}
+        {fitText(report.riskControls, 72)}
       </Text>
-      {active && focused && <Text dimColor>Enter 打开阅读弹窗</Text>}
     </Box>
   );
 }
@@ -1119,11 +1146,20 @@ export function ReportReaderOverlay({
   rows?: number;
 }) {
   const report = state.library.reports[state.library.selectedIdx];
-  const width = Math.max(72, Math.min(118, columns - 8));
-  const viewport = Math.max(8, Math.min(24, rows - 10));
-  const view = reportDisplayViewport(state.library.body, state.library.scroll, viewport, width - 6);
+  const width = Math.max(82, Math.min(128, columns - 6));
+  const height = Math.max(18, Math.min(32, rows - 4));
+  const bodyRows = Math.max(8, height - 6);
+  const view = reportDisplayViewport(state.library.body, state.library.scroll, bodyRows, width - 8);
   return (
-    <Box flexDirection="column" width={width} borderStyle="single" paddingX={2} paddingY={1}>
+    <Box
+      flexDirection="column"
+      width={width}
+      height={height}
+      borderStyle="single"
+      borderColor="cyan"
+      paddingX={2}
+      paddingY={1}
+    >
       <Box justifyContent="space-between">
         <Text bold color="cyan">
           {report ? `${report.ticker} · ${report.date}` : "报告阅读"}
@@ -1131,14 +1167,18 @@ export function ReportReaderOverlay({
         <Text dimColor>Esc 关闭</Text>
       </Box>
       {state.library.bodyLoading ? (
-        <Text dimColor>读取中…</Text>
+        <>
+          <Text dimColor>读取中…</Text>
+          <BlankLines count={bodyRows - 1} prefix="reader-loading-pad" />
+        </>
       ) : state.library.body ? (
         <>
-          <Box flexDirection="column" marginTop={1}>
+          <Box flexDirection="column" marginTop={1} height={bodyRows}>
             {view.lines.map((line, i) => (
               /* biome-ignore lint/suspicious/noArrayIndexKey: scrolled snapshot */
               <ReportLine key={`reader-${i}`} line={line} />
             ))}
+            <BlankLines count={bodyRows - view.lines.length} prefix="reader-body-pad" />
           </Box>
           <Text dimColor>
             {view.atTop ? "顶部" : "↑"} · {view.atBottom ? "底部" : "↓"} ·{" "}

@@ -98,7 +98,7 @@ export const PROVIDER_BASE_URLS: Record<string, string> = {
 /** Report body viewport (lines) and wrap width used by the P0 reader. */
 export const REPORT_VIEWPORT = 18;
 export const REPORT_WIDTH = 116;
-export const LIBRARY_CARD_VIEWPORT = 5;
+export const LIBRARY_CARD_VIEWPORT = 3;
 export const ELAPSED_REFRESH_MS = 5000;
 
 // ===========================================================================
@@ -275,6 +275,7 @@ export interface ReportMeta {
   ticker: string;
   date: string;
   path: string;
+  analysisDate?: string;
   rating?: string;
   recommendation?: string;
   strategy?: string;
@@ -967,13 +968,14 @@ function visibleCardOffset(selectedWithinTicker: number, currentOffset: number):
 
 export function summarizeReportBody(
   body: string,
-): Pick<ReportMeta, "rating" | "recommendation" | "strategy" | "riskControls"> {
+): Pick<ReportMeta, "analysisDate" | "rating" | "recommendation" | "strategy" | "riskControls"> {
   const lines = body
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .split("\n")
     .map(cleanSummaryLine)
     .filter((line) => line.length > 0);
+  const analysisDate = extractAnalysisDate(lines);
   const recommendation = findSummarySnippet(lines, [
     /分析师建议|研究结论|最终交易建议|最终配置建议|投资建议|配置建议|Recommendation|Decision/i,
   ]);
@@ -985,6 +987,7 @@ export function summarizeReportBody(
   ]);
   const rating = extractRating(recommendation ?? lines.join(" "));
   return {
+    ...(analysisDate ? { analysisDate } : {}),
     ...(rating ? { rating } : {}),
     ...(recommendation ? { recommendation } : {}),
     ...(strategy ? { strategy } : {}),
@@ -1016,10 +1019,10 @@ function findSummarySnippet(lines: string[], patterns: RegExp[]): string | undef
     const line = lines[i] ?? "";
     if (!patterns.some((pattern) => pattern.test(line))) continue;
     const afterLabel = line.replace(/^.*?[：:]\s*/, "").trim();
-    if (afterLabel && afterLabel !== line) return truncateSummary(afterLabel);
+    if (afterLabel && afterLabel !== line) return conciseCardText(afterLabel);
     const next = nextSummaryLine(lines, i + 1);
-    if (next) return truncateSummary(next);
-    return truncateSummary(line);
+    if (next) return conciseCardText(next);
+    return conciseCardText(line);
   }
   return undefined;
 }
@@ -1033,10 +1036,51 @@ function nextSummaryLine(lines: string[], start: number): string | undefined {
   return undefined;
 }
 
-function truncateSummary(line: string, width = 118): string {
+function conciseCardText(line: string, width = 46): string {
+  const text = line
+    .replace(/^(?:结论|建议|策略|风控|风险控制|操作策略|持仓建议)\s*[：:]\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const clauses = text
+    .split(/(?<=[。；;！？!?])\s*|(?<=，)\s*/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  let out = "";
+  let usedClauses = 0;
+  for (const clause of clauses) {
+    if (usedClauses >= 2) break;
+    if (!out) {
+      out = clause;
+      usedClauses += 1;
+      continue;
+    }
+    if ((out + clause).length > width) break;
+    out += clause;
+    usedClauses += 1;
+  }
+  return truncateSummary(out || text, width);
+}
+
+function truncateSummary(line: string, width = 46): string {
   const text = line.replace(/\s+/g, " ").trim();
   if (text.length <= width) return text;
   return `${text.slice(0, width - 1)}…`;
+}
+
+function extractAnalysisDate(lines: string[]): string | undefined {
+  const labeledDate = lines
+    .slice(0, 80)
+    .join("\n")
+    .match(
+      /(?:分析时点|分析日期|交易日期|数据日期|Trade Date|As of|Date)\s*[：:\s]\s*(20\d{2}[-/]\d{1,2}[-/]\d{1,2})/i,
+    )?.[1];
+  const date =
+    labeledDate ??
+    lines
+      .slice(0, 40)
+      .join("\n")
+      .match(/\b20\d{2}[-/]\d{1,2}[-/]\d{1,2}\b/)?.[0];
+  return date?.replace(/\//g, "-");
 }
 
 function extractRating(text: string): string | undefined {

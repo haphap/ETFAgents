@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 import type { Instance, RenderOptions } from "ink";
-import { Box, render, useApp, useInput, useStdout } from "ink";
+import { Box, render, Text, useApp, useInput, useStdout } from "ink";
 import type { ReactNode } from "react";
 import { useEffect, useReducer, useRef, useState } from "react";
 import {
@@ -516,7 +516,9 @@ function App() {
         {state.phase === "dashboard" && (
           <Dashboard state={state} elapsed={elapsed} screenRows={terminalSize.rows - 4} />
         )}
-        {state.phase === "library" && <ReportLibrary state={state} />}
+        {state.phase === "library" && (
+          <ReportLibrary state={state} screenRows={terminalSize.rows - 4} />
+        )}
         {state.phase === "backtest" && <BacktestScreen state={state} />}
         {state.phase === "paper" && <PaperScreen state={state} />}
       </Box>
@@ -569,14 +571,22 @@ function CenteredOverlay({
   rows: number;
 }) {
   return (
-    <Box
-      position="absolute"
-      width={columns}
-      height={rows}
-      justifyContent="center"
-      alignItems="center"
-    >
-      {children}
+    <Box position="absolute" width={columns} height={rows} flexDirection="column">
+      {Array.from({ length: rows }, (_, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: terminal backdrop rows are positional
+        <Box key={`overlay-backdrop-${index}`} width={columns}>
+          <Text>{" ".repeat(columns)}</Text>
+        </Box>
+      ))}
+      <Box
+        position="absolute"
+        width={columns}
+        height={rows}
+        justifyContent="center"
+        alignItems="center"
+      >
+        {children}
+      </Box>
     </Box>
   );
 }

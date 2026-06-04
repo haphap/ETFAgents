@@ -672,16 +672,19 @@ describe("P2 report library", () => {
     const summary = summarizeReportBody(
       [
         "## 投资组合经理决策",
-        "研究结论: **增持**，建议维持核心仓位。",
+        "Trade Date: 2026-06-03",
+        "研究结论: **增持**，建议维持核心仓位。后续等待成交确认后再逐步提高暴露，不在卡片中展示整段原文。",
         "## 持仓建议",
-        "目标仓位 20%-30%，回踩支撑后加仓。",
+        "目标仓位 20%-30%，回踩支撑后加仓。若高开过多则延后执行。",
         "## 再平衡与风险控制",
         "跌破 3.72 元先减仓，放量跌破止损。",
       ].join("\n"),
     );
 
+    expect(summary.analysisDate).toBe("2026-06-03");
     expect(summary.rating).toBe("增持");
     expect(summary.recommendation).toContain("增持");
+    expect(summary.recommendation).not.toContain("整段原文");
     expect(summary.strategy).toContain("目标仓位");
     expect(summary.riskControls).toContain("3.72");
   });

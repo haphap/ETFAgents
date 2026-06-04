@@ -51,8 +51,10 @@ export async function loadLibrary(dispatch: AppDispatch): Promise<void> {
         const reportFile = `${path}/complete_report.md`;
         try {
           await stat(reportFile);
-          let summary: Pick<ReportMeta, "rating" | "recommendation" | "strategy" | "riskControls"> =
-            {};
+          let summary: Pick<
+            ReportMeta,
+            "analysisDate" | "rating" | "recommendation" | "strategy" | "riskControls"
+          > = {};
           try {
             summary = summarizeReportBody(await readFile(reportFile, "utf-8"));
           } catch {
