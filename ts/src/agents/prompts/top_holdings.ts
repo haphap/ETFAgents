@@ -6,6 +6,7 @@
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
   getConciseHeadingInstruction,
+  getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
   getNoProcessNarrationInstruction,
   getNoTitleInstruction,
@@ -17,6 +18,7 @@ export const TOP_HOLDINGS_REPORT_SPEC: AnalystReportSpec = {
   analystName: "top_holdings",
   requiredTopSections: ["一", "二", "三", "四"],
   requireTopSectionLeads: true,
+  requireDecisionSignalSummary: true,
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否逐份分析每份个股报告的论点、数据和评级？\n" +
@@ -101,6 +103,7 @@ export function buildTopHoldingsSystemMessage(ctx: PromptContext): string {
     "- 每句话必须传达具体数据点、券商引用或组合含义。" +
     "删除'深度挂钩'、'全面覆盖'、'值得注意的是'、'it is worth noting'等填充语。\n" +
     "- 像向只想看结论的投资组合经理汇报一样写作。" +
+    getDecisionSignalSummaryInstruction(ctx) +
     getLanguageInstruction(ctx)
   );
 }

@@ -16,10 +16,18 @@
  * uncompressed.
  */
 
+import { type PromptContext, reportForDecisionContext } from "../prompts/shared.js";
 import type { DebateState, SpineStateType } from "../state.js";
 
+const DEBATE_REPORT_CONTEXT_LIMIT = 5_000;
+
 /** The six analyst reports, labelled, skipping any that are still empty. */
-export function buildReportsBlock(state: SpineStateType): string {
+export function buildReportsBlock(state: SpineStateType, ctx?: PromptContext): string {
+  const promptContext: PromptContext = {
+    language: ctx?.language ?? "Chinese",
+    reportContextCharLimit: ctx?.reportContextCharLimit ?? DEBATE_REPORT_CONTEXT_LIMIT,
+    ...(ctx?.validationMode ? { validationMode: ctx.validationMode } : {}),
+  };
   const rows: Array<[string, string]> = [
     ["市场与资金流分析", state.market_flow_report],
     ["舆情与事件影响分析", state.catalyst_sentiment_report],
@@ -30,8 +38,17 @@ export function buildReportsBlock(state: SpineStateType): string {
   ];
   const blocks = rows
     .filter(([, body]) => body?.trim())
-    .map(([label, body]) => `### ${label}\n${body.trim()}`);
-  return blocks.length ? `## 分析师报告\n\n${blocks.join("\n\n")}` : "";
+    .map(
+      ([label, body]) =>
+        `### ${label}\n${reportForDecisionContext(
+          body,
+          promptContext,
+          promptContext.reportContextCharLimit ?? DEBATE_REPORT_CONTEXT_LIMIT,
+        )}`,
+    );
+  return blocks.length
+    ? `## 分析师报告\n\n优先使用每份报告中的「决策信号摘要」；报告摘录只作为证据核对，不要把长篇正文重新复述。\n\n${blocks.join("\n\n")}`
+    : "";
 }
 
 function section(title: string, body: string): string {
@@ -43,10 +60,10 @@ function join(parts: string[]): string {
 }
 
 /** Bull researcher sees reports + own history + the bear's full history and latest argument. */
-export function buildBullContext(state: SpineStateType): string {
+export function buildBullContext(state: SpineStateType, ctx?: PromptContext): string {
   const d = state.investment_debate_state;
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
     section("我方（看多）完整历史", d.bullHistory),
     section("对手（看空）完整历史", d.bearHistory),
     section("对手最新论点", d.currentBearResponse),
@@ -54,10 +71,10 @@ export function buildBullContext(state: SpineStateType): string {
 }
 
 /** Bear researcher sees reports + own history + the bull's full history and latest argument. */
-export function buildBearContext(state: SpineStateType): string {
+export function buildBearContext(state: SpineStateType, ctx?: PromptContext): string {
   const d = state.investment_debate_state;
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
     section("我方（看空）完整历史", d.bearHistory),
     section("对手（看多）完整历史", d.bullHistory),
     section("对手最新论点", d.currentBullResponse),
@@ -65,10 +82,10 @@ export function buildBearContext(state: SpineStateType): string {
 }
 
 /** Research manager sees reports + both sides' complete debate histories. */
-export function buildResearchManagerContext(state: SpineStateType): string {
+export function buildResearchManagerContext(state: SpineStateType, ctx?: PromptContext): string {
   const d = state.investment_debate_state;
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
     section("看多完整辩论历史", d.bullHistory),
     section("看空完整辩论历史", d.bearHistory),
   ]);
@@ -99,12 +116,16 @@ const RISK_META: Record<
   Neutral: { label: "中性派", history: "neutralHistory", response: "currentNeutralResponse" },
 };
 
-export function buildRiskContext(state: SpineStateType, speaker: RiskRole): string {
+export function buildRiskContext(
+  state: SpineStateType,
+  speaker: RiskRole,
+  ctx?: PromptContext,
+): string {
   const d = state.risk_debate_state;
   const own = RISK_META[speaker];
   const others = (Object.keys(RISK_META) as RiskRole[]).filter((r) => r !== speaker);
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
     section("交易员配置方案", state.trader_allocation_plan),
     section(`我方（${own.label}）完整历史`, String(d[own.history] ?? "")),
     ...others.flatMap((r) => [
@@ -114,20 +135,20 @@ export function buildRiskContext(state: SpineStateType, speaker: RiskRole): stri
   ]);
 }
 
-export const buildAggressiveContext = (state: SpineStateType): string =>
-  buildRiskContext(state, "Aggressive");
+export const buildAggressiveContext = (state: SpineStateType, ctx?: PromptContext): string =>
+  buildRiskContext(state, "Aggressive", ctx);
 
-export const buildConservativeContext = (state: SpineStateType): string =>
-  buildRiskContext(state, "Conservative");
+export const buildConservativeContext = (state: SpineStateType, ctx?: PromptContext): string =>
+  buildRiskContext(state, "Conservative", ctx);
 
-export const buildNeutralContext = (state: SpineStateType): string =>
-  buildRiskContext(state, "Neutral");
+export const buildNeutralContext = (state: SpineStateType, ctx?: PromptContext): string =>
+  buildRiskContext(state, "Neutral", ctx);
 
 /** Portfolio manager sees reports + the research plan + all three risk histories. */
-export function buildPortfolioManagerContext(state: SpineStateType): string {
+export function buildPortfolioManagerContext(state: SpineStateType, ctx?: PromptContext): string {
   const d = state.risk_debate_state;
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
     section("研究经理配置方案", state.research_allocation_plan),
     section("激进派历史", d.aggressiveHistory),
     section("保守派历史", d.conservativeHistory),

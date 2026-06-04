@@ -27,7 +27,7 @@ import {
 import {
   buildInstrumentContext,
   type PromptContext,
-  truncateForPrompt,
+  reportForDecisionContext,
 } from "../prompts/shared.js";
 import {
   buildTraderContextMessage,
@@ -52,13 +52,17 @@ export function createTraderNode(opts: TraderNodeOptions) {
     const contextMessage = buildTraderContextMessage({
       asset: ticker,
       instrumentContext,
-      researchPlan: truncateForPrompt(state.research_allocation_plan, ctx),
-      marketFlowReport: truncateForPrompt(state.market_flow_report, ctx),
-      catalystSentimentReport: truncateForPrompt(state.catalyst_sentiment_report, ctx),
-      macroRegimeReport: truncateForPrompt(state.macro_regime_report, ctx),
-      mesoCommodityReport: truncateForPrompt(state.meso_commodity_report, ctx),
-      holdingsIndustryReport: state.holdings_industry_report,
-      topHoldingsReport: state.top_holdings_report,
+      researchPlan: reportForDecisionContext(state.research_allocation_plan, ctx, 4_000),
+      marketFlowReport: reportForDecisionContext(state.market_flow_report, ctx, 5_000),
+      catalystSentimentReport: reportForDecisionContext(
+        state.catalyst_sentiment_report,
+        ctx,
+        5_000,
+      ),
+      macroRegimeReport: reportForDecisionContext(state.macro_regime_report, ctx, 5_000),
+      mesoCommodityReport: reportForDecisionContext(state.meso_commodity_report, ctx, 5_000),
+      holdingsIndustryReport: reportForDecisionContext(state.holdings_industry_report, ctx, 5_000),
+      topHoldingsReport: reportForDecisionContext(state.top_holdings_report, ctx, 5_000),
     });
 
     const systemMessage = buildTraderSystemMessage(ctx);

@@ -103,7 +103,8 @@ export function buildTraderContextMessage(opts: {
     `${opts.instrumentContext} ` +
     "This view incorporates insights from current technical market trends, macroeconomic indicators, commodity signals, " +
     "market flows, event-driven sentiment, industry structure, and constituent-level research. " +
-    "Use this view as a foundation for evaluating your next ETF allocation decision.\n\n" +
+    "Use this view as a foundation for evaluating your next ETF allocation decision. " +
+    "When an upstream block contains `决策信号摘要` or `Decision Signal Summary`, treat that block as the highest-priority summary and use the surrounding report excerpt only as supporting evidence.\n\n" +
     `Proposed Allocation View: ${opts.researchPlan}\n\n` +
     `Macro regime analysis: ${opts.macroRegimeReport}\n` +
     `Meso commodity analysis: ${opts.mesoCommodityReport}\n` +

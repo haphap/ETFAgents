@@ -7,6 +7,7 @@
 
 import {
   getConciseHeadingInstruction,
+  getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
   getNoProcessNarrationInstruction,
   getNoTitleInstruction,
@@ -109,6 +110,7 @@ export function buildMarketFlowSystemMessage(ctx: PromptContext): string {
     "| 换手率 | 1.3% | 正常 | 未见拥挤 | 超过3%则拥挤加剧 |\n\n" +
     "## 语言\n" +
     "分析文本使用中文。工具名称、指标ID与行情代码保持英文。\n" +
+    getDecisionSignalSummaryInstruction(ctx) +
     getLanguageInstruction(ctx)
   );
 }

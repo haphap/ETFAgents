@@ -6,6 +6,7 @@
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
   getConciseHeadingInstruction,
+  getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
   getNoProcessNarrationInstruction,
   getNoTitleInstruction,
@@ -16,6 +17,7 @@ import {
 export const MACRO_REGIME_REPORT_SPEC: AnalystReportSpec = {
   analystName: "macro_regime",
   requiredTopSections: ["一", "二", "三", "四"],
+  requireDecisionSignalSummary: true,
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否建立了逻辑链：ETF暴露 → 宏观与政策制度 → 异常信号 → 情景敏感性 → 配置含义？\n" +
@@ -65,6 +67,7 @@ export function buildMacroRegimeSystemMessage(ctx: PromptContext): string {
     "若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出'数据缺失''数据不足'等提示。" +
     "开篇帽段和每个一级章节标题后的结论段都必须直接陈述结论。" +
     "不得使用'本章''本节''本部分''该部分''这一节'等自指式开头（如'本章旨在梳理''本节核心结论指出''本部分结论表明''该部分说明'）。" +
+    getDecisionSignalSummaryInstruction(ctx) +
     getLanguageInstruction(ctx)
   );
 }

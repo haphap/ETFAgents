@@ -15,6 +15,7 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { type AIMessage, type BaseMessage, HumanMessage } from "@langchain/core/messages";
 import { z } from "zod";
+import { extractDecisionSignalSummary } from "../prompts/shared.js";
 import { extractTextContent } from "./content.js";
 import {
   collectTopSectionMarks,
@@ -42,6 +43,8 @@ export interface AnalystReportSpec {
   leadRequiredTopSections?: ReadonlyArray<string>;
   /** Whether a Markdown table (``| --- |`` separator) must exist in the tail. */
   requireTailTable?: boolean;
+  /** Whether the report must end with a decision-oriented signal summary. */
+  requireDecisionSignalSummary?: boolean;
   /** Free-form rules forwarded verbatim to the LLM judge prompt. */
   customRulesMarkdown?: string;
 }
@@ -84,11 +87,31 @@ function resolveValidationMode(value: string | undefined): ValidationMode {
 const MARKDOWN_H1_RE = /^[ \t]*#\s+\S/m;
 const MARKDOWN_H2_RE = /^[ \t]*##\s+\S/m;
 const MARKDOWN_TABLE_SEPARATOR_RE = /^\|(?:\s*:?-{3,}:?\s*\|)+\s*$/m;
+const DECISION_SIGNAL_FIELDS: ReadonlyArray<ReadonlyArray<string>> = [
+  ["方向", "Direction"],
+  ["置信度", "Confidence"],
+  ["时间窗口", "Time Window"],
+  ["ETF传导路径", "ETF Transmission Path"],
+  ["核心证据", "Core Evidence"],
+  ["最大反证条件", "Main Invalidation"],
+  ["配置含义", "Allocation Implication"],
+  ["下一步观察", "Next Watch Items"],
+];
+
+function bodyWithoutDecisionSignalSummary(report: string): string {
+  let bestIdx = -1;
+  for (const marker of ["决策信号摘要", "Decision Signal Summary"]) {
+    const idx = report.lastIndexOf(marker);
+    if (idx > bestIdx) bestIdx = idx;
+  }
+  return bestIdx >= 0 ? report.slice(0, bestIdx) : report;
+}
 
 export function staticValidate(report: string, spec: AnalystReportSpec): StaticVerdict {
   const verdict: StaticVerdict = { criticalIssues: [], missingElements: [] };
   if (!report) return verdict;
 
+  const requiresNumberedReport = (spec.requiredTopSections?.length ?? 0) > 0;
   const sectionMarks = collectTopSectionMarks(report);
   for (const need of spec.requiredTopSections ?? []) {
     if (!sectionMarks.has(need)) {
@@ -106,10 +129,10 @@ export function staticValidate(report: string, spec: AnalystReportSpec): StaticV
   if (MARKDOWN_H1_RE.test(report)) {
     verdict.criticalIssues.push("出现 markdown # H1 标题（应改为正文或中文一级编号）");
   }
-  if (MARKDOWN_H2_RE.test(report)) {
+  if (requiresNumberedReport && MARKDOWN_H2_RE.test(report)) {
     verdict.criticalIssues.push("出现 markdown ## 二级标题（应使用 中文『（一）』格式）");
   }
-  if (startsWithoutOverviewParagraph(report)) {
+  if (requiresNumberedReport && startsWithoutOverviewParagraph(report)) {
     verdict.criticalIssues.push("缺少开篇概述帽段，报告直接以标题、章节、列表或表格开头");
   }
 
@@ -136,7 +159,22 @@ export function staticValidate(report: string, spec: AnalystReportSpec): StaticV
     }
   }
 
-  if (containsQaLabelArtifacts(report)) {
+  if (spec.requireDecisionSignalSummary) {
+    const summary = extractDecisionSignalSummary(report);
+    if (!summary) {
+      verdict.missingElements.push("缺少末尾『决策信号摘要』");
+    } else {
+      for (const aliases of DECISION_SIGNAL_FIELDS) {
+        const hasField = aliases.some(
+          (field) => summary.includes(`${field}:`) || summary.includes(`${field}：`),
+        );
+        if (!hasField) verdict.missingElements.push(`决策信号摘要缺少字段『${aliases[0]}』`);
+      }
+    }
+  }
+
+  const bodyOnly = bodyWithoutDecisionSignalSummary(report);
+  if (containsQaLabelArtifacts(bodyOnly)) {
     verdict.criticalIssues.push("出现『判断：』『证据：』『结论：』等标签式结构");
   }
   if (containsSelfReferentialMetaLeads(report)) {
@@ -159,13 +197,18 @@ const JUDGE_BASE_RULES =
   "- 一级标题是否使用「一、」「二、」「三、」格式，且标题中不得包含英文翻译或括号注释？\n" +
   "- 不得出现连续重复的一级标题。\n" +
   "- 每个一级章节标题后是否直接写2-3句概括性结论段，且结论段高于子章节层面（不重复子章节内容）？\n" +
-  "- 不得出现 ## 或其他 markdown 标题格式（应使用中文编号）。\n\n" +
+  "- 当报告结构要求「一、二、三、」中文编号时，不得出现 ## 或其他 markdown 标题格式；经理层辩论结论类报告若提示词明确要求Markdown标题，则按其专属结构评审。\n\n" +
   "### 术语表达\n" +
   "- 必要术语说明是否自然融入分析句子，而不是前置术语表、括号定义、注释块或口径说明？\n" +
   "- 不得用独立术语解释段替代正文中的因果分析。\n\n" +
   "### 可操作性\n" +
   "- 是否把主要信号的配置含义融入正文推理，而不是写成「这意味着什么」「对交易应该怎么做」等问答标签或交易指引块？\n" +
   "- 开篇第一句是否直接陈述核心结论或判断（偏多/偏空/中性及原因），而非「本报告将…」等场景设置？\n\n" +
+  "### 决策价值\n" +
+  "- 末尾是否包含「决策信号摘要」或「Decision Signal Summary」，且包含方向、置信度、时间窗口、ETF传导路径、核心证据、最大反证条件、配置含义和下一步观察？\n" +
+  "- 方向是否明确为偏多/偏空/中性或 bullish/bearish/neutral，而不是含糊描述？\n" +
+  "- 配置含义是否落到ETF整体仓位的增持、持有、减持或回避，而不是停留在行业评论或成分股交易？\n" +
+  "- 是否至少给出一个能推翻当前判断的反证条件，以及2-3条带数据或来源的核心证据？\n\n" +
   "### 禁止内容\n" +
   "- 一级章节标题后的结论段和段落开头不得使用任何自指式元叙述（「本节锁定…」「本部分聚焦…」等）。\n" +
   "- 不得使用「判断：」「证据：」「关键价位：」「条件情景：」等标签式结构。\n" +

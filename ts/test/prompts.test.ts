@@ -15,8 +15,11 @@ import {
   buildInstrumentContext,
   collapseBlankLines,
   dateDaysBefore,
+  extractDecisionSignalSummary,
   getCollaborationStopInstruction,
+  getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
+  reportForDecisionContext,
   truncateForPrompt,
 } from "../src/agents/prompts/shared.js";
 import { buildTopHoldingsSystemMessage } from "../src/agents/prompts/top_holdings.js";
@@ -61,11 +64,39 @@ describe("prompt helpers", () => {
     expect(collapseBlankLines("")).toBe("");
   });
 
-  it("truncateForPrompt keeps the tail content with a clear marker", () => {
-    const long = "x".repeat(20_000);
+  it("truncateForPrompt preserves opening and closing excerpts with a clear marker", () => {
+    const long = `OPENING-${"x".repeat(20_000)}-CLOSING`;
     const out = truncateForPrompt(long, { language: "Chinese", reportContextCharLimit: 1000 });
-    expect(out).toContain("[Content trimmed, omitted 19000 characters]");
-    expect(out.endsWith("x".repeat(1000))).toBe(true);
+    expect(out).toContain("[Content trimmed, omitted");
+    expect(out).toContain("[Opening excerpt]");
+    expect(out).toContain("[Closing excerpt]");
+    expect(out).toContain("OPENING-");
+    expect(out).toContain("-CLOSING");
+  });
+
+  it("extractDecisionSignalSummary finds the final summary block", () => {
+    const report =
+      "正文很长。\n\n**决策信号摘要**\n" +
+      "方向: 偏多\n置信度: 中\n时间窗口: 1周\nETF传导路径: 资金流 -> ETF\n" +
+      "核心证据: 成交量放大\n最大反证条件: 跌破支撑\n配置含义: 增持ETF\n下一步观察: 份额变化";
+    expect(extractDecisionSignalSummary(report)).toContain("方向: 偏多");
+  });
+
+  it("reportForDecisionContext prioritizes the decision signal summary when trimming", () => {
+    const report =
+      "OPEN\n" +
+      "x".repeat(8_000) +
+      "\n**决策信号摘要**\n方向: 偏空\n置信度: 高\n时间窗口: 1周\nETF传导路径: 利率 -> ETF\n核心证据: 量能恶化\n最大反证条件: 放量收复均线\n配置含义: 减持ETF\n下一步观察: 成交量";
+    const out = reportForDecisionContext(report, { language: "Chinese" }, 1_200);
+    expect(out).toContain("[Decision signal summary]");
+    expect(out).toContain("方向: 偏空");
+    expect(out).toContain("OPEN");
+  });
+
+  it("getDecisionSignalSummaryInstruction defines the stable Chinese contract", () => {
+    const out = getDecisionSignalSummaryInstruction({ language: "Chinese" });
+    expect(out).toContain("**决策信号摘要**");
+    expect(out).toContain("方向、置信度、时间窗口、ETF传导路径");
   });
 
   it("dateDaysBefore is timezone-stable for ISO yyyy-mm-dd", () => {
@@ -141,5 +172,44 @@ describe("visible agent prompts", () => {
         hasChineseLanguageInstruction: prompt.includes("Write your entire response in Chinese"),
       }).toEqual({ name, hasChineseLanguageInstruction: true });
     }
+  });
+
+  it("requires decision signal summaries from report-producing agents", () => {
+    const ctx = { language: "Chinese" };
+    const catalystData = {
+      etfInfo: "",
+      etfHoldings: "",
+      tickerNews: "",
+      holdingsNews: "",
+      globalNews: "",
+    };
+    const prompts = [
+      buildMarketFlowSystemMessage(ctx),
+      buildMacroRegimeSystemMessage(ctx),
+      buildMesoCommoditySystemMessage(ctx),
+      buildCatalystSentimentSystemMessage(ctx, catalystData),
+      buildHoldingsIndustrySystemMessage(ctx),
+      buildTopHoldingsSystemMessage(ctx),
+      buildBullResearcherSystemMessage(ctx),
+      buildBearResearcherSystemMessage(ctx),
+      buildResearchManagerSystemMessage(ctx),
+      buildAggressiveDebatorSystemMessage(ctx),
+      buildConservativeDebatorSystemMessage(ctx),
+      buildNeutralDebatorSystemMessage(ctx),
+      buildPortfolioManagerSystemMessage(ctx),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain("**决策信号摘要**");
+      expect(prompt).toContain("最大反证条件");
+      expect(prompt).toContain("ETF整体仓位");
+    }
+  });
+
+  it("uses Chinese source prompts for the risk team in Chinese mode", () => {
+    const ctx = { language: "Chinese" };
+    expect(buildAggressiveDebatorSystemMessage(ctx)).toContain("你是激进风险分析师");
+    expect(buildConservativeDebatorSystemMessage(ctx)).toContain("你是保守风险分析师");
+    expect(buildNeutralDebatorSystemMessage(ctx)).toContain("你是中性风险分析师");
   });
 });

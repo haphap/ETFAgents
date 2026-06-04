@@ -3,6 +3,7 @@ import {
   buildAggressiveContext,
   buildBearContext,
   buildBullContext,
+  buildReportsBlock,
 } from "../src/agents/helpers/debate_context.js";
 import type { SpineStateType } from "../src/agents/state.js";
 import { emptyDebateState } from "../src/agents/state.js";
@@ -65,5 +66,21 @@ describe("debate context builders", () => {
     expect(ctx).toContain("NEU_R1");
     expect(ctx).toContain("CON_NOW");
     expect(ctx).toContain("trader-plan");
+  });
+
+  it("compresses long analyst reports around the decision signal summary", () => {
+    const longState = stateWith({});
+    longState.market_flow_report =
+      "OPENING_SIGNAL\n" +
+      "MIDDLE_NOISE".repeat(1_000) +
+      "\n**决策信号摘要**\n方向: 偏多\n置信度: 中\n时间窗口: 1周\nETF传导路径: 资金流 -> ETF\n核心证据: 份额增加\n最大反证条件: 放量跌破支撑\n配置含义: 增持ETF\n下一步观察: 成交量\n" +
+      "CLOSING_SIGNAL";
+
+    const ctx = buildReportsBlock(longState, { language: "Chinese", reportContextCharLimit: 800 });
+    expect(ctx).toContain("优先使用每份报告中的「决策信号摘要」");
+    expect(ctx).toContain("[Decision signal summary]");
+    expect(ctx).toContain("方向: 偏多");
+    expect(ctx).toContain("OPENING_SIGNAL");
+    expect(ctx).toContain("CLOSING_SIGNAL");
   });
 });

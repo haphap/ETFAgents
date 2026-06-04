@@ -10,6 +10,7 @@
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
   getConciseHeadingInstruction,
+  getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
   getNoProcessNarrationInstruction,
   getNoTitleInstruction,
@@ -20,6 +21,7 @@ import {
 export const CATALYST_SENTIMENT_REPORT_SPEC: AnalystReportSpec = {
   analystName: "catalyst_sentiment",
   requiredTopSections: ["一", "二", "三", "四"],
+  requireDecisionSignalSummary: true,
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否将分析扩展到ETF重行业和权重股，而非仅停留在ETF代码层面？\n" +
@@ -63,7 +65,7 @@ export function buildCatalystSentimentSystemMessage(
     "3. 判断每个事件可能支撑、压制还是拖累ETF价格，解释传导路径：新闻/情绪/宏观事件 → 持仓/行业影响 → ETF价格含义。\n" +
     "4. 跨数据源比对：如果某个事件在多个来源中出现，信号更强；如果不同源指向矛盾方向，需要明确指出分歧。\n" +
     "5. 区分事实与观点：新闻标题是事实，社交媒体评论是观点，两者权重不同。\n" +
-    "6. 如果某个数据源返回为空或数据不足，在分析中明确标注该信号的置信度较低。\n\n" +
+    "6. 如果某个关键数据源返回为空或数据不足，不在正文堆砌缺失提示；只在相关事件判断和决策信号摘要中降低置信度。\n\n" +
     getNoProcessNarrationInstruction() +
     "\n" +
     getNoTitleInstruction() +
@@ -91,9 +93,10 @@ export function buildCatalystSentimentSystemMessage(
     "中文输出时使用中文章节标题，如'真实支撑与短期噪声'；不得使用英文标签如'Genuine Support'。" +
     "末尾附Markdown表格整理报告关键要点。\n\n" +
     "当连续出现同类变量（如多条均线、多个价位、多个指标值）时，合并为一句并用'分别为'连接，不得逐个单独陈述。" +
-    "若某项数据在已获取的数据源中不存在，直接省略该分析维度，不得输出'数据缺失''数据不足'等提示。" +
+    "若某项数据在已获取的数据源中不存在，正文直接省略该分析维度；只有当缺口改变核心判断时，才在决策信号摘要的置信度或最大反证条件中体现。" +
     "开篇帽段和每个一级章节标题后的结论段都必须直接陈述结论。" +
     "不得使用'本章''本节''本部分''该部分''这一节'等自指式开头（如'本章旨在梳理''本节核心结论指出''本部分结论表明''该部分说明'）。" +
+    getDecisionSignalSummaryInstruction(ctx) +
     getLanguageInstruction(ctx)
   );
 }

@@ -6,6 +6,7 @@
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
   getConciseHeadingInstruction,
+  getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
   getNoProcessNarrationInstruction,
   getNoTitleInstruction,
@@ -18,6 +19,7 @@ export const MESO_COMMODITY_REPORT_SPEC: AnalystReportSpec = {
   requiredTopSections: ["一", "二", "三", "四"],
   requireTopSectionLeads: true,
   leadRequiredTopSections: ["一", "二", "三"],
+  requireDecisionSignalSummary: true,
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否包含四个一级章节：一、核心矛盾与主线判断；二、矛盾推演；三、情景推演与策略启示；四、近期合约表现总览？\n" +
@@ -128,6 +130,7 @@ export function buildMesoCommoditySystemMessage(ctx: PromptContext): string {
     "- 正面示例（目标风格）：'本期沪铜以6.28%的涨幅配合近50%的仓单骤降，是典型的价量齐升去库组合，确认了下游实物需求的强劲接货意愿。这组信号整体偏多，确信度中等，但需留意高杠杆资金的短期扰动。'\n" +
     "- 引用数字时必须成对呈现（如'30D +8%, 90D -2%'）以显示动量背景。\n" +
     "- 像向只想看结论的投资组合经理汇报一样写作。" +
+    getDecisionSignalSummaryInstruction(ctx) +
     getLanguageInstruction(ctx)
   );
 }

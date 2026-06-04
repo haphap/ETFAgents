@@ -17,6 +17,22 @@ const MARKET_FLOW_SPEC: AnalystReportSpec = {
   requireTailTable: true,
 };
 
+const SUMMARY_REQUIRED_SPEC: AnalystReportSpec = {
+  analystName: "summary_required",
+  requireDecisionSignalSummary: true,
+};
+
+const DECISION_SUMMARY =
+  "\n\n**决策信号摘要**\n" +
+  "方向: 偏多\n" +
+  "置信度: 中\n" +
+  "时间窗口: 1周\n" +
+  "ETF传导路径: 资金流改善 -> ETF价格支撑\n" +
+  "核心证据: MACD改善；份额净申购\n" +
+  "最大反证条件: 放量跌破支撑\n" +
+  "配置含义: 增持ETF整体仓位\n" +
+  "下一步观察: 成交量和份额变化";
+
 const COMPLETE_REPORT =
   "概览段：偏多结构成立，MACD与RSI同步确认。\n\n" +
   "一、市场结构与量价诊断\n" +
@@ -72,6 +88,26 @@ describe("staticValidate", () => {
     const withMeta = `本节锁定偏多结构。\n\n${COMPLETE_REPORT}`;
     const verdict = staticValidate(withMeta, MARKET_FLOW_SPEC);
     expect(verdict.criticalIssues.some((i) => i.includes("自指式元叙述"))).toBe(true);
+  });
+
+  it("enforces the decision signal summary when the spec requires it", () => {
+    const verdict = staticValidate("概览段。\n\n一、正文\n内容。", SUMMARY_REQUIRED_SPEC);
+    expect(verdict.missingElements).toContain("缺少末尾『决策信号摘要』");
+
+    const complete = staticValidate(
+      `概览段。\n\n一、正文\n内容。${DECISION_SUMMARY}`,
+      SUMMARY_REQUIRED_SPEC,
+    );
+    expect(staticVerdictHasIssues(complete)).toBe(false);
+  });
+
+  it("flags missing fields inside the decision signal summary", () => {
+    const verdict = staticValidate(
+      "概览段。\n\n**决策信号摘要**\n方向: 中性",
+      SUMMARY_REQUIRED_SPEC,
+    );
+    expect(verdict.missingElements.some((m) => m.includes("置信度"))).toBe(true);
+    expect(verdict.missingElements.some((m) => m.includes("最大反证条件"))).toBe(true);
   });
 });
 

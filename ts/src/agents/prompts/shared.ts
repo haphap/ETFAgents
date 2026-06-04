@@ -27,13 +27,75 @@ export interface PromptContext {
 }
 
 const DEFAULT_REPORT_CHAR_LIMIT = 16_000;
+const DEFAULT_DECISION_CONTEXT_CHAR_LIMIT = 6_000;
+const SUMMARY_CONTEXT_CHAR_LIMIT = 2_400;
+const DECISION_SIGNAL_SUMMARY_MARKERS = ["决策信号摘要", "Decision Signal Summary"] as const;
+
+export function getDecisionSignalSummaryInstruction(ctx: PromptContext): string {
+  if (isChinese(ctx.language)) {
+    return (
+      "\n## 决策信号摘要要求\n" +
+      "报告末尾必须在最后一个一级章节内附加加粗行 **决策信号摘要**，不要新增“五、”或额外一级章节。" +
+      "摘要必须使用以下字段，字段名保持不变：方向、置信度、时间窗口、ETF传导路径、核心证据、最大反证条件、配置含义、下一步观察。" +
+      "方向只能写偏多、偏空或中性；置信度只能写低、中或高；核心证据写2-3条带数据或来源的证据；" +
+      "配置含义必须明确对应ETF整体仓位的增持、持有、减持或回避含义，不得给成分股交易指令。" +
+      "摘要应短而可被后续研究经理和交易员直接使用，不要输出JSON、代码块或机器字段名。\n"
+    );
+  }
+  return (
+    "\n## Decision Signal Summary Requirement\n" +
+    "At the end of the final top-level section, append a bold line **Decision Signal Summary**; do not create an extra top-level section." +
+    " Use these exact fields: Direction, Confidence, Time Window, ETF Transmission Path, Core Evidence, Main Invalidation, Allocation Implication, Next Watch Items." +
+    " Direction must be bullish, bearish, or neutral; confidence must be low, medium, or high; core evidence should include 2-3 data-backed points." +
+    " Allocation implication must target the ETF position only, never constituent-stock trades. Do not output JSON or code blocks.\n"
+  );
+}
+
+export function extractDecisionSignalSummary(
+  text: string | undefined,
+  maxChars = SUMMARY_CONTEXT_CHAR_LIMIT,
+): string {
+  if (!text?.trim()) return "";
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  let bestIdx = -1;
+  for (const marker of DECISION_SIGNAL_SUMMARY_MARKERS) {
+    const idx = normalized.lastIndexOf(marker);
+    if (idx > bestIdx) bestIdx = idx;
+  }
+  if (bestIdx < 0) return "";
+  const summary = normalized.slice(bestIdx).trim();
+  if (summary.length <= maxChars) return summary;
+  return `${summary.slice(0, maxChars).trimEnd()}\n[Decision signal summary trimmed]`;
+}
 
 export function truncateForPrompt(text: string | undefined, ctx: PromptContext): string {
   if (!text) return "";
   const limit = ctx.reportContextCharLimit ?? DEFAULT_REPORT_CHAR_LIMIT;
   if (limit <= 0 || text.length <= limit) return text;
   const omitted = text.length - limit;
-  return `[Content trimmed, omitted ${omitted} characters]\n${text.slice(-limit)}`;
+  const marker = `[Content trimmed, omitted ${omitted} characters]`;
+  const summary = extractDecisionSignalSummary(text, Math.min(SUMMARY_CONTEXT_CHAR_LIMIT, limit));
+  const summaryBlock = summary ? `[Decision signal summary]\n${summary}\n\n` : "";
+  const remaining = Math.max(0, limit - marker.length - summaryBlock.length - 40);
+  if (remaining <= 300) {
+    return `${marker}\n${summaryBlock}${text.slice(-Math.max(300, limit - marker.length))}`.trim();
+  }
+  const headChars = Math.floor(remaining * 0.55);
+  const tailChars = remaining - headChars;
+  return (
+    `${marker}\n` +
+    summaryBlock +
+    `[Opening excerpt]\n${text.slice(0, headChars).trimEnd()}\n\n` +
+    `[Closing excerpt]\n${text.slice(-tailChars).trimStart()}`
+  ).trim();
+}
+
+export function reportForDecisionContext(
+  text: string | undefined,
+  ctx: PromptContext,
+  charLimit = DEFAULT_DECISION_CONTEXT_CHAR_LIMIT,
+): string {
+  return truncateForPrompt(text, { ...ctx, reportContextCharLimit: charLimit });
 }
 
 /** Collapse 3+ consecutive newlines into 2. Mirrors collapse_blank_lines. */

@@ -48,7 +48,7 @@ export interface AnalystConfig {
    * Mirrors the Python nodes that embed reports directly in the prompt rather
    * than relying solely on accumulated message history.
    */
-  buildContextBlock?: (state: SpineStateType) => string;
+  buildContextBlock?: (state: SpineStateType, ctx: PromptContext) => string;
   /**
    * Whether to append the report to the message history (default true). Debate
    * and manager nodes set this false: they read explicit context blocks and
@@ -91,7 +91,7 @@ export function createAnalystNode(
     const analystBody = config.buildSystemBody(ctx);
     const toolNames = config.tools.map((t) => t.name).join(", ");
     // Explicit reports/debate context (debators & managers), built from state.
-    const contextBlock = config.buildContextBlock?.(state) ?? "";
+    const contextBlock = config.buildContextBlock?.(state, ctx) ?? "";
 
     const buildSystemMessage = (phase: SystemMessagePhase): string => {
       let body = analystBody;
