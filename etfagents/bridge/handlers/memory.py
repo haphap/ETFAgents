@@ -8,6 +8,8 @@ build and persist the analysis entry with the existing Python
 from __future__ import annotations
 
 import copy
+import json
+from pathlib import Path
 from typing import Any
 
 from ..protocol import INVALID_PARAMS, RpcError
@@ -21,6 +23,33 @@ _DEFAULT_ANALYSTS = (
     "holdings_industry",
     "top_holdings",
 )
+
+
+def _write_signal_sidecars(state: dict[str, Any], config: dict[str, Any]) -> None:
+    signals = state.get("agent_signals")
+    if not isinstance(signals, dict) or not signals:
+        return
+    ticker = str(state.get("asset_of_interest") or "").strip()
+    trade_date = str(state.get("trade_date") or "").strip()
+    results_dir = str(config.get("results_dir") or "").strip()
+    if not ticker or not trade_date or not results_dir:
+        return
+    report_dir = Path(results_dir) / ticker / trade_date
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / "agent_signals.json").write_text(
+        json.dumps(signals, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    summaries = {
+        source: signal.get("decision_summary")
+        for source, signal in signals.items()
+        if isinstance(signal, dict) and signal.get("decision_summary")
+    }
+    if summaries:
+        (report_dir / "decision_signal_summaries.json").write_text(
+            json.dumps(summaries, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
 
 @method("memory.append_analysis")
@@ -54,6 +83,7 @@ def memory_append_analysis(params: dict[str, Any]) -> dict[str, Any]:
 
     entry = build_analysis_memory_entry(state, config=config, selected_analysts=selected)
     store.append_analysis(entry)
+    _write_signal_sidecars(state, config)
     return {"written": True, "entry": entry.to_dict()}
 
 

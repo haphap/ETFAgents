@@ -132,9 +132,12 @@ describe("buildMiniSpineGraph", () => {
     expect(llm.structuredCalls).toBe(1);
 
     expect(result.market_flow_report).toContain("一、市场结构与量价诊断");
+    expect(result.market_flow_report).not.toContain("输出Schema");
+    expect(result.market_flow_report).not.toContain("决策信号摘要");
     expect(result.agent_signals.market_flow?.fields.price_regime).toBe("TREND_UP");
     expect(result.trader_allocation_plan).toContain("一、配置逻辑");
     expect(result.trader_allocation_plan).toContain("**买入**");
+    expect(result.trader_allocation_plan).not.toContain("输出Schema");
     expect(result.agent_signals.trader?.fields.allocation_action).toBe("BUY");
     expect(result.sender).toBe("Trader");
   });

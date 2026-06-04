@@ -7,6 +7,7 @@ node) reaches ``AnalysisMemoryStore`` instead of being silently replaced by
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -97,6 +98,36 @@ class MemoryAppendAnalysisConfigTests(unittest.TestCase):
                 self.assertIn("market_flow", result[key])
                 self.assertIn("portfolio_manager", result[key])
             self.assertIn("past_context", result)
+
+    def test_agent_signal_sidecars_are_written(self) -> None:
+        """Parsed TS agent signals should be stored outside visible markdown reports."""
+        with tempfile.TemporaryDirectory() as tmp:
+            state = {
+                **_STATE,
+                "agent_signals": {
+                    "market_flow": {
+                        "source": "market_flow",
+                        "agent": "market_flow",
+                        "fields": {"price_regime": "TREND_UP", "confidence": 0.8},
+                        "raw": "agent: market_flow\nprice_regime: TREND_UP\nconfidence: 0.8",
+                        "decision_summary": {"方向": "偏多"},
+                    }
+                },
+            }
+            result = memory_append_analysis(
+                {
+                    "state": state,
+                    "config": {"results_dir": tmp, "memory_mode": "full"},
+                }
+            )
+            self.assertTrue(result["written"])
+            report_dir = Path(tmp) / "510300.SH" / "2026-05-29"
+            signals = json.loads((report_dir / "agent_signals.json").read_text(encoding="utf-8"))
+            summaries = json.loads(
+                (report_dir / "decision_signal_summaries.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(signals["market_flow"]["fields"]["price_regime"], "TREND_UP")
+            self.assertEqual(summaries["market_flow"]["方向"], "偏多")
 
 
 if __name__ == "__main__":

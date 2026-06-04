@@ -1780,6 +1780,22 @@ def _default_backtest_output_dir(config: dict, tickers: list[str], start_date: s
 def save_report_to_disk(final_state, ticker: str, save_path: Path):
     """Save complete analysis report to disk with organized subfolders."""
     save_path.mkdir(parents=True, exist_ok=True)
+    agent_signals = get_state_value(final_state, "agent_signals", {}) or {}
+    if isinstance(agent_signals, dict) and agent_signals:
+        (save_path / "agent_signals.json").write_text(
+            json.dumps(agent_signals, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        decision_summaries = {
+            source: signal.get("decision_summary")
+            for source, signal in agent_signals.items()
+            if isinstance(signal, dict) and signal.get("decision_summary")
+        }
+        if decision_summaries:
+            (save_path / "decision_signal_summaries.json").write_text(
+                json.dumps(decision_summaries, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
     sections = []
 
     # 1. Analysts

@@ -15,7 +15,11 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { buildTraderBacktestSignal } from "../helpers/backtest_signal.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
-import { formatAgentSignalsForPrompt, signalUpdate } from "../helpers/output_schema.js";
+import {
+  formatAgentSignalsForPrompt,
+  signalUpdate,
+  stripAgentMachineBlocks,
+} from "../helpers/output_schema.js";
 import type { PositionSizingOptions } from "../helpers/position_sizing.js";
 import { appendTraderOutputSchema, renderTraderProposal } from "../helpers/render.js";
 import { normalizeChineseManagerTerms } from "../helpers/role_terms.js";
@@ -113,15 +117,17 @@ export function createTraderNode(opts: TraderNodeOptions) {
     postProcessed = restoreTraderExecutionBiasSection(postProcessed, ctx.language);
     postProcessed = stripConstituentTradeInstructions(postProcessed, ctx.language);
     postProcessed = appendTraderOutputSchema(postProcessed, _structured, ctx.language);
+    const signalSourceReport = postProcessed;
+    const visibleReport = stripAgentMachineBlocks(postProcessed);
 
     return {
-      messages: [new AIMessage(postProcessed)],
-      trader_allocation_plan: postProcessed,
-      agent_signals: signalUpdate("trader", postProcessed),
+      messages: [new AIMessage(visibleReport)],
+      trader_allocation_plan: visibleReport,
+      agent_signals: signalUpdate("trader", signalSourceReport),
       trader_backtest_signal: buildTraderBacktestSignal(
         ticker,
         state.trade_date ?? "",
-        postProcessed,
+        signalSourceReport,
         _structured,
         {
           agentSignals: state.agent_signals,

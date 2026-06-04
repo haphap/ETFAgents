@@ -21,7 +21,7 @@ import {
   normalizeMarketFlowTailSections,
 } from "../helpers/market_flow_normalize.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
-import { signalUpdate } from "../helpers/output_schema.js";
+import { signalUpdate, stripAgentMachineBlocks } from "../helpers/output_schema.js";
 import { postJudgeClean, preJudgeClean } from "../helpers/report_leads.js";
 import { normalizeChineseRoleTerms } from "../helpers/role_terms.js";
 import {
@@ -151,11 +151,13 @@ export function createMarketFlowNode(opts: AnalystNodeOptions) {
         );
       }
     }
+    const signalSourceReport = cleaned;
+    const visibleReport = stripAgentMachineBlocks(cleaned);
 
     return {
-      messages: [cleaned ? new AIMessage(cleaned) : result],
-      market_flow_report: cleaned,
-      agent_signals: signalUpdate(MARKET_FLOW_REPORT_SPEC.analystName, cleaned),
+      messages: [visibleReport ? new AIMessage(visibleReport) : result],
+      market_flow_report: visibleReport,
+      agent_signals: signalUpdate(MARKET_FLOW_REPORT_SPEC.analystName, signalSourceReport),
     };
   };
 }

@@ -10,7 +10,7 @@
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
-import { signalUpdate } from "../helpers/output_schema.js";
+import { signalUpdate, stripAgentMachineBlocks } from "../helpers/output_schema.js";
 import { postJudgeClean, preJudgeClean } from "../helpers/report_leads.js";
 import { normalizeChineseRoleTerms } from "../helpers/role_terms.js";
 import { validateAndRefine } from "../helpers/validate_refine.js";
@@ -168,11 +168,13 @@ export function createCatalystSentimentNode(opts: AnalystNodeOptions) {
       if (refined) report = refined;
       report = postJudgeClean(report);
     }
+    const signalSourceReport = report;
+    const visibleReport = stripAgentMachineBlocks(report);
 
     return {
-      messages: [new AIMessage(report)],
-      catalyst_sentiment_report: report,
-      agent_signals: signalUpdate(CATALYST_SENTIMENT_REPORT_SPEC.analystName, report),
+      messages: [new AIMessage(visibleReport)],
+      catalyst_sentiment_report: visibleReport,
+      agent_signals: signalUpdate(CATALYST_SENTIMENT_REPORT_SPEC.analystName, signalSourceReport),
       sender: "CatalystSentiment",
     } as SpineStateUpdate;
   };

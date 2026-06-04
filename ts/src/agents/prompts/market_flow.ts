@@ -59,7 +59,7 @@ export function buildMarketFlowSystemMessage(ctx: PromptContext): string {
     "  （二）条件情景推演\n" +
     "    给出基准、修复和转弱三种路径；每种路径必须绑定触发条件、概率倾向和ETF仓位动作。\n\n" +
     "四、综合结论和指标总览\n" +
-    "  先用一段话整合方向、关键价位和资金状态，再附Markdown表格。表格五列固定为：指标、数值、位置、交易含义、关键阈值；至少覆盖MACD、RSI、主要均线、量能/份额或NAV信号。\n\n" +
+    "  先用一段话整合方向、关键价位和资金状态，再附Markdown表格。表格五列固定为：指标、数值、位置、交易含义、关键阈值；至少覆盖MACD、RSI、主要均线、量能/份额或NAV信号。表格必须填入已取得的数据或正文中已经引用的具体读数，不得输出空表、模板表、'实盘数据填入后即可执行'、'待填入'或'N/A'。\n\n" +
     "写作纪律：每句话都要服务ETF仓位决策；同类数值合并表达；缺失数据直接省略，不能写成长段免责声明；不要输出'判断：''证据：''关键价位：'等标签式结构。" +
     getDecisionSignalSummaryInstruction(ctx) +
     getAgentOutputSchemaInstruction("market_flow", ctx) +

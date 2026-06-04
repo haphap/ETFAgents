@@ -17,6 +17,7 @@ function fakeState(overrides: Partial<SpineStateType> = {}): SpineStateType {
     top_holdings_report: "th",
     research_allocation_plan: "rap",
     trader_allocation_plan: "tap",
+    agent_signals: {},
     trader_backtest_signal: { rating: "Overweight" },
     final_allocation_decision: "fad",
     investment_debate_state: {
@@ -60,6 +61,28 @@ describe("memory writer", () => {
       current_aggressive_response: "Aggressive: more",
       current_conservative_response: "Conservative: less",
       current_neutral_response: "Neutral: hold",
+    });
+  });
+
+  it("forwards parsed agent signals as machine-readable sidecar payload", () => {
+    const payload = buildMemoryPayload(
+      fakeState({
+        agent_signals: {
+          market_flow: {
+            source: "market_flow",
+            agent: "market_flow",
+            fields: { price_regime: "TREND_UP", confidence: 0.8 },
+            raw: "agent: market_flow\nprice_regime: TREND_UP\nconfidence: 0.8",
+            decision_summary: { 方向: "偏多" },
+          },
+        },
+      }),
+    );
+    expect(payload.agent_signals).toMatchObject({
+      market_flow: {
+        fields: { price_regime: "TREND_UP", confidence: 0.8 },
+        decision_summary: { 方向: "偏多" },
+      },
     });
   });
 

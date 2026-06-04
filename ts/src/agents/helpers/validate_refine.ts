@@ -89,6 +89,8 @@ function resolveValidationMode(value: string | undefined): ValidationMode {
 const MARKDOWN_H1_RE = /^[ \t]*#\s+\S/m;
 const MARKDOWN_H2_RE = /^[ \t]*##\s+\S/m;
 const MARKDOWN_TABLE_SEPARATOR_RE = /^\|(?:\s*:?-{3,}:?\s*\|)+\s*$/m;
+const MARKDOWN_TABLE_DATA_ROW_RE = /^\|(?:[^|\n]*\|){2,}\s*$/m;
+const PLACEHOLDER_TABLE_TEXT_RE = /实盘数据填入后即可执行|待填入|待补充|N\/A|暂无数据/i;
 const DECISION_SIGNAL_FIELDS: ReadonlyArray<ReadonlyArray<string>> = [
   ["方向", "Direction"],
   ["置信度", "Confidence"],
@@ -116,6 +118,24 @@ function escapeRegExp(value: string): string {
 function hasSchemaField(text: string, field: string): boolean {
   const re = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(field)}\\s*[:：]`);
   return re.test(text);
+}
+
+function hasMarkdownTableWithData(text: string): boolean {
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length - 2; i += 1) {
+    const header = (lines[i] ?? "").trim();
+    const separator = (lines[i + 1] ?? "").trim();
+    const row = (lines[i + 2] ?? "").trim();
+    if (
+      header.startsWith("|") &&
+      MARKDOWN_TABLE_SEPARATOR_RE.test(separator) &&
+      MARKDOWN_TABLE_DATA_ROW_RE.test(row) &&
+      !PLACEHOLDER_TABLE_TEXT_RE.test(row)
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function staticValidate(report: string, spec: AnalystReportSpec): StaticVerdict {
@@ -165,8 +185,8 @@ export function staticValidate(report: string, spec: AnalystReportSpec): StaticV
 
   if (spec.requireTailTable) {
     const tailWindow = report.length > 2000 ? report.slice(-2000) : report;
-    if (!MARKDOWN_TABLE_SEPARATOR_RE.test(tailWindow)) {
-      verdict.missingElements.push("末尾章节缺少指标总览 Markdown 表格");
+    if (!hasMarkdownTableWithData(tailWindow)) {
+      verdict.missingElements.push("末尾章节缺少带实际数据行的指标总览 Markdown 表格");
     }
   }
 
@@ -229,8 +249,8 @@ const JUDGE_BASE_RULES =
   "- 是否把主要信号的配置含义融入正文推理，而不是写成「这意味着什么」「对交易应该怎么做」等问答标签或交易指引块？\n" +
   "- 开篇第一句是否直接陈述核心结论或判断（偏多/偏空/中性及原因），而非「本报告将…」等场景设置？\n\n" +
   "### 决策价值\n" +
-  "- 末尾是否包含「决策信号摘要」或「Decision Signal Summary」，且包含方向、置信度、时间窗口、ETF传导路径、核心证据、最大反证条件、配置含义和下一步观察？\n" +
-  "- 决策信号摘要之后是否包含「输出Schema」或「Output Schema」，并按角色专属schema逐项填写字段、枚举值、key_drivers和confidence？\n" +
+  "- 正文之后是否包含独立机器块「决策信号摘要」或「Decision Signal Summary」，且包含方向、置信度、时间窗口、ETF传导路径、核心证据、最大反证条件、配置含义和下一步观察？\n" +
+  "- 决策信号摘要之后是否包含独立机器块「输出Schema」或「Output Schema」，并按角色专属schema逐项填写字段、枚举值、key_drivers和confidence？\n" +
   "- 方向是否明确为偏多/偏空/中性或 bullish/bearish/neutral，而不是含糊描述？\n" +
   "- 配置含义是否落到ETF整体仓位的增持、持有、减持或回避，而不是停留在行业评论或成分股交易？\n" +
   "- 是否至少给出一个能推翻当前判断的反证条件，以及2-3条带数据或来源的核心证据？\n\n" +

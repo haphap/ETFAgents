@@ -3,6 +3,7 @@ import {
   formatAgentSignalsForPrompt,
   parseAgentOutputSchema,
   signalUpdate,
+  stripAgentMachineBlocks,
 } from "../src/agents/helpers/output_schema.js";
 
 describe("agent output schema parser", () => {
@@ -25,6 +26,19 @@ describe("agent output schema parser", () => {
     expect(parsed?.fields.oil_regime).toBe("BACKWARDATION");
     expect(parsed?.fields.confidence).toBe(0.68);
     expect(parsed?.key_drivers).toEqual(["铜库存下降", "中国需求稳定", "油价曲线偏紧"]);
+    expect(parsed?.decision_summary?.方向).toBe("中性");
+  });
+
+  it("strips decision summary and output schema from visible report text", () => {
+    const report =
+      "正文第一段。\n\n四、综合结论和指标总览\n\n结论段。\n\n" +
+      "**决策信号摘要**\n方向: 偏多\n置信度: 高\n\n" +
+      "**输出Schema**\nagent: market_flow\nconfidence: 0.8";
+    const visible = stripAgentMachineBlocks(report);
+    expect(visible).toContain("四、综合结论和指标总览");
+    expect(visible).toContain("结论段。");
+    expect(visible).not.toContain("决策信号摘要");
+    expect(visible).not.toContain("输出Schema");
   });
 
   it("formats parsed signals as a compact machine-readable context block", () => {

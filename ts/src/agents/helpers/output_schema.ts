@@ -7,6 +7,8 @@ export interface AgentOutputSignal {
   agent: string;
   fields: Record<string, AgentSignalValue>;
   raw: string;
+  decision_summary?: Record<string, string>;
+  decision_summary_raw?: string;
   confidence?: number;
   key_drivers?: string[];
 }
@@ -15,6 +17,9 @@ export type AgentSignalMap = Record<string, AgentOutputSignal>;
 
 const SCHEMA_HEADING_RE = /(?:^|\n)\s*(?:\*\*)?(?:输出Schema|Output Schema)(?:\*\*)?\s*(?:\n|$)/g;
 const SCHEMA_FIELD_RE = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*[:：]\s*(.*?)\s*$/;
+const DECISION_SUMMARY_HEADING_RE =
+  /(?:^|\n)\s*(?:\*\*)?(?:决策信号摘要|Decision Signal Summary)(?:\*\*)?\s*(?:\n|$)/g;
+const DECISION_SUMMARY_FIELD_RE = /^\s*([^:：\n]{1,40})\s*[:：]\s*(.*?)\s*$/;
 const NEXT_SECTION_RE =
   /^\s*(?:#{1,6}\s+\S|[一二三四五六七八九十]+、\S|（[一二三四五六七八九十]+）\S)/;
 
@@ -79,6 +84,66 @@ function readSchemaBlock(report: string): string {
   return block.join("\n").trim();
 }
 
+function lastDecisionSummaryIndex(text: string): number {
+  let index = -1;
+  for (const match of text.matchAll(DECISION_SUMMARY_HEADING_RE)) {
+    index = (match.index ?? 0) + match[0].length;
+  }
+  return index;
+}
+
+function readDecisionSummaryBlock(report: string): string {
+  const start = lastDecisionSummaryIndex(report);
+  if (start < 0) return "";
+  const schemaStart = lastSchemaIndex(report);
+  const end = schemaStart > start ? schemaStart : report.length;
+  return report.slice(start, end).trim();
+}
+
+export function parseDecisionSignalSummary(
+  report: string | undefined,
+): { raw: string; fields: Record<string, string> } | null {
+  if (!report?.trim()) return null;
+  const raw = readDecisionSummaryBlock(report);
+  if (!raw) return null;
+  const fields: Record<string, string> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const match = DECISION_SUMMARY_FIELD_RE.exec(line);
+    if (!match) continue;
+    const [, field, value] = match;
+    if (!field || value === undefined) continue;
+    fields[field.trim()] = value.trim();
+  }
+  return { raw, fields };
+}
+
+export function stripAgentMachineBlocks(report: string | undefined): string {
+  if (!report) return "";
+  const normalized = report.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  let cut = normalized.length;
+  const summaryStart = (() => {
+    let best = -1;
+    for (const match of normalized.matchAll(DECISION_SUMMARY_HEADING_RE)) {
+      best = match.index ?? best;
+    }
+    return best;
+  })();
+  const schemaStart = (() => {
+    let best = -1;
+    for (const match of normalized.matchAll(SCHEMA_HEADING_RE)) {
+      best = match.index ?? best;
+    }
+    return best;
+  })();
+  for (const idx of [summaryStart, schemaStart]) {
+    if (idx >= 0) cut = Math.min(cut, idx);
+  }
+  return normalized
+    .slice(0, cut)
+    .replace(/\n[ \t]*\n[ \t]*$/g, "\n")
+    .trim();
+}
+
 export function parseAgentOutputSchema(
   report: string | undefined,
   source: string,
@@ -98,11 +163,13 @@ export function parseAgentOutputSchema(
   const agent = typeof fields.agent === "string" && fields.agent ? fields.agent : source;
   const confidence = typeof fields.confidence === "number" ? fields.confidence : undefined;
   const keyDrivers = Array.isArray(fields.key_drivers) ? fields.key_drivers : undefined;
+  const summary = parseDecisionSignalSummary(report);
   return {
     source,
     agent,
     fields,
     raw,
+    ...(summary ? { decision_summary: summary.fields, decision_summary_raw: summary.raw } : {}),
     ...(confidence !== undefined ? { confidence } : {}),
     ...(keyDrivers ? { key_drivers: keyDrivers } : {}),
   };

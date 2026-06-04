@@ -195,19 +195,19 @@ export function getDecisionSignalSummaryInstruction(ctx: PromptContext): string 
   if (isChinese(ctx.language)) {
     return (
       "\n## 决策信号摘要要求\n" +
-      "报告末尾必须在最后一个一级章节内附加加粗行 **决策信号摘要**，不要新增“五、”或额外一级章节。" +
+      "完成报告正文后，另起一个机器提取块 **决策信号摘要**；它不属于报告正文，不要新增“五、”或额外一级章节。" +
       "摘要必须使用以下字段，字段名保持不变：方向、置信度、时间窗口、ETF传导路径、核心证据、最大反证条件、配置含义、下一步观察。" +
       "方向只能写偏多、偏空或中性；置信度只能写低、中或高；核心证据写2-3条带数据或来源的证据；" +
       "配置含义必须明确对应ETF整体仓位的增持、持有、减持或回避含义，不得给成分股交易指令。" +
-      "摘要应短而可被后续研究经理和交易员直接使用；不要输出JSON或代码块，角色输出Schema字段用普通文本字段行填写。\n"
+      "摘要应短而可被后续研究经理和交易员直接使用；系统会把该块提取为JSON sidecar，不要把这些字段混入正文段落。\n"
     );
   }
   return (
     "\n## Decision Signal Summary Requirement\n" +
-    "At the end of the final top-level section, append a bold line **Decision Signal Summary**; do not create an extra top-level section." +
+    "After the prose report, start a separate machine-extraction block named **Decision Signal Summary**; it is not part of the prose report and must not create an extra top-level section." +
     " Use these exact fields: Direction, Confidence, Time Window, ETF Transmission Path, Core Evidence, Main Invalidation, Allocation Implication, Next Watch Items." +
     " Direction must be bullish, bearish, or neutral; confidence must be low, medium, or high; core evidence should include 2-3 data-backed points." +
-    " Allocation implication must target the ETF position only, never constituent-stock trades. Do not output JSON or code blocks; render the role output schema as plain field lines.\n"
+    " Allocation implication must target the ETF position only, never constituent-stock trades. The system extracts this block into a JSON sidecar; do not blend these fields into prose paragraphs.\n"
   );
 }
 
@@ -228,7 +228,7 @@ export function getAgentOutputSchemaInstruction(
         : "在 **决策信号摘要** 之后附加 **输出Schema**";
     return (
       "\n## 输出Schema要求\n" +
-      `${anchor}，参考 MOSAIC-Agents 风格，用普通文本逐行填写以下字段；不要使用代码块、JSON对象或额外字段。` +
+      `${anchor}，参考 MOSAIC-Agents 风格，用普通文本逐行填写以下字段；这是机器提取块，不属于报告正文，不要使用代码块、JSON对象或额外字段。` +
       "枚举字段必须从给定枚举中选择；key_drivers 保持3-5条；confidence 使用0到1之间的小数。\n" +
       `${lines}\n`
     );
@@ -239,7 +239,7 @@ export function getAgentOutputSchemaInstruction(
       : "After **Decision Signal Summary**, append **Output Schema**";
   return (
     "\n## Output Schema Requirement\n" +
-    `${anchor} in MOSAIC-Agents style as plain text field lines. Do not use code fences, JSON objects, or extra fields. ` +
+    `${anchor} in MOSAIC-Agents style as plain text field lines. This is a machine-extraction block, not prose report content. Do not use code fences, JSON objects, or extra fields. ` +
     "Choose enum values from the allowed options; keep key_drivers to 3-5 items; use a 0-1 decimal for confidence.\n" +
     `${lines}\n`
   );

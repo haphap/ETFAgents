@@ -12,7 +12,7 @@ import { AIMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { MemoryRoleConfig } from "../helpers/memory.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
-import { signalUpdate } from "../helpers/output_schema.js";
+import { signalUpdate, stripAgentMachineBlocks } from "../helpers/output_schema.js";
 import { postJudgeClean, preJudgeClean } from "../helpers/report_leads.js";
 import { normalizeChineseRoleTerms } from "../helpers/role_terms.js";
 import {
@@ -153,18 +153,20 @@ export function createAnalystNode(
       }
       processedReport = postJudgeClean(processedReport);
     }
+    const signalSourceReport = processedReport;
+    const visibleReport = stripAgentMachineBlocks(processedReport);
 
     const stateUpdate: Record<string, unknown> = {};
-    stateUpdate[config.stateKey as string] = processedReport;
+    stateUpdate[config.stateKey as string] = visibleReport;
     if (config.reportSpec?.analystName) {
-      stateUpdate.agent_signals = signalUpdate(config.reportSpec.analystName, processedReport);
+      stateUpdate.agent_signals = signalUpdate(config.reportSpec.analystName, signalSourceReport);
     }
     // Analysts append their report to the message history so the next analyst /
     // tool round sees it; debate & manager nodes opt out (appendMessage: false)
     // since they read explicit context blocks instead, matching Python (their
     // nodes return only debate-state / plan fields, not chat messages).
     if (config.appendMessage !== false) {
-      stateUpdate.messages = [new AIMessage(processedReport)];
+      stateUpdate.messages = [new AIMessage(visibleReport)];
     }
 
     return stateUpdate as SpineStateUpdate;
