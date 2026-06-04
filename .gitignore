@@ -9,12 +9,15 @@ dist/
 .env
 .claude/
 .commandcode/
+.reasonix/
 AGENTS.md
+REASONIX.md
 
 results/
 plan.md
 
 # TypeScript workspace
+node_modules/
 ts/node_modules/
 ts/dist/
 ts/coverage/

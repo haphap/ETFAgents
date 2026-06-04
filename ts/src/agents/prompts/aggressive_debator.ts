@@ -14,7 +14,7 @@
  */
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
-import type { PromptContext } from "./shared.js";
+import { getLanguageInstruction, type PromptContext } from "./shared.js";
 
 export const AGGRESSIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
   analystName: "aggressive_debator",
@@ -26,7 +26,7 @@ export const AGGRESSIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
     "- 是否以对话辩论风格输出？",
 };
 
-export function buildAggressiveDebatorSystemMessage(_ctx: PromptContext): string {
+export function buildAggressiveDebatorSystemMessage(ctx: PromptContext): string {
   return (
     "As the Aggressive Risk Analyst, your role is to actively champion " +
     "high-reward ETF allocation opportunities, emphasizing bold positioning, " +
@@ -49,6 +49,7 @@ export function buildAggressiveDebatorSystemMessage(_ctx: PromptContext): string
     "risk-taking to outpace market norms. Maintain a focus on debating " +
     "and persuading, not just presenting data. Challenge each counterpoint " +
     "to underscore why a high-risk approach is optimal. Output " +
-    "conversationally as if you are speaking without any special formatting."
+    "conversationally as if you are speaking without any special formatting." +
+    getLanguageInstruction(ctx)
   );
 }

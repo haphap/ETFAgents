@@ -1,5 +1,5 @@
 /**
- * Typed wrappers for the 21 RPC methods exposed by `etfagents/bridge`.
+ * Typed wrappers for RPC methods exposed by `etfagents/bridge`.
  *
  * Keep this file as the single source of truth for the wire-level shapes.
  * If a method's params/result change on the Python side, update the type
@@ -93,6 +93,15 @@ export interface PaperTrade {
   pnl: number | null;
   analysis_id: string | null;
   created_at: string;
+}
+
+export interface WatchlistEntry {
+  ticker: string;
+  name?: string;
+  group?: string;
+  tags?: string[];
+  notes?: string;
+  added_at?: string;
 }
 
 /** Backtest signal payload — same shape EtfAgentsGraph.analyze_candidate_pool returns. */
@@ -223,6 +232,11 @@ export class BridgeApi {
     opts: { user_id?: string; db_path?: string } = {},
   ): Promise<unknown> {
     return this.client.call("paper.sell", { ticker, quantity, ...opts });
+  }
+
+  // watchlist.*
+  watchlistList(opts: { group?: string; db_path?: string } = {}): Promise<WatchlistEntry[]> {
+    return this.client.call<WatchlistEntry[]>("watchlist.list", opts);
   }
 
   // backtest.*

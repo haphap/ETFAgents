@@ -37,7 +37,7 @@ python -m venv .venv && source .venv/bin/activate && pip install .
 cp .env.example .env          # fill TUSHARE_TOKEN + an LLM provider key
 cd ts && pnpm install --frozen-lockfile
 pnpm dev analyze 510300.SH    # full pipeline for one ETF
-pnpm dev tui                  # interactive dashboard
+pnpm dev tui                  # interactive dashboard (or: pnpm tui)
 ```
 
 See **[CLI & TUI](CLI-and-TUI)** for the full command set and **[Configuration](Configuration)** for environment setup.

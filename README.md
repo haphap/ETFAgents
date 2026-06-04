@@ -52,7 +52,7 @@ _A multi-agent ETF research & allocation framework, built on LangGraph._
 - 🔁 **多轮辩论 (Multi-round)**：多空与风险辩论可按 `maxDebateRounds` / `maxRiskRounds` 循环，由 `routeDebate` / `routeRiskDebate` 驱动并以累计回合数终止。
 - 🧬 **智能体记忆 (Memory)**：运行结束写回 `analysis_memory_entry`（延续性 / 经验教训 / 方法手册），下次运行前由 `memory.build_context` 注入到图初始状态——**先读后写**的闭环。
 - 📊 **Backtrader 回测 + 纸上交易**：结构化触发信号驱动的回测（NAV / 基准对比 / 指标 / 健康检查），以及多用户纸上交易引擎（T+1、佣金、最小交易单位、bcrypt 鉴权）。
-- 🖥️ **Ink TUI 终端仪表盘**：实时研究面板（按团队分栏 + 章节阅读器 + 滚动）、报告库、自选、回测查看、纸上交易快照、错误详情，以及分析师选择 / 研究深度 / 辩论轮数等配置。
+- 🖥️ **Ink TUI 终端仪表盘**：实时研究面板（团队标签 + 团队详情弹窗 + 章节阅读器）、报告库、自选、回测查看、纸上交易快照、错误详情，以及分析师选择 / 研究深度 / 辩论轮数等配置。
 - 🌐 **多 LLM Provider + 厂商路由数据**：LLM 走 OpenAI 兼容工厂（OpenAI / DeepSeek / xAI / OpenRouter / Ollama / MiniMax / vLLM）+ Python 端原生 Anthropic / Google；数据按 `route_to_vendor()` 在 Tushare / yfinance / akshare / FRED / Brave / qlib 间路由。
 - 🈶 **中英文输出**：分析报告与最终决策支持中文 / English。
 
@@ -114,7 +114,7 @@ pnpm dev backtest 510300.SH --start-date 2024-01-01 --end-date 2024-06-01
 pnpm dev paper account                          # 纸上交易账户
 pnpm dev detail 510300.SH                       # ETF 信息查询
 pnpm dev cache stats                            # 缓存管理
-pnpm dev tui                                    # 交互式 Ink 终端仪表盘
+pnpm dev tui                                    # 全屏交互式 Ink 终端仪表盘（也可 pnpm tui）
 ```
 
 **Python CLI**（`pip install .` 后提供 `etfagents` 控制台脚本）：
@@ -126,6 +126,8 @@ etfagents cache cleanup --days 30
 etfagents backtest --tickers 510300.SH,159915.SZ --benchmark-tickers equal_weight_pool \
   --start-date 2026-01-02 --end-date 2026-03-31
 ```
+
+> `etfagents tui` 是旧版 Python Textual TUI 入口，现已降级为迁移提示；交互式仪表盘请使用 `pnpm dev tui` / `pnpm tui`。
 
 > ⚙️ 输出语言由 `output_language` 配置（中文 / English）。保留完整代码与交易所后缀（如 `510300.SH` / `159915.SZ` / `7203.T`）。
 
@@ -147,7 +149,7 @@ LLM 工厂 · 回测信号提取
 ```text
 ETFAgents/
 ├── etfagents/                  # 🐍 Python sidecar
-│   ├── bridge/                 #   JSON-RPC over stdio + handlers/ (tools/config/cache/paper/backtest/memory)
+│   ├── bridge/                 #   JSON-RPC over stdio + handlers/ (tools/config/cache/paper/backtest/memory/watchlist)
 │   ├── agents/                 #   analyst / researcher / trader / risk / manager 角色 + utils
 │   ├── graph/                  #   LangGraph 编排、checkpoint、回放、信号处理
 │   ├── dataflows/              #   Tushare / yfinance / akshare / FRED / Brave + route_to_vendor()
@@ -155,7 +157,7 @@ ETFAgents/
 │   ├── backtest/               #   Backtrader 引擎 + 结果产物 (nav/metrics/trades/...)
 │   ├── paper_trading/          #   A 股 ETF 纸上交易 (T+1 / 佣金 / 最小单位 / 多用户)
 │   ├── watchlist.py · detail.py · cache_manager.py · default_config.py
-├── cli/                        # ⌨️ Typer/Rich Python CLI (etfagents 控制台脚本) + Textual TUI
+├── cli/                        # ⌨️ Typer/Rich Python CLI (etfagents 控制台脚本；Textual TUI legacy)
 ├── ts/                         # 🟦 TypeScript 前端
 │   └── src/
 │       ├── bridge/             #   BridgeClient + 类型化 RPC 封装
@@ -163,7 +165,7 @@ ETFAgents/
 │       ├── agents/             #   nodes · helpers · prompts · schemas · state
 │       ├── graph/              #   full_graph LangGraph.js 装配
 │       ├── cli/commands/       #   analyze / analyze-pool / backtest / paper / detail / cache / ...
-│       └── tui/                #   Ink TUI (研究 / 报告库 / 自选 / 回测 / 纸上交易 / 错误详情)
+│       └── tui/                #   Ink TUI shell + model/runner/services/screens
 ├── tests/                      # ✅ Python unittest
 ├── docs/ · pyproject.toml · ts/package.json · .github/workflows/ci.yml
 ```

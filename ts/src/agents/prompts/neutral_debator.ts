@@ -11,7 +11,7 @@
  */
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
-import type { PromptContext } from "./shared.js";
+import { getLanguageInstruction, type PromptContext } from "./shared.js";
 
 export const NEUTRAL_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
   analystName: "neutral_debator",
@@ -24,7 +24,7 @@ export const NEUTRAL_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
     "- 是否使用3-5个短段落（段落之间空行）而非列表？",
 };
 
-export function buildNeutralDebatorSystemMessage(_ctx: PromptContext): string {
+export function buildNeutralDebatorSystemMessage(ctx: PromptContext): string {
   return (
     "As the Neutral Risk Analyst, your role is to provide a balanced " +
     "perspective, weighing both the potential benefits and risks of the " +
@@ -45,6 +45,7 @@ export function buildNeutralDebatorSystemMessage(_ctx: PromptContext): string {
     "data, aiming to show that a balanced view can lead to the most " +
     "reliable outcomes.\n\n" +
     "Write the visible body in 3-5 short paragraphs with blank lines " +
-    "between paragraphs; do not use bullet points or numbered lists."
+    "between paragraphs; do not use bullet points or numbered lists." +
+    getLanguageInstruction(ctx)
   );
 }

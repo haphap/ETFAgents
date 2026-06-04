@@ -39,7 +39,7 @@ The front-end spawns the Python sidecar as a subprocess
 
 ```text
 etfagents/        # Python sidecar
-  bridge/         #   JSON-RPC server + handlers (tools/config/cache/paper/backtest/memory)
+  bridge/         #   JSON-RPC server + handlers (tools/config/cache/paper/backtest/memory/watchlist)
   agents/         #   analyst / researcher / trader / risk / manager roles + utils
   graph/          #   LangGraph orchestration, checkpointing, replay, signal processing
   dataflows/      #   vendor integrations + route_to_vendor()
@@ -53,7 +53,7 @@ ts/src/
   agents/         #   nodes · helpers · prompts · schemas · state
   graph/          #   full_graph LangGraph.js assembly
   cli/commands/   #   analyze / analyze-pool / backtest / paper / detail / cache / ...
-  tui/            #   Ink TUI
+  tui/            #   Ink TUI shell + model / runner / services / screens
 ```
 
 ## Design principles

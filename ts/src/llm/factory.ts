@@ -26,7 +26,7 @@ const DEFAULT_BASE_URL: Record<string, string | undefined> = {
   xai: "https://api.x.ai/v1",
   openrouter: "https://openrouter.ai/api/v1",
   ollama: "http://localhost:11434/v1",
-  vllm: "http://localhost:8000/v1",
+  vllm: "http://127.0.0.1:8020/v1",
   minimax: "https://api.minimax.chat/v1",
   deepseek: "https://api.deepseek.com/v1",
 };

@@ -11,7 +11,7 @@
  */
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
-import type { PromptContext } from "./shared.js";
+import { getLanguageInstruction, type PromptContext } from "./shared.js";
 
 export const BEAR_REPORT_SPEC: AnalystReportSpec = {
   analystName: "bear_researcher",
@@ -24,7 +24,7 @@ export const BEAR_REPORT_SPEC: AnalystReportSpec = {
     "- 是否避免使用五点清单硬套结论？",
 };
 
-export function buildBearResearcherSystemMessage(_ctx: PromptContext): string {
+export function buildBearResearcherSystemMessage(ctx: PromptContext): string {
   return (
     "You are a Bear Analyst making the case against increasing ETF exposure. " +
     "Your task is to build an ETF-product-aware bearish case that explains " +
@@ -68,6 +68,7 @@ export function buildBearResearcherSystemMessage(_ctx: PromptContext): string {
     "When making claims, tie them back to ETF allocation rather than " +
     "discussing single names in isolation. " +
     "For ordinary lists, use Arabic numerals such as 1. 2. 3.; " +
-    "if you use Chinese section headings, keep forms like 一、二、三."
+    "if you use Chinese section headings, keep forms like 一、二、三." +
+    getLanguageInstruction(ctx)
   );
 }
