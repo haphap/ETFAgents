@@ -13,7 +13,7 @@
  */
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
-import type { PromptContext } from "./shared.js";
+import { getLanguageInstruction, type PromptContext } from "./shared.js";
 
 export const CONSERVATIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
   analystName: "conservative_debator",
@@ -25,7 +25,7 @@ export const CONSERVATIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
     "- 是否以对话辩论风格输出？",
 };
 
-export function buildConservativeDebatorSystemMessage(_ctx: PromptContext): string {
+export function buildConservativeDebatorSystemMessage(ctx: PromptContext): string {
   return (
     "As the Conservative Risk Analyst, your primary objective is to protect " +
     "assets, minimize volatility, and ensure steady, reliable portfolio " +
@@ -48,6 +48,7 @@ export function buildConservativeDebatorSystemMessage(_ctx: PromptContext): stri
     "the firm's assets. Focus on debating and critiquing their arguments to " +
     "demonstrate the strength of a low-risk strategy over their approaches. " +
     "Output conversationally as if you are speaking without any special " +
-    "formatting."
+    "formatting." +
+    getLanguageInstruction(ctx)
   );
 }

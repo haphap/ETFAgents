@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { buildAggressiveDebatorSystemMessage } from "../src/agents/prompts/aggressive_debator.js";
+import { buildConservativeDebatorSystemMessage } from "../src/agents/prompts/conservative_debator.js";
 import { buildMarketFlowSystemMessage } from "../src/agents/prompts/market_flow.js";
+import { buildNeutralDebatorSystemMessage } from "../src/agents/prompts/neutral_debator.js";
 import {
   buildInstrumentContext,
   collapseBlankLines,
@@ -93,5 +96,21 @@ describe("trader prompt", () => {
     );
     // The non-structured guidance must survive
     expect(stripped).toContain("配置执行计划");
+  });
+});
+
+describe("risk debator prompts", () => {
+  it("inherit the configured Chinese output language", () => {
+    const ctx = { language: "Chinese" };
+
+    expect(buildAggressiveDebatorSystemMessage(ctx)).toContain(
+      "Write your entire response in Chinese",
+    );
+    expect(buildConservativeDebatorSystemMessage(ctx)).toContain(
+      "Write your entire response in Chinese",
+    );
+    expect(buildNeutralDebatorSystemMessage(ctx)).toContain(
+      "Write your entire response in Chinese",
+    );
   });
 });
