@@ -15,6 +15,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { buildTraderBacktestSignal } from "../helpers/backtest_signal.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
+import { formatAgentSignalsForPrompt, signalUpdate } from "../helpers/output_schema.js";
 import { appendTraderOutputSchema, renderTraderProposal } from "../helpers/render.js";
 import { normalizeChineseManagerTerms } from "../helpers/role_terms.js";
 import { invokeStructuredOrFreetext } from "../helpers/structured_output.js";
@@ -52,6 +53,20 @@ export function createTraderNode(opts: TraderNodeOptions) {
     const contextMessage = buildTraderContextMessage({
       asset: ticker,
       instrumentContext,
+      structuredSignals: formatAgentSignalsForPrompt(state.agent_signals, {
+        language: ctx.language,
+        include: [
+          "market_flow",
+          "catalyst_sentiment",
+          "macro_regime",
+          "meso_commodity",
+          "holdings_industry",
+          "top_holdings",
+          "bull_researcher",
+          "bear_researcher",
+          "research_manager",
+        ],
+      }),
       researchPlan: reportForDecisionContext(state.research_allocation_plan, ctx, 4_000),
       marketFlowReport: reportForDecisionContext(state.market_flow_report, ctx, 5_000),
       catalystSentimentReport: reportForDecisionContext(
@@ -100,6 +115,7 @@ export function createTraderNode(opts: TraderNodeOptions) {
     return {
       messages: [new AIMessage(postProcessed)],
       trader_allocation_plan: postProcessed,
+      agent_signals: signalUpdate("trader", postProcessed),
       trader_backtest_signal: buildTraderBacktestSignal(
         ticker,
         state.trade_date ?? "",

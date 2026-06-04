@@ -21,6 +21,7 @@ import {
   normalizeMarketFlowTailSections,
 } from "../helpers/market_flow_normalize.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
+import { signalUpdate } from "../helpers/output_schema.js";
 import { postJudgeClean, preJudgeClean } from "../helpers/report_leads.js";
 import { normalizeChineseRoleTerms } from "../helpers/role_terms.js";
 import {
@@ -154,6 +155,7 @@ export function createMarketFlowNode(opts: AnalystNodeOptions) {
     return {
       messages: [cleaned ? new AIMessage(cleaned) : result],
       market_flow_report: cleaned,
+      agent_signals: signalUpdate(MARKET_FLOW_REPORT_SPEC.analystName, cleaned),
     };
   };
 }

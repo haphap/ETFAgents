@@ -19,6 +19,19 @@ function stateWith(
     meso_commodity_report: "",
     holdings_industry_report: "",
     top_holdings_report: "",
+    agent_signals: {
+      market_flow: {
+        source: "market_flow",
+        agent: "market_flow",
+        fields: {
+          agent: "market_flow",
+          price_regime: "TREND_UP",
+          confidence: 0.75,
+        },
+        raw: "agent: market_flow\nprice_regime: TREND_UP\nconfidence: 0.75",
+        confidence: 0.75,
+      },
+    },
     trader_allocation_plan: "trader-plan",
     investment_debate_state: { ...emptyDebateState(), ...investment },
     risk_debate_state: { ...emptyDebateState(), ...risk },
@@ -39,6 +52,8 @@ describe("debate context builders", () => {
     expect(ctx).toContain("BEAR_R1");
     expect(ctx).toContain("BEAR_NOW");
     expect(ctx).toContain("mf-report"); // reports still injected
+    expect(ctx).toContain("## 结构化信号");
+    expect(ctx).toContain("price_regime: TREND_UP");
   });
 
   it("gives the bear its own complete history plus the bull's", () => {

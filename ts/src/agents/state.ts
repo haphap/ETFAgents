@@ -9,6 +9,8 @@
  */
 
 import { Annotation, MessagesAnnotation } from "@langchain/langgraph";
+import type { AgentSignalMap } from "./helpers/output_schema.js";
+import { mergeAgentSignals } from "./helpers/output_schema.js";
 
 /**
  * Accumulating debate accounting shared by the research and risk debates.
@@ -92,6 +94,11 @@ export const SpineState = Annotation.Root({
   top_holdings_report: Annotation<string>({
     reducer: (_prev, next) => next,
     default: () => "",
+  }),
+
+  agent_signals: Annotation<AgentSignalMap>({
+    reducer: (prev, next) => mergeAgentSignals(prev, next),
+    default: () => ({}),
   }),
 
   research_allocation_plan: Annotation<string>({

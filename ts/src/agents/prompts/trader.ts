@@ -95,6 +95,7 @@ export function buildTraderSystemMessage(ctx: PromptContext): string {
 export function buildTraderContextMessage(opts: {
   asset: string;
   instrumentContext: string;
+  structuredSignals?: string;
   researchPlan: string;
   marketFlowReport: string;
   catalystSentimentReport: string;
@@ -110,6 +111,9 @@ export function buildTraderContextMessage(opts: {
     "market flows, event-driven sentiment, industry structure, and constituent-level research. " +
     "Use this view as a foundation for evaluating your next ETF allocation decision. " +
     "When an upstream block contains `决策信号摘要` or `Decision Signal Summary`, treat that block as the highest-priority summary and use the surrounding report excerpt only as supporting evidence.\n\n" +
+    (opts.structuredSignals?.trim()
+      ? `${opts.structuredSignals.trim()}\n\nUse these structured signals as the machine-readable state snapshot; use the report excerpts below to verify evidence and thresholds.\n\n`
+      : "") +
     `Proposed Allocation View: ${opts.researchPlan}\n\n` +
     `Macro regime analysis: ${opts.macroRegimeReport}\n` +
     `Meso commodity analysis: ${opts.mesoCommodityReport}\n` +

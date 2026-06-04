@@ -10,6 +10,7 @@
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
+import { signalUpdate } from "../helpers/output_schema.js";
 import { postJudgeClean, preJudgeClean } from "../helpers/report_leads.js";
 import { normalizeChineseRoleTerms } from "../helpers/role_terms.js";
 import { validateAndRefine } from "../helpers/validate_refine.js";
@@ -171,6 +172,7 @@ export function createCatalystSentimentNode(opts: AnalystNodeOptions) {
     return {
       messages: [new AIMessage(report)],
       catalyst_sentiment_report: report,
+      agent_signals: signalUpdate(CATALYST_SENTIMENT_REPORT_SPEC.analystName, report),
       sender: "CatalystSentiment",
     } as SpineStateUpdate;
   };

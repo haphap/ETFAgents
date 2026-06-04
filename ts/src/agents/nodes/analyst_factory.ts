@@ -12,6 +12,7 @@ import { AIMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { MemoryRoleConfig } from "../helpers/memory.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
+import { signalUpdate } from "../helpers/output_schema.js";
 import { postJudgeClean, preJudgeClean } from "../helpers/report_leads.js";
 import { normalizeChineseRoleTerms } from "../helpers/role_terms.js";
 import {
@@ -155,6 +156,9 @@ export function createAnalystNode(
 
     const stateUpdate: Record<string, unknown> = {};
     stateUpdate[config.stateKey as string] = processedReport;
+    if (config.reportSpec?.analystName) {
+      stateUpdate.agent_signals = signalUpdate(config.reportSpec.analystName, processedReport);
+    }
     // Analysts append their report to the message history so the next analyst /
     // tool round sees it; debate & manager nodes opt out (appendMessage: false)
     // since they read explicit context blocks instead, matching Python (their

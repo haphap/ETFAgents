@@ -18,6 +18,7 @@
 
 import { type PromptContext, reportForDecisionContext } from "../prompts/shared.js";
 import type { DebateState, SpineStateType } from "../state.js";
+import { formatAgentSignalsForPrompt } from "./output_schema.js";
 
 const DEBATE_REPORT_CONTEXT_LIMIT = 5_000;
 
@@ -46,9 +47,21 @@ export function buildReportsBlock(state: SpineStateType, ctx?: PromptContext): s
       ([label, body]) =>
         `### ${label}\n${reportForDecisionContext(body, promptContext, reportContextCharLimit)}`,
     );
-  return blocks.length
+  const structuredSignals = formatAgentSignalsForPrompt(state.agent_signals, {
+    language: promptContext.language,
+    include: [
+      "market_flow",
+      "catalyst_sentiment",
+      "macro_regime",
+      "meso_commodity",
+      "holdings_industry",
+      "top_holdings",
+    ],
+  });
+  const reportBlock = blocks.length
     ? `## 分析师报告\n\n优先使用每份报告中的「决策信号摘要」；报告摘录只作为证据核对，不要把长篇正文重新复述。\n\n${blocks.join("\n\n")}`
     : "";
+  return join([structuredSignals, reportBlock]);
 }
 
 function section(title: string, body: string): string {
@@ -126,6 +139,14 @@ export function buildRiskContext(
   const others = (Object.keys(RISK_META) as RiskRole[]).filter((r) => r !== speaker);
   return join([
     buildReportsBlock(state, ctx),
+    formatAgentSignalsForPrompt(state.agent_signals, {
+      language: ctx?.language ?? "Chinese",
+      include: ["research_manager", "trader"],
+      title:
+        ctx?.language?.trim().toLowerCase() === "english"
+          ? "## Manager and Trader Structured Signals"
+          : "## 研究经理与交易员结构化信号",
+    }),
     section("交易员配置方案", state.trader_allocation_plan),
     section(`我方（${own.label}）完整历史`, String(d[own.history] ?? "")),
     ...others.flatMap((r) => [
@@ -149,6 +170,20 @@ export function buildPortfolioManagerContext(state: SpineStateType, ctx?: Prompt
   const d = state.risk_debate_state;
   return join([
     buildReportsBlock(state, ctx),
+    formatAgentSignalsForPrompt(state.agent_signals, {
+      language: ctx?.language ?? "Chinese",
+      include: [
+        "research_manager",
+        "trader",
+        "aggressive_debator",
+        "conservative_debator",
+        "neutral_debator",
+      ],
+      title:
+        ctx?.language?.trim().toLowerCase() === "english"
+          ? "## Downstream Structured Signals"
+          : "## 下游结构化信号",
+    }),
     section("研究经理配置方案", state.research_allocation_plan),
     section("激进派历史", d.aggressiveHistory),
     section("保守派历史", d.conservativeHistory),
