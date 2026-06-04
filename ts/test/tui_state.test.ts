@@ -15,6 +15,7 @@ import {
   selectedAnalystIds,
   sortByTicker,
   sortReports,
+  wrapToWidth,
 } from "../src/tui/index.js";
 
 describe("TUI state model", () => {
@@ -269,6 +270,32 @@ describe("P0 report reader", () => {
     expect(view.lines[1]?.text.startsWith("  ")).toBe(true);
   });
 
+  it("wraps plain text at word-ish boundaries when available", () => {
+    expect(wrapToWidth("alpha beta gamma", 10)).toEqual(["alpha beta", "gamma"]);
+  });
+
+  it("renders markdown tables as aligned terminal rows", () => {
+    const view = reportDisplayViewport(
+      [
+        "| 指标 | 数值 | 说明 |",
+        "| --- | ---: | --- |",
+        "| 成交额 | 12.3亿元 | 放量 |",
+        "| 净流入 | +2.1% | 改善 |",
+      ].join("\n"),
+      0,
+      10,
+      48,
+    );
+
+    const lines = view.lines.map((line) => line.text);
+    expect(lines[0]).toContain("指标");
+    expect(lines[0]).toContain("数值");
+    expect(lines[0]).toContain("说明");
+    expect(lines.some((line) => line.includes("| ---"))).toBe(false);
+    expect(lines.some((line) => line.includes("成交额"))).toBe(true);
+    expect(view.lines.every((line) => line.kind === "table")).toBe(true);
+  });
+
   it("preserves section scroll when appending above the reader's current position", () => {
     let state = reducer(initState(), { type: "startAnalysis" });
     state = reducer(state, { type: "setTab", tab: "research" });
@@ -326,7 +353,7 @@ describe("P1 analysis config", () => {
 
   it("applies depth presets and marks manual round changes as custom", () => {
     let s = reducer(initState(), { type: "setFocus", focus: "depth" });
-    s = reducer(s, { type: "selectDown" });
+    s = reducer(s, { type: "openSelect" });
     s = reducer(s, { type: "selectDown" });
     s = reducer(s, { type: "selectPick" });
     expect(s.depth).toBe("deep");
@@ -336,6 +363,17 @@ describe("P1 analysis config", () => {
     s = reducer(s, { type: "stepRounds", field: "riskRounds", delta: -1 });
     expect(s.depth).toBe("custom");
     expect(s.riskRounds).toBe(2);
+  });
+
+  it("does not open a select just because focus moves onto a select field", () => {
+    let s = reducer(initState(), { type: "setFocus", focus: "depth" });
+    expect(s.selectOpen).toBeNull();
+    expect(s.selectIdx).toBe(0);
+
+    s = reducer(s, { type: "openSelect" });
+    expect(s.selectOpen).toBe("depth");
+    // Current default depth is "standard", the second depth option.
+    expect(s.selectIdx).toBe(1);
   });
 
   it("toggles an analyst without mutating the default set", () => {

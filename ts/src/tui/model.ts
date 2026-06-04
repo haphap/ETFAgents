@@ -635,10 +635,101 @@ function classifyReportLine(line: string): {
   return { text: stripInlineMarkdown(line.trimEnd()), kind: "paragraph" };
 }
 
+function isMarkdownTableSeparator(line: string): boolean {
+  const cells = parseMarkdownTableRow(line);
+  return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell.replace(/\s/g, "")));
+}
+
+function isMarkdownTableLine(line: string): boolean {
+  const trimmed = line.trim();
+  return (
+    trimmed.includes("|") && (/^\|?.+\|.+\|?$/.test(trimmed) || isMarkdownTableSeparator(trimmed))
+  );
+}
+
+function parseMarkdownTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => stripInlineMarkdown(cell.trim()));
+}
+
+function fitCell(text: string, width: number): string {
+  if (text.length <= width) return text.padEnd(width);
+  if (width <= 1) return text.slice(0, width);
+  return `${text.slice(0, width - 1)}…`;
+}
+
+function renderMarkdownTableBlock(lines: string[], width: number): ReportDisplayLine[] {
+  const parsed = lines
+    .map((line) => ({
+      cells: parseMarkdownTableRow(line),
+      separator: isMarkdownTableSeparator(line),
+    }))
+    .filter((row) => row.cells.length > 0);
+  const rows = parsed.filter((row) => !row.separator).map((row) => row.cells);
+  const columnCount = Math.max(...rows.map((row) => row.length), 0);
+  if (columnCount === 0) return [];
+
+  const normalized = rows.map((row) =>
+    Array.from({ length: columnCount }, (_, index) => row[index] ?? ""),
+  );
+  const columnWidths = Array.from({ length: columnCount }, (_, index) =>
+    Math.max(3, ...normalized.map((row) => row[index]?.length ?? 0)),
+  );
+  const gapWidth = 2;
+  const available = Math.max(24, width);
+  let totalWidth = columnWidths.reduce((sum, item) => sum + item, 0) + gapWidth * (columnCount - 1);
+  const minWidth = columnCount > 3 ? 6 : 8;
+  while (totalWidth > available) {
+    const shrinkIndex = columnWidths.reduce(
+      (best, item, index) => (item > (columnWidths[best] ?? 0) ? index : best),
+      0,
+    );
+    const current = columnWidths[shrinkIndex] ?? minWidth;
+    if (current <= minWidth) break;
+    columnWidths[shrinkIndex] = current - 1;
+    totalWidth -= 1;
+  }
+
+  const renderRow = (cells: string[]) =>
+    cells
+      .map((cell, index) => fitCell(cell, columnWidths[index] ?? 8))
+      .join("  ")
+      .trimEnd();
+  const separator = columnWidths.map((item) => "-".repeat(item)).join("  ");
+  const out: ReportDisplayLine[] = [];
+  normalized.forEach((row, index) => {
+    out.push({ text: renderRow(row), kind: "table" });
+    if (index === 0 && parsed.some((item) => item.separator)) {
+      out.push({ text: separator, kind: "table" });
+    }
+  });
+  return out;
+}
+
 function reportDisplayLines(body: string, width: number): ReportDisplayLine[] {
   const out: ReportDisplayLine[] = [];
   let previousBlank = true;
-  for (const raw of body.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")) {
+  const rawLines = body.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+  for (let i = 0; i < rawLines.length; i += 1) {
+    const raw = rawLines[i] ?? "";
+    if (isMarkdownTableLine(raw)) {
+      const tableLines = [raw];
+      while (i + 1 < rawLines.length && isMarkdownTableLine(rawLines[i + 1] ?? "")) {
+        i += 1;
+        tableLines.push(rawLines[i] ?? "");
+      }
+      if (tableLines.length >= 2 && tableLines.some(isMarkdownTableSeparator)) {
+        if (!previousBlank) out.push({ text: "", kind: "blank" });
+        out.push(...renderMarkdownTableBlock(tableLines, width));
+        previousBlank = false;
+        continue;
+      }
+    }
+
     const classified = classifyReportLine(raw);
     if (classified.kind === "blank") {
       if (!previousBlank) out.push({ text: "", kind: "blank" });
@@ -1150,7 +1241,7 @@ export function reducer(state: AppState, action: Action): AppState {
       return {
         ...state,
         focus: action.focus,
-        selectOpen: isSelectField(state, action.focus) ? action.focus : null,
+        selectOpen: null,
         selectIdx: 0,
       };
     case "appendChar": {

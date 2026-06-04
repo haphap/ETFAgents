@@ -591,7 +591,10 @@ function TabContent({
   const scroll = selectedId ? (state.reportScrollBySection[selectedId] ?? 0) : 0;
   const summaryRows = state.activeTab === "decision" && state.executionSummary ? 5 : 0;
   const bodyRows = Math.max(4, viewportRows - summaryRows - 2);
+  const bodyAreaRows = bodyRows + 2;
   const view = reportDisplayViewport(selectedBody, scroll, bodyRows);
+  const runningLogs = state.logs.slice(-Math.max(0, bodyAreaRows - 1));
+  const progressLogs = state.logs.slice(-Math.max(0, bodyAreaRows - 1));
 
   return (
     <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1}>
@@ -618,28 +621,31 @@ function TabContent({
             {view.atTop ? "顶部" : "↑"} · {view.atBottom ? "底部" : "↓"} ·{" "}
             {scroll + view.lines.length}/{view.total} 行 · PgUp/PgDn 滚动
           </Text>
+          <BlankLines count={bodyAreaRows - view.lines.length - 2} prefix="report-pad" />
         </>
       ) : selectedStatus === "running" ? (
         <>
           <Text color="yellow">{selected?.title ?? ""} 运行中…</Text>
-          {state.logs.slice(-bodyRows).map((log, i) => (
+          {runningLogs.map((log, i) => (
             /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
             <Text key={`${i}`} dimColor>
               • {log}
             </Text>
           ))}
+          <BlankLines count={bodyAreaRows - runningLogs.length - 1} prefix="running-pad" />
         </>
       ) : selectedStatus === "failed" ? (
         <>
           <Text color="red">{selected?.title ?? ""} 失败</Text>
           <Text color="red">{state.errorMsg.slice(0, 200)}</Text>
           {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
+          <BlankLines count={bodyAreaRows - (state.errorDetail ? 3 : 2)} prefix="failed-pad" />
         </>
       ) : (
         <>
           <Text dimColor>整体进度</Text>
           {state.logs.length > 0 ? (
-            state.logs.slice(-bodyRows).map((log, i) => (
+            progressLogs.map((log, i) => (
               /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
               <Text key={`${i}`} dimColor={log.startsWith("──") || log.startsWith("✓")}>
                 {log.startsWith("──") || log.startsWith("✓") ? `  ${log}` : `• ${log}`}
@@ -654,9 +660,29 @@ function TabContent({
               {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
             </Box>
           )}
+          <BlankLines
+            count={
+              bodyAreaRows -
+              1 -
+              (state.logs.length > 0 ? progressLogs.length : 1) -
+              (state.status === "error" ? (state.errorDetail ? 2 : 1) : 0)
+            }
+            prefix="progress-pad"
+          />
         </>
       )}
     </Box>
+  );
+}
+
+function BlankLines({ count, prefix }: { count: number; prefix: string }) {
+  return (
+    <>
+      {Array.from({ length: Math.max(0, count) }, (_, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: fixed-height terminal padding
+        <Text key={`${prefix}-${index}`}> </Text>
+      ))}
+    </>
   );
 }
 
@@ -731,6 +757,8 @@ function SummaryLine({ label, values }: { label: string; values: string[] }) {
 
 const NUMBER_TOKEN_RE =
   /(\d{4}-\d{2}-\d{2}|[+-]?\d+(?:\.\d+)?\s*(?:%|％|倍|万手|亿份|元|日|天|周|月)?)/g;
+const NUMBER_TOKEN_TEST_RE =
+  /^(\d{4}-\d{2}-\d{2}|[+-]?\d+(?:\.\d+)?\s*(?:%|％|倍|万手|亿份|元|日|天|周|月)?)$/;
 
 function ReportLine({ line }: { line: ReportDisplayLine }) {
   if (line.kind === "blank") return <Text> </Text>;
@@ -775,8 +803,7 @@ function HighlightedText({ text }: { text: string }) {
     <>
       {parts.map((part, i) => {
         if (!part) return null;
-        const isNumber = NUMBER_TOKEN_RE.test(part);
-        NUMBER_TOKEN_RE.lastIndex = 0;
+        const isNumber = NUMBER_TOKEN_TEST_RE.test(part);
         return (
           // biome-ignore lint/suspicious/noArrayIndexKey: split text fragments are stable for a line
           <Text key={i} bold={isNumber} {...(isNumber ? { color: "yellow" as const } : {})}>
