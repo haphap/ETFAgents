@@ -10,6 +10,7 @@ import {
   normalizeBacktestResult,
   parseTickers,
   reducer,
+  reportDisplayViewport,
   reportViewport,
   selectedAnalystIds,
   sortByTicker,
@@ -226,6 +227,46 @@ describe("P0 report reader", () => {
     const bottom = reportViewport(body, 9999, 18, 120);
     expect(bottom.scroll).toBe(50 - 18);
     expect(bottom.atBottom).toBe(true);
+  });
+
+  it("renders markdown report structure without visible heading markers", () => {
+    const view = reportDisplayViewport(
+      [
+        "### 市场与资金流",
+        "",
+        "资金净流入扩大，成交额同步放大。",
+        "",
+        "#### 1. 结论",
+        "研究结论: **买入**",
+      ].join("\n"),
+      0,
+      20,
+      40,
+    );
+
+    expect(view.lines.map((line) => line.text)).toEqual([
+      "市场与资金流",
+      "",
+      "资金净流入扩大，成交额同步放大。",
+      "",
+      "1. 结论",
+      "研究结论: 买入",
+    ]);
+    expect(view.lines[0]?.kind).toBe("subheading");
+    expect(view.lines[4]?.kind).toBe("subheading");
+  });
+
+  it("wraps list items with continuation indentation", () => {
+    const view = reportDisplayViewport(
+      "- 资金流连续改善但仍需要等待成交量确认后再提高仓位",
+      0,
+      10,
+      18,
+    );
+
+    expect(view.lines[0]?.kind).toBe("bullet");
+    expect(view.lines[0]?.text.startsWith("• ")).toBe(true);
+    expect(view.lines[1]?.text.startsWith("  ")).toBe(true);
   });
 
   it("preserves section scroll when appending above the reader's current position", () => {

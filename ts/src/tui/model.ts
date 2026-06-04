@@ -532,10 +532,136 @@ export function nextSectionId(
 }
 
 /** Wrap a single logical line to a max width, preserving word-ish breaks. */
-export function wrapToWidth(line: string, width: number): string[] {
-  if (line.length <= width) return [line];
+export function wrapToWidth(line: string, width: number, continuationIndent = ""): string[] {
+  const safeWidth = Math.max(12, width);
+  if (line.length <= safeWidth) return [line];
   const out: string[] = [];
-  for (let i = 0; i < line.length; i += width) out.push(line.slice(i, i + width));
+  let remaining = line;
+  while (remaining.length > safeWidth) {
+    const limit = out.length === 0 ? safeWidth : safeWidth - continuationIndent.length;
+    let cut = bestWrapIndex(remaining, limit);
+    if (out.length > 0 && cut <= continuationIndent.length) {
+      cut = Math.max(continuationIndent.length + 1, Math.min(limit, remaining.length));
+    }
+    out.push(remaining.slice(0, cut).trimEnd());
+    remaining = `${continuationIndent}${remaining.slice(cut).trimStart()}`;
+  }
+  if (remaining) out.push(remaining);
+  return out;
+}
+
+function bestWrapIndex(text: string, limit: number): number {
+  const safeLimit = Math.max(8, Math.min(limit, text.length));
+  const windowStart = Math.max(4, safeLimit - 18);
+  for (let i = safeLimit; i >= windowStart; i -= 1) {
+    const ch = text[i - 1];
+    if (ch && /[\s,，;；。.!?！？、]/.test(ch)) return i;
+  }
+  return safeLimit;
+}
+
+export type ReportDisplayLineKind =
+  | "blank"
+  | "heading"
+  | "subheading"
+  | "paragraph"
+  | "bullet"
+  | "ordered"
+  | "table"
+  | "quote";
+
+export interface ReportDisplayLine {
+  text: string;
+  kind: ReportDisplayLineKind;
+  level?: number;
+  continuation?: boolean;
+}
+
+function stripInlineMarkdown(text: string): string {
+  return text
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .trimEnd();
+}
+
+function classifyReportLine(line: string): {
+  text: string;
+  kind: ReportDisplayLineKind;
+  level?: number;
+  continuationIndent?: string;
+} {
+  const trimmed = line.trim();
+  if (!trimmed) return { text: "", kind: "blank" };
+
+  const heading = trimmed.match(/^(#{1,6})\s+(.+?)\s*#*$/);
+  if (heading) {
+    const level = heading[1]?.length ?? 3;
+    const text = stripInlineMarkdown(heading[2] ?? "");
+    return { text, kind: level <= 2 ? "heading" : "subheading", level };
+  }
+
+  if (
+    /^\|?.+\|.+\|?$/.test(trimmed) ||
+    /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(trimmed)
+  ) {
+    return { text: trimmed, kind: "table", continuationIndent: "  " };
+  }
+
+  const bullet = trimmed.match(/^[-*•]\s+(.+)$/);
+  if (bullet) {
+    return {
+      text: `• ${stripInlineMarkdown(bullet[1] ?? "")}`,
+      kind: "bullet",
+      continuationIndent: "  ",
+    };
+  }
+
+  const ordered = trimmed.match(/^((?:\d+|[一二三四五六七八九十]+)[.)、])\s+(.+)$/);
+  if (ordered) {
+    const marker = ordered[1] ?? "1.";
+    return {
+      text: `${marker} ${stripInlineMarkdown(ordered[2] ?? "")}`,
+      kind: "ordered",
+      continuationIndent: " ".repeat(Math.min(marker.length + 1, 6)),
+    };
+  }
+
+  if (trimmed.startsWith(">")) {
+    return { text: stripInlineMarkdown(trimmed.replace(/^>\s*/, "")), kind: "quote" };
+  }
+
+  return { text: stripInlineMarkdown(line.trimEnd()), kind: "paragraph" };
+}
+
+function reportDisplayLines(body: string, width: number): ReportDisplayLine[] {
+  const out: ReportDisplayLine[] = [];
+  let previousBlank = true;
+  for (const raw of body.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n")) {
+    const classified = classifyReportLine(raw);
+    if (classified.kind === "blank") {
+      if (!previousBlank) out.push({ text: "", kind: "blank" });
+      previousBlank = true;
+      continue;
+    }
+
+    if ((classified.kind === "heading" || classified.kind === "subheading") && !previousBlank) {
+      out.push({ text: "", kind: "blank" });
+    }
+
+    const wrapped = wrapToWidth(classified.text, width, classified.continuationIndent ?? "");
+    wrapped.forEach((text, index) => {
+      out.push({
+        text,
+        kind: classified.kind,
+        ...(classified.level !== undefined ? { level: classified.level } : {}),
+        ...(index > 0 ? { continuation: true } : {}),
+      });
+    });
+    previousBlank = false;
+  }
+  while (out.at(-1)?.kind === "blank") out.pop();
   return out;
 }
 
@@ -544,23 +670,39 @@ export function wrapToWidth(line: string, width: number): string[] {
  * clamped scroll offset, the total wrapped-line count, and edge flags so the
  * caller can render a scroll indicator without recomputing.
  */
+export function reportDisplayViewport(
+  body: string,
+  scroll: number,
+  viewport = REPORT_VIEWPORT,
+  width = REPORT_WIDTH,
+): {
+  lines: ReportDisplayLine[];
+  scroll: number;
+  total: number;
+  atTop: boolean;
+  atBottom: boolean;
+} {
+  const lines = reportDisplayLines(body, width);
+  const total = lines.length;
+  const maxScroll = Math.max(0, total - viewport);
+  const clamped = Math.max(0, Math.min(scroll, maxScroll));
+  return {
+    lines: lines.slice(clamped, clamped + viewport),
+    scroll: clamped,
+    total,
+    atTop: clamped === 0,
+    atBottom: clamped >= maxScroll,
+  };
+}
+
 export function reportViewport(
   body: string,
   scroll: number,
   viewport = REPORT_VIEWPORT,
   width = REPORT_WIDTH,
 ): { lines: string[]; scroll: number; total: number; atTop: boolean; atBottom: boolean } {
-  const wrapped = body.split("\n").flatMap((line) => wrapToWidth(line, width));
-  const total = wrapped.length;
-  const maxScroll = Math.max(0, total - viewport);
-  const clamped = Math.max(0, Math.min(scroll, maxScroll));
-  return {
-    lines: wrapped.slice(clamped, clamped + viewport),
-    scroll: clamped,
-    total,
-    atTop: clamped === 0,
-    atBottom: clamped >= maxScroll,
-  };
+  const view = reportDisplayViewport(body, scroll, viewport, width);
+  return { ...view, lines: view.lines.map((line) => line.text) };
 }
 
 /** P1: clamp debate/risk rounds to the supported range (1–3); the graph loops

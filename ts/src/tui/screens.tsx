@@ -5,6 +5,7 @@ import type {
   ErrorDetail,
   ExecutionSummary,
   Phase,
+  ReportDisplayLine,
   SectionDef,
 } from "./model.js";
 import {
@@ -21,7 +22,7 @@ import {
   PROVIDERS,
   parseTickers,
   queueStatusLabel,
-  reportViewport,
+  reportDisplayViewport,
   sectionGroups,
   sparkline,
   TEAM_TABS,
@@ -590,7 +591,7 @@ function TabContent({
   const scroll = selectedId ? (state.reportScrollBySection[selectedId] ?? 0) : 0;
   const summaryRows = state.activeTab === "decision" && state.executionSummary ? 5 : 0;
   const bodyRows = Math.max(4, viewportRows - summaryRows - 2);
-  const view = reportViewport(selectedBody, scroll, bodyRows);
+  const view = reportDisplayViewport(selectedBody, scroll, bodyRows);
 
   return (
     <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1}>
@@ -731,27 +732,39 @@ function SummaryLine({ label, values }: { label: string; values: string[] }) {
 const NUMBER_TOKEN_RE =
   /(\d{4}-\d{2}-\d{2}|[+-]?\d+(?:\.\d+)?\s*(?:%|％|倍|万手|亿份|元|日|天|周|月)?)/g;
 
-function ReportLine({ line }: { line: string }) {
-  if (!line) return <Text> </Text>;
-  const trimmed = line.trim();
-  if (trimmed.startsWith("#")) {
+function ReportLine({ line }: { line: ReportDisplayLine }) {
+  if (line.kind === "blank") return <Text> </Text>;
+  const text = line.text.trimEnd();
+  if (line.kind === "heading") {
     return (
       <Text bold color="cyan">
-        {trimmed.replace(/^#+\s*/, "")}
+        {text}
       </Text>
     );
   }
-  if (/^[-*•]\s+/.test(trimmed)) {
+  if (line.kind === "subheading") {
+    return (
+      <Text bold {...(line.level && line.level <= 3 ? { color: "cyan" as const } : {})}>
+        {text}
+      </Text>
+    );
+  }
+  if (line.kind === "table") {
+    return <Text dimColor>{text}</Text>;
+  }
+  if (line.kind === "quote") {
+    return <Text dimColor>│ {text}</Text>;
+  }
+  if (line.kind === "bullet" || line.kind === "ordered") {
     return (
       <Text>
-        <Text dimColor>• </Text>
-        <HighlightedText text={trimmed.replace(/^[-*•]\s+/, "")} />
+        <HighlightedText text={text} />
       </Text>
     );
   }
   return (
     <Text>
-      <HighlightedText text={line} />
+      <HighlightedText text={text} />
     </Text>
   );
 }
@@ -786,7 +799,7 @@ function fmtElapsed(s: number): string {
 
 export function ReportLibrary({ state }: { state: AppState }) {
   const { reports, selectedIdx, body, bodyLoading, loading, error, scroll } = state.library;
-  const view = reportViewport(body, scroll);
+  const view = reportDisplayViewport(body, scroll);
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
       <Text bold>📚 报告库</Text>
