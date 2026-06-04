@@ -25,8 +25,9 @@ Implemented screens and overlays:
 - Research entry with multi-ticker parsing and watchlist/recent-report shortcuts.
 - Analysis config with provider/model, analyst toggles, depth presets, and
   manual debate/risk round steppers.
-- Live dashboard with team tabs, per-section report reader, queue state, ETF
-  detail card, execution summary, and structured error overlay.
+- Live dashboard with team tabs, a team-detail overlay for section selection,
+  per-section report reader, queue state, ETF detail card, execution summary,
+  and structured error overlay.
 - Report library over saved `complete_report.md` artifacts.
 - Backtest viewer over saved metrics/NAV/trade artifacts.
 - Paper-trading account snapshot.

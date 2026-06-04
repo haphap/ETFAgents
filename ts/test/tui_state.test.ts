@@ -197,6 +197,17 @@ describe("P0 report reader", () => {
     expect(onResearch.selectedSectionByTab.research).toBe("research_debate");
   });
 
+  it("keeps team-section selection behind a detail overlay", () => {
+    let state = reducer(initState(), { type: "startAnalysis" });
+    expect(state.showTeamDetail).toBe(false);
+
+    state = reducer(state, { type: "toggleTeamDetail" });
+    expect(state.showTeamDetail).toBe(true);
+
+    state = reducer(state, { type: "closeTeamDetail" });
+    expect(state.showTeamDetail).toBe(false);
+  });
+
   it("moves and wraps section selection within the active tab", () => {
     const ids = ["research_debate", "research"];
     expect(nextSectionId(ids, undefined, 1)).toBe("research_debate");

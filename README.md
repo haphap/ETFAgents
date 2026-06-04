@@ -52,7 +52,7 @@ _A multi-agent ETF research & allocation framework, built on LangGraph._
 - 🔁 **多轮辩论 (Multi-round)**：多空与风险辩论可按 `maxDebateRounds` / `maxRiskRounds` 循环，由 `routeDebate` / `routeRiskDebate` 驱动并以累计回合数终止。
 - 🧬 **智能体记忆 (Memory)**：运行结束写回 `analysis_memory_entry`（延续性 / 经验教训 / 方法手册），下次运行前由 `memory.build_context` 注入到图初始状态——**先读后写**的闭环。
 - 📊 **Backtrader 回测 + 纸上交易**：结构化触发信号驱动的回测（NAV / 基准对比 / 指标 / 健康检查），以及多用户纸上交易引擎（T+1、佣金、最小交易单位、bcrypt 鉴权）。
-- 🖥️ **Ink TUI 终端仪表盘**：实时研究面板（按团队分栏 + 章节阅读器 + 滚动）、报告库、自选、回测查看、纸上交易快照、错误详情，以及分析师选择 / 研究深度 / 辩论轮数等配置。
+- 🖥️ **Ink TUI 终端仪表盘**：实时研究面板（团队标签 + 团队详情弹窗 + 章节阅读器）、报告库、自选、回测查看、纸上交易快照、错误详情，以及分析师选择 / 研究深度 / 辩论轮数等配置。
 - 🌐 **多 LLM Provider + 厂商路由数据**：LLM 走 OpenAI 兼容工厂（OpenAI / DeepSeek / xAI / OpenRouter / Ollama / MiniMax / vLLM）+ Python 端原生 Anthropic / Google；数据按 `route_to_vendor()` 在 Tushare / yfinance / akshare / FRED / Brave / qlib 间路由。
 - 🈶 **中英文输出**：分析报告与最终决策支持中文 / English。
 

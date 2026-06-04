@@ -34,30 +34,53 @@ import {
 export function HomeScreen({ state }: { state: AppState }) {
   return (
     <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
-      <Text bold color="cyan">
-        {HOME_TITLE}
-      </Text>
-      <Text dimColor>{HOME_SUBTITLE}</Text>
-      <Box flexDirection="column" marginTop={2} width={52}>
-        {HOME_OPTIONS.map((item, i) => {
-          const active = i === state.homeIdx;
-          return (
-            <Text
-              key={item.key}
-              bold={active}
-              {...(active ? { color: "cyan" as const } : { dimColor: true })}
-            >
-              {active ? "▶ " : "  "}
-              {item.label.padEnd(15)} {item.description}
-            </Text>
-          );
-        })}
-      </Box>
-      <Box marginTop={2}>
-        <Text dimColor>↑↓ 选择 · Enter 打开 · ? 帮助 · Esc 退出</Text>
+      <Box flexDirection="column" width={64}>
+        <Box flexDirection="column" marginBottom={2}>
+          <Text bold color="cyan">
+            {HOME_TITLE}
+          </Text>
+          <Text dimColor>{HOME_SUBTITLE}</Text>
+        </Box>
+        <Box flexDirection="column">
+          {HOME_OPTIONS.map((item, i) => {
+            const active = i === state.homeIdx;
+            const shortcut = homeShortcut(item.key);
+            return (
+              <Box key={item.key}>
+                <Text
+                  key={item.key}
+                  bold={active}
+                  {...(active ? { color: "cyan" as const } : { dimColor: true })}
+                >
+                  {active ? ">" : " "} [{shortcut}] {item.label.padEnd(14)}
+                </Text>
+                <Text dimColor>{item.description}</Text>
+              </Box>
+            );
+          })}
+        </Box>
+        <Box marginTop={2} justifyContent="space-between">
+          <Text dimColor>↑↓ move</Text>
+          <Text dimColor>Enter open</Text>
+          <Text dimColor>? help</Text>
+          <Text dimColor>Esc quit</Text>
+        </Box>
       </Box>
     </Box>
   );
+}
+
+function homeShortcut(key: (typeof HOME_OPTIONS)[number]["key"]): string {
+  switch (key) {
+    case "ticker":
+      return "r";
+    case "library":
+      return "l";
+    case "backtest":
+      return "b";
+    case "paper":
+      return "p";
+  }
 }
 
 // ===========================================================================
@@ -326,7 +349,15 @@ function SelectFieldRow({
 // Dashboard (Python-aligned layout)
 // ===========================================================================
 
-export function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
+export function Dashboard({
+  state,
+  elapsed,
+  screenRows,
+}: {
+  state: AppState;
+  elapsed: number;
+  screenRows: number;
+}) {
   const groups = sectionGroups(state.selectedAnalysts);
   const done = state.sectionDone;
 
@@ -345,6 +376,7 @@ export function Dashboard({ state, elapsed }: { state: AppState; elapsed: number
   const agentsDone = activeSectionIds.filter((s) => done.has(s.id)).length;
   const reportsTotal = agentsTotal;
   const reportsDone = agentsDone;
+  const viewportRows = Math.max(6, screenRows - 10);
 
   return (
     <Box flexDirection="column" flexGrow={1}>
@@ -425,7 +457,7 @@ export function Dashboard({ state, elapsed }: { state: AppState; elapsed: number
             {state.status === "running" ? (
               <Text dimColor>Esc 取消并返回</Text>
             ) : (
-              <Text dimColor>Enter 返回首页</Text>
+              <Text dimColor>Esc 返回首页</Text>
             )}
           </Box>
 
@@ -498,8 +530,8 @@ export function Dashboard({ state, elapsed }: { state: AppState; elapsed: number
           </Box>
 
           {/* Tabbed section view + progress (bottom) */}
-          <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1}>
-            <TabContent state={state} groups={groups} />
+          <Box flexDirection="column" flexGrow={1}>
+            <TabContent state={state} groups={groups} viewportRows={viewportRows} />
           </Box>
         </Box>
       </Box>
@@ -527,7 +559,7 @@ export function Dashboard({ state, elapsed }: { state: AppState; elapsed: number
           Nodes {state.stats.llm_calls} · Toolset {state.stats.tool_calls} · Reports {reportsDone}/
           {reportsTotal}
         </Text>
-        <Text dimColor>{el} ←→ 团队 · ↑↓ 章节 · PgUp/PgDn 滚动 · e 错误 · Enter 返回</Text>
+        <Text dimColor>{el} ←→ 团队 · Enter 团队详情 · PgUp/PgDn 滚动 · e 错误 · Esc 返回</Text>
       </Box>
     </Box>
   );
@@ -538,7 +570,15 @@ export function Dashboard({ state, elapsed }: { state: AppState; elapsed: number
  * and the per-section report content for the selected team tab. Falls back to
  * the progress log until a section has produced output.
  */
-function TabContent({ state, groups }: { state: AppState; groups: Record<string, SectionDef[]> }) {
+function TabContent({
+  state,
+  groups,
+  viewportRows,
+}: {
+  state: AppState;
+  groups: Record<string, SectionDef[]>;
+  viewportRows: number;
+}) {
   const sections = groups[state.activeTab] ?? [];
   const tabMeta = TEAM_TABS.find((t) => t.key === state.activeTab);
 
@@ -548,111 +588,73 @@ function TabContent({ state, groups }: { state: AppState; groups: Record<string,
   const selectedStatus = selectedId ? (state.sectionStatus[selectedId] ?? "pending") : "pending";
   const selectedBody = selectedId ? (state.reports[selectedId] ?? "") : "";
   const scroll = selectedId ? (state.reportScrollBySection[selectedId] ?? 0) : 0;
-  const view = reportViewport(selectedBody, scroll);
+  const summaryRows = state.activeTab === "decision" && state.executionSummary ? 5 : 0;
+  const bodyRows = Math.max(4, viewportRows - summaryRows - 2);
+  const view = reportViewport(selectedBody, scroll, bodyRows);
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
-      <Text bold>{tabMeta?.label ?? "整体进度"}</Text>
-
-      {/* P0: section checklist with the selected section highlighted. */}
-      <Box flexDirection="column" marginTop={1}>
-        {sections.map((s) => {
-          const status = state.sectionStatus[s.id] ?? "pending";
-          const isDone = status === "done";
-          const hasBody = Boolean(state.reports[s.id]?.trim());
-          const isSelected = s.id === selectedId;
-          const mark =
-            status === "done"
-              ? "✓"
-              : status === "failed"
-                ? "×"
-                : status === "running"
-                  ? "◐"
-                  : state.status === "running"
-                    ? "○"
-                    : "·";
-          const colorProps = isSelected
-            ? { color: "cyan" as const }
-            : isDone
-              ? { color: "green" as const }
-              : status === "failed"
-                ? { color: "red" as const }
-                : hasBody || status === "running"
-                  ? { color: "yellow" as const }
-                  : {};
-          return (
-            <Text
-              key={s.id}
-              bold={isSelected}
-              dimColor={!isSelected && !isDone && !hasBody}
-              {...colorProps}
-            >
-              {isSelected ? "▶ " : "  "}
-              {mark} {s.title}
-            </Text>
-          );
-        })}
+    <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1}>
+      <Box marginBottom={1}>
+        <Text bold>{tabMeta?.label ?? "整体进度"}</Text>
+        <Text dimColor> · </Text>
+        <Text>{selected?.title ?? "整体进度"}</Text>
+        <Text dimColor> · Enter 查看团队详情</Text>
       </Box>
 
-      {/* Decision tab keeps the structured execution-summary panel. */}
       {state.activeTab === "decision" && state.executionSummary && (
         <ExecutionSummaryView summary={state.executionSummary} />
       )}
-
-      {/* P0: selected section body viewport, or status/progress fallback. */}
-      <Box flexDirection="column" marginTop={1} flexGrow={1}>
-        {selected && selectedBody.trim() ? (
-          <>
-            <Text bold color="cyan">
-              ── {selected.title} ── <Text dimColor>({selectedStatus})</Text>
+      {selected && selectedBody.trim() ? (
+        <>
+          <Text bold color="cyan">
+            ── {selected.title} ── <Text dimColor>({selectedStatus})</Text>
+          </Text>
+          {view.lines.map((line, i) => (
+            /* biome-ignore lint/suspicious/noArrayIndexKey: scrolled snapshot */
+            <ReportLine key={`${selectedId}-${i}`} line={line} />
+          ))}
+          <Text dimColor>
+            {view.atTop ? "顶部" : "↑"} · {view.atBottom ? "底部" : "↓"} ·{" "}
+            {scroll + view.lines.length}/{view.total} 行 · PgUp/PgDn 滚动
+          </Text>
+        </>
+      ) : selectedStatus === "running" ? (
+        <>
+          <Text color="yellow">{selected?.title ?? ""} 运行中…</Text>
+          {state.logs.slice(-bodyRows).map((log, i) => (
+            /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
+            <Text key={`${i}`} dimColor>
+              • {log}
             </Text>
-            {view.lines.map((line, i) => (
-              /* biome-ignore lint/suspicious/noArrayIndexKey: scrolled snapshot */
-              <ReportLine key={`${selectedId}-${i}`} line={line} />
-            ))}
-            <Text dimColor>
-              {view.atTop ? "顶部" : "↑"} · {view.atBottom ? "底部" : "↓"} ·{" "}
-              {scroll + view.lines.length}/{view.total} 行 · PgUp/PgDn 滚动 · ↑↓ 选择章节
-            </Text>
-          </>
-        ) : selectedStatus === "running" ? (
-          <>
-            <Text color="yellow">{selected?.title ?? ""} 运行中…</Text>
-            {state.logs.slice(-8).map((log, i) => (
+          ))}
+        </>
+      ) : selectedStatus === "failed" ? (
+        <>
+          <Text color="red">{selected?.title ?? ""} 失败</Text>
+          <Text color="red">{state.errorMsg.slice(0, 200)}</Text>
+          {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
+        </>
+      ) : (
+        <>
+          <Text dimColor>整体进度</Text>
+          {state.logs.length > 0 ? (
+            state.logs.slice(-bodyRows).map((log, i) => (
               /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
-              <Text key={`${i}`} dimColor>
-                • {log}
+              <Text key={`${i}`} dimColor={log.startsWith("──") || log.startsWith("✓")}>
+                {log.startsWith("──") || log.startsWith("✓") ? `  ${log}` : `• ${log}`}
               </Text>
-            ))}
-          </>
-        ) : selectedStatus === "failed" ? (
-          <>
-            <Text color="red">{selected?.title ?? ""} 失败</Text>
-            <Text color="red">{state.errorMsg.slice(0, 200)}</Text>
-            {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
-          </>
-        ) : (
-          <>
-            <Text dimColor>整体进度</Text>
-            {state.logs.length > 0 ? (
-              state.logs.slice(-12).map((log, i) => (
-                /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
-                <Text key={`${i}`} dimColor={log.startsWith("──") || log.startsWith("✓")}>
-                  {log.startsWith("──") || log.startsWith("✓") ? `  ${log}` : `• ${log}`}
-                </Text>
-              ))
-            ) : (
-              <Text dimColor>{selected ? `${selected.title} 等待中` : "准备开始分析。"}</Text>
-            )}
-            {state.status === "error" && (
-              <Box marginTop={1} flexDirection="column">
-                <Text color="red">{state.errorMsg.slice(0, 120)}</Text>
-                {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
-              </Box>
-            )}
-          </>
-        )}
-      </Box>
+            ))
+          ) : (
+            <Text dimColor>{selected ? `${selected.title} 等待中` : "准备开始分析。"}</Text>
+          )}
+          {state.status === "error" && (
+            <Box marginTop={1} flexDirection="column">
+              <Text color="red">{state.errorMsg.slice(0, 120)}</Text>
+              {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
+            </Box>
+          )}
+        </>
+      )}
     </Box>
   );
 }
@@ -668,14 +670,14 @@ function TabButton({
   total: number;
   active: boolean;
 }) {
-  const allDone = done === total && total > 0;
   return (
-    <Box flexDirection="column" borderStyle={active ? "round" : "single"} paddingX={1}>
+    <Box borderStyle={active ? "round" : "single"} paddingX={1}>
       <Text bold={active} {...(active ? { color: "cyan" as const } : {})}>
-        {label} {active ? "▾" : "▸"}
-      </Text>
-      <Text color={allDone ? "green" : "yellow"}>
-        {done}/{total}
+        {label}{" "}
+        <Text color={done === total && total > 0 ? "green" : "yellow"}>
+          ({done}/{total})
+        </Text>
+        {active ? " ▾" : " ▸"}
       </Text>
     </Box>
   );
@@ -984,6 +986,79 @@ export function PaperScreen({ state }: { state: AppState }) {
 }
 
 // ===========================================================================
+// Team detail overlay
+// ===========================================================================
+
+export function TeamDetailOverlay({ state }: { state: AppState }) {
+  const groups = sectionGroups(state.selectedAnalysts);
+  const sections = groups[state.activeTab] ?? [];
+  const tabMeta = TEAM_TABS.find((t) => t.key === state.activeTab);
+  const selectedId = state.selectedSectionByTab[state.activeTab] ?? sections[0]?.id;
+  const done = sections.filter((section) => state.sectionDone.has(section.id)).length;
+
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="double"
+      borderColor="cyan"
+      paddingX={2}
+      paddingY={1}
+      marginTop={1}
+      width={56}
+    >
+      <Text bold color="cyan">
+        {tabMeta?.label ?? "团队详情"} ({done}/{sections.length})
+      </Text>
+      <Box flexDirection="column" marginTop={1}>
+        {sections.length === 0 ? (
+          <Text dimColor>当前团队没有可选章节。</Text>
+        ) : (
+          sections.map((section) => {
+            const status = state.sectionStatus[section.id] ?? "pending";
+            const isDone = status === "done";
+            const hasBody = Boolean(state.reports[section.id]?.trim());
+            const isSelected = section.id === selectedId;
+            const mark =
+              status === "done"
+                ? "✓"
+                : status === "failed"
+                  ? "×"
+                  : status === "running"
+                    ? "◐"
+                    : state.status === "running"
+                      ? "○"
+                      : "·";
+            const colorProps = isSelected
+              ? { color: "cyan" as const }
+              : isDone
+                ? { color: "green" as const }
+                : status === "failed"
+                  ? { color: "red" as const }
+                  : hasBody || status === "running"
+                    ? { color: "yellow" as const }
+                    : {};
+            return (
+              <Text
+                key={section.id}
+                bold={isSelected}
+                dimColor={!isSelected && !isDone && !hasBody}
+                {...colorProps}
+              >
+                {isSelected ? "> " : "  "}
+                {mark} {section.title}
+              </Text>
+            );
+          })
+        )}
+      </Box>
+      <Box marginTop={1}>
+        <Text dimColor>↑↓ 选择章节 · ←→ 切团队 · Enter/Esc 关闭</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
 // Help overlay
 // ===========================================================================
 
@@ -993,7 +1068,13 @@ export function HelpOverlay({ phase }: { phase: Phase }) {
     home: ["↑↓ 选择入口", "Enter 打开", "r/l/b/p 快速进入研究/报告/回测/模拟盘", shared],
     ticker: ["输入 ETF 代码，逗号或空格分隔", "Enter 配置分析", "Tab 加入选中的最近研究", shared],
     config: ["Tab 切换字段", "Enter 展开选择或开始分析", "←→ 调整分析师/轮数", shared],
-    dashboard: ["←→ 切换团队", "↑↓ 选择章节", "PgUp/PgDn 滚动正文", "Esc 取消并返回"],
+    dashboard: [
+      "←→ 切换团队",
+      "Enter 打开团队详情",
+      "详情中 ↑↓ 选择章节",
+      "PgUp/PgDn 滚动正文",
+      "Esc 取消并返回",
+    ],
     library: ["↑↓ 选择报告", "PgUp/PgDn 滚动正文", "r 刷新", shared],
     backtest: ["↑↓ 选择回测记录", "r 刷新", shared],
     paper: ["r 刷新账户快照", shared],

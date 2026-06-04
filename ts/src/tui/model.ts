@@ -371,6 +371,7 @@ export interface AppState {
   errorDetail: ErrorDetail | null;
   showErrorDetail: boolean;
   showHelp: boolean;
+  showTeamDetail: boolean;
   /** P3 watchlist (read-only, derived from discovered report history). */
   watchlist: string[];
   watchlistIdx: number;
@@ -490,7 +491,9 @@ export type Action =
   // P6 error detail
   | { type: "setErrorDetail"; detail: ErrorDetail }
   | { type: "toggleErrorDetail" }
-  | { type: "toggleHelp" };
+  | { type: "toggleHelp" }
+  | { type: "toggleTeamDetail" }
+  | { type: "closeTeamDetail" };
 
 export type AppDispatch = (action: Action) => void;
 
@@ -863,6 +866,7 @@ export function initState(): AppState {
     errorDetail: null,
     showErrorDetail: false,
     showHelp: false,
+    showTeamDetail: false,
     watchlist: [],
     watchlistIdx: 0,
     library: {
@@ -998,6 +1002,7 @@ export function reducer(state: AppState, action: Action): AppState {
         errorDetail: null,
         showErrorDetail: false,
         showHelp: false,
+        showTeamDetail: false,
       };
     case "setFocus":
       return {
@@ -1097,6 +1102,7 @@ export function reducer(state: AppState, action: Action): AppState {
         errorDetail: null,
         showErrorDetail: false,
         showHelp: false,
+        showTeamDetail: false,
       };
     }
     case "appendLog":
@@ -1219,7 +1225,14 @@ export function reducer(state: AppState, action: Action): AppState {
     case "analysisError":
       return { ...state, status: "error", errorMsg: action.msg };
     case "backToTicker":
-      return { ...state, phase: "ticker", errorMsg: "", selectOpen: null, selectIdx: 0 };
+      return {
+        ...state,
+        phase: "ticker",
+        errorMsg: "",
+        selectOpen: null,
+        selectIdx: 0,
+        showTeamDetail: false,
+      };
     case "etfDetailLoading":
       return { ...state, etfDetail: { loading: true } };
     case "etfDetailLoaded":
@@ -1316,6 +1329,7 @@ export function reducer(state: AppState, action: Action): AppState {
         selectOpen: null,
         selectIdx: 0,
         showHelp: false,
+        showTeamDetail: false,
       };
 
     // --- P2 library ---
@@ -1437,5 +1451,9 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, showErrorDetail: !state.showErrorDetail };
     case "toggleHelp":
       return { ...state, showHelp: !state.showHelp };
+    case "toggleTeamDetail":
+      return { ...state, showTeamDetail: !state.showTeamDetail };
+    case "closeTeamDetail":
+      return { ...state, showTeamDetail: false };
   }
 }

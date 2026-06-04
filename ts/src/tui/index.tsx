@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
 import type { Instance, RenderOptions } from "ink";
-import { Box, render, useApp, useInput } from "ink";
+import { Box, render, useApp, useInput, useStdout } from "ink";
 import { useEffect, useReducer, useRef, useState } from "react";
 import {
   ANALYST_IDS,
@@ -24,6 +24,7 @@ import {
   HomeScreen,
   PaperScreen,
   ReportLibrary,
+  TeamDetailOverlay,
   TickerScreen,
 } from "./screens.js";
 import {
@@ -46,6 +47,8 @@ export type RunTuiOptions = RenderOptions & {
 
 function App() {
   const { exit } = useApp();
+  const { stdout } = useStdout();
+  const [terminalSize, setTerminalSize] = useState(() => readTerminalSize(stdout));
   const [state, dispatch] = useReducer(reducer, undefined, initState);
 
   const stateRef = useRef(state);
@@ -54,6 +57,14 @@ function App() {
   dispatchRef.current = dispatch;
   const runSeqRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const update = () => setTerminalSize(readTerminalSize(stdout));
+    stdout.on("resize", update);
+    return () => {
+      stdout.off("resize", update);
+    };
+  }, [stdout]);
 
   // vllm discovery
   const vllmFetchedRef = useRef(false);
@@ -138,6 +149,35 @@ function App() {
 
     if (s.showHelp) {
       d({ type: "toggleHelp" });
+      return;
+    }
+
+    if (s.showTeamDetail) {
+      if (key.upArrow) {
+        d({ type: "selectSection", delta: -1 });
+        return;
+      }
+      if (key.downArrow) {
+        d({ type: "selectSection", delta: 1 });
+        return;
+      }
+      if (key.tab || key.rightArrow) {
+        const i = TEAM_TABS.findIndex((t) => t.key === s.activeTab);
+        const next = TEAM_TABS[(i + 1) % TEAM_TABS.length];
+        if (next) d({ type: "setTab", tab: next.key });
+        return;
+      }
+      if (key.leftArrow) {
+        const i = TEAM_TABS.findIndex((t) => t.key === s.activeTab);
+        const prev = TEAM_TABS[(i - 1 + TEAM_TABS.length) % TEAM_TABS.length];
+        if (prev) d({ type: "setTab", tab: prev.key });
+        return;
+      }
+      if (key.escape || key.return) {
+        d({ type: "closeTeamDetail" });
+        return;
+      }
+      d({ type: "closeTeamDetail" });
       return;
     }
 
@@ -352,10 +392,12 @@ function App() {
       }
       // P0: up/down select a section, PageUp/PageDown scroll its body.
       if (key.upArrow) {
+        d({ type: "toggleTeamDetail" });
         d({ type: "selectSection", delta: -1 });
         return;
       }
       if (key.downArrow) {
+        d({ type: "toggleTeamDetail" });
         d({ type: "selectSection", delta: 1 });
         return;
       }
@@ -367,10 +409,9 @@ function App() {
         d({ type: "scrollReport", delta: REPORT_VIEWPORT });
         return;
       }
-      if (key.return && (s.status === "done" || s.status === "error")) {
-        abortRef.current?.abort();
-        runSeqRef.current += 1;
-        d({ type: "goPhase", phase: "home" });
+      if (key.return) {
+        d({ type: "toggleTeamDetail" });
+        return;
       }
       return;
     }
@@ -421,26 +462,45 @@ function App() {
     }
   });
 
-  return (
-    <Box flexDirection="column" padding={1} flexGrow={1}>
-      {/* Main content */}
+  const content =
+    state.phase === "home" ? (
+      <HomeScreen state={state} />
+    ) : (
       <Box flexDirection="row" flexGrow={1} borderStyle="single">
-        {state.phase === "home" && <HomeScreen state={state} />}
         {state.phase === "ticker" && <TickerScreen state={state} />}
         {state.phase === "config" && <ConfigModal state={state} />}
-        {state.phase === "dashboard" && <Dashboard state={state} elapsed={elapsed} />}
+        {state.phase === "dashboard" && (
+          <Dashboard state={state} elapsed={elapsed} screenRows={terminalSize.rows - 4} />
+        )}
         {state.phase === "library" && <ReportLibrary state={state} />}
         {state.phase === "backtest" && <BacktestScreen state={state} />}
         {state.phase === "paper" && <PaperScreen state={state} />}
       </Box>
+    );
 
+  return (
+    <Box
+      flexDirection="column"
+      paddingX={1}
+      paddingY={state.phase === "home" ? 0 : 1}
+      width={terminalSize.columns}
+      height={terminalSize.rows}
+    >
+      {content}
       {/* P6: error detail overlay */}
       {state.showErrorDetail && state.errorDetail && (
         <ErrorDetailOverlay detail={state.errorDetail} />
       )}
       {state.showHelp && <HelpOverlay phase={state.phase} />}
+      {state.showTeamDetail && <TeamDetailOverlay state={state} />}
     </Box>
   );
+}
+
+function readTerminalSize(stdout: NodeJS.WriteStream): { columns: number; rows: number } {
+  const columns = Number.isFinite(stdout.columns) && stdout.columns > 0 ? stdout.columns : 120;
+  const rows = Number.isFinite(stdout.rows) && stdout.rows > 0 ? stdout.rows : 32;
+  return { columns, rows };
 }
 
 export function runTui(options: RunTuiOptions = {}): Instance {

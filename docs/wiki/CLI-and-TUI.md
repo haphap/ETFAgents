@@ -45,9 +45,10 @@ restores the previous terminal contents on exit, and provides home navigation
 across several workflow screens:
 
 - **Research dashboard** — ticker input → config → live dashboard. Team tabs
-  (analysts / research / trader / risk / decision), a per-section reader with
-  scroll (`↑↓` select section, `PgUp/PgDn` scroll), an ETF info card, a
-  multi-ticker queue, and a stats bar.
+  (analysts / research / trader / risk / decision) show inline completion
+  counts; `Enter` opens the team-detail overlay for section selection, and the
+  report reader scrolls with `PgUp/PgDn`. The screen also includes an ETF info
+  card, a multi-ticker queue, and a stats bar.
 - **Config screen** — date, provider, model (incl. vLLM model discovery that
   probes `http://127.0.0.1:8020/v1` before `http://localhost:8000/v1` and uses
   the discovered endpoint),
