@@ -78,6 +78,7 @@ An error response:
 | `paper.get_positions` | Params: `{user_id?}`. |
 | `paper.get_trades` | Params: `{user_id?, limit?}`. |
 | `paper.suggest_order_from_signal` | Params: `{ticker, state, user_id?}`. |
+| `watchlist.list` | Params: `{group?, db_path?}`. Returns watchlist entries (`ticker`, `name`, `group`, `tags`, `notes`, `added_at`). |
 | `backtest.run_candidate_pool` | Run a Backtrader candidate-pool backtest with **TS-precomputed signals**. See "Backtest contract" below. |
 
 All `paper.*` methods accept an optional `db_path` param to override the

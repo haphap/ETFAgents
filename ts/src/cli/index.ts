@@ -17,6 +17,7 @@ import { registerDetail } from "./commands/detail.js";
 import { registerPaper } from "./commands/paper.js";
 import { registerToolCall } from "./commands/tool-call.js";
 import { registerToolLoop } from "./commands/tool-loop.js";
+import { registerTui } from "./commands/tui.js";
 
 const program = new Command();
 
@@ -32,5 +33,6 @@ registerBacktest(program);
 registerDetail(program);
 registerPaper(program);
 registerCache(program);
+registerTui(program);
 
 await program.parseAsync(process.argv);

@@ -18,6 +18,7 @@ JSON-RPC 2.0 over stdio**. Each line is one request or response object.
 | `cache.stats` / `cache.cleanup` / `cache.clear` / `cache.details` | Cache management |
 | `paper.current_user` / `paper.get_account` / `paper.get_positions` / `paper.get_trades` | Paper-trading reads |
 | `paper.register` / `paper.login` / `paper.logout` / `paper.buy` / `paper.sell` | Paper-trading actions |
+| `watchlist.list` | List watchlist entries for a group (`group`, optional `db_path`) |
 | `backtest.run_candidate_pool` | Run a Backtrader candidate-pool backtest from a precomputed signal bundle |
 | `memory.build_context` | Build per-role continuity/lesson/method context (memory **read**) |
 | `memory.append_analysis` | Persist an analysis memory entry (memory **write**) |

@@ -22,7 +22,7 @@ cd ts && pnpm install
 | `pnpm dev paper register <user>` | Register paper trading account |
 | `pnpm dev paper account` | Show paper account summary |
 | `pnpm dev paper positions` | List paper positions |
-| `pnpm dev tui` | Launch Ink TUI |
+| `pnpm dev tui` / `pnpm tui` | Launch Ink TUI |
 
 Options available on most commands:
 

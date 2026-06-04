@@ -188,7 +188,7 @@ describe("P0 report reader", () => {
     expect(bottom.atBottom).toBe(true);
   });
 
-  it("resets section scroll when a report body is appended", () => {
+  it("preserves section scroll when appending above the reader's current position", () => {
     let state = reducer(initState(), { type: "startAnalysis" });
     state = reducer(state, { type: "setTab", tab: "research" });
     state = reducer(state, {
@@ -197,9 +197,9 @@ describe("P0 report reader", () => {
       nodeLabel: "看多",
       body: Array.from({ length: 60 }, (_, i) => `l${i}`).join("\n"),
     });
-    state = reducer(state, { type: "scrollReport", delta: 18 });
-    expect(state.reportScrollBySection.research_debate).toBeGreaterThan(0);
-    // appending new content resets the scroll back to the top
+    state = reducer(state, { type: "scrollReport", delta: -999 });
+    expect(state.reportScrollBySection.research_debate).toBe(0);
+    // appending new content preserves the user's scroll when they are reading above the bottom
     state = reducer(state, {
       type: "sectionReport",
       sectionId: "research_debate",
@@ -208,6 +208,26 @@ describe("P0 report reader", () => {
     });
     expect(state.reportScrollBySection.research_debate).toBe(0);
   });
+
+  it("follows appended report content when the reader is already at the bottom", () => {
+    let state = reducer(initState(), { type: "startAnalysis" });
+    state = reducer(state, { type: "setTab", tab: "research" });
+    state = reducer(state, {
+      type: "sectionReport",
+      sectionId: "research_debate",
+      nodeLabel: "看多",
+      body: Array.from({ length: 60 }, (_, i) => `l${i}`).join("\n"),
+    });
+    const bottom = state.reportScrollBySection.research_debate ?? 0;
+    expect(state.reportScrollBySection.research_debate).toBeGreaterThan(0);
+    state = reducer(state, {
+      type: "sectionReport",
+      sectionId: "research_debate",
+      nodeLabel: "看空",
+      body: Array.from({ length: 20 }, (_, i) => `m${i}`).join("\n"),
+    });
+    expect(state.reportScrollBySection.research_debate).toBeGreaterThan(bottom);
+  });
 });
 
 // ===========================================================================
@@ -215,12 +235,26 @@ describe("P0 report reader", () => {
 // ===========================================================================
 
 describe("P1 analysis config", () => {
-  it("defaults to all analysts enabled, standard depth, single round", () => {
+  it("defaults to all analysts enabled and standard depth rounds", () => {
     const s = initState();
     expect(Object.values(s.selectedAnalysts).every(Boolean)).toBe(true);
     expect(s.depth).toBe("standard");
-    expect(s.debateRounds).toBe(1);
-    expect(s.riskRounds).toBe(1);
+    expect(s.debateRounds).toBe(2);
+    expect(s.riskRounds).toBe(2);
+  });
+
+  it("applies depth presets and marks manual round changes as custom", () => {
+    let s = reducer(initState(), { type: "setFocus", focus: "depth" });
+    s = reducer(s, { type: "selectDown" });
+    s = reducer(s, { type: "selectDown" });
+    s = reducer(s, { type: "selectPick" });
+    expect(s.depth).toBe("deep");
+    expect(s.debateRounds).toBe(3);
+    expect(s.riskRounds).toBe(3);
+
+    s = reducer(s, { type: "stepRounds", field: "riskRounds", delta: -1 });
+    expect(s.depth).toBe("custom");
+    expect(s.riskRounds).toBe(2);
   });
 
   it("toggles an analyst without mutating the default set", () => {
@@ -311,6 +345,25 @@ describe("P1 analysis config", () => {
     // The analysts tab should no longer surface the deselected section.
     const onAnalysts = reducer(s, { type: "setTab", tab: "analysts" });
     expect(onAnalysts.selectedSectionByTab.analysts).not.toBe("macro_regime");
+  });
+});
+
+// ===========================================================================
+// Home / navigation
+// ===========================================================================
+
+describe("Home navigation", () => {
+  it("starts at the home phase and opens the selected entry", () => {
+    let s = initState();
+    expect(s.phase).toBe("home");
+    s = reducer(s, { type: "homeOpen" });
+    expect(s.phase).toBe("ticker");
+  });
+
+  it("moves through home entries and opens report library", () => {
+    let s = reducer(initState(), { type: "homeMove", delta: 1 });
+    s = reducer(s, { type: "homeOpen" });
+    expect(s.phase).toBe("library");
   });
 });
 

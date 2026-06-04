@@ -12,3 +12,4 @@ from . import config  # noqa: F401
 from . import memory  # noqa: F401
 from . import paper  # noqa: F401
 from . import tools  # noqa: F401
+from . import watchlist  # noqa: F401

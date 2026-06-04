@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -38,6 +39,7 @@ class BridgeProtocolTests(unittest.TestCase):
         self._cache_dir.mkdir()
         self._results_dir.mkdir()
         self._paper_db = Path(self._tmp.name) / "paper_trading.db"
+        self._watchlist_db = Path(self._tmp.name) / "watchlist.db"
 
         env = {
             **os.environ,
@@ -235,6 +237,36 @@ class BridgeProtocolTests(unittest.TestCase):
             self._paper_params(ticker="510300.SH", state="not-a-dict"),
         )
         self.assertEqual(err["code"], -32602)
+
+    # ------------------------------------------------- watchlist.* tests
+
+    def test_watchlist_list_reads_temp_watchlist_db(self) -> None:
+        with sqlite3.connect(str(self._watchlist_db)) as conn:
+            conn.executescript("""
+                CREATE TABLE groups (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name        TEXT    NOT NULL UNIQUE,
+                    sort_order  INTEGER NOT NULL DEFAULT 0,
+                    created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE watchlist (
+                    ticker      TEXT    NOT NULL,
+                    name        TEXT    NOT NULL DEFAULT '',
+                    group_id    INTEGER NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+                    tags        TEXT    DEFAULT '[]',
+                    notes       TEXT    DEFAULT '',
+                    added_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+                    PRIMARY KEY (ticker, group_id)
+                );
+                INSERT INTO groups (id, name, sort_order) VALUES (1, 'default', 0);
+                INSERT INTO watchlist (ticker, name, group_id, tags, notes)
+                VALUES ('510300.SH', '沪深300ETF', 1, '[]', '');
+            """)
+
+        rows = self.call_ok("watchlist.list", {"db_path": str(self._watchlist_db)})
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["ticker"], "510300.SH")
+        self.assertEqual(rows[0]["name"], "沪深300ETF")
 
     # -------------------------------------------------- backtest.* tests
 

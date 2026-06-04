@@ -114,7 +114,7 @@ pnpm dev backtest 510300.SH --start-date 2024-01-01 --end-date 2024-06-01
 pnpm dev paper account                          # 纸上交易账户
 pnpm dev detail 510300.SH                       # ETF 信息查询
 pnpm dev cache stats                            # 缓存管理
-pnpm dev tui                                    # 交互式 Ink 终端仪表盘
+pnpm dev tui                                    # 交互式 Ink 终端仪表盘（也可 pnpm tui）
 ```
 
 **Python CLI**（`pip install .` 后提供 `etfagents` 控制台脚本）：
@@ -147,7 +147,7 @@ LLM 工厂 · 回测信号提取
 ```text
 ETFAgents/
 ├── etfagents/                  # 🐍 Python sidecar
-│   ├── bridge/                 #   JSON-RPC over stdio + handlers/ (tools/config/cache/paper/backtest/memory)
+│   ├── bridge/                 #   JSON-RPC over stdio + handlers/ (tools/config/cache/paper/backtest/memory/watchlist)
 │   ├── agents/                 #   analyst / researcher / trader / risk / manager 角色 + utils
 │   ├── graph/                  #   LangGraph 编排、checkpoint、回放、信号处理
 │   ├── dataflows/              #   Tushare / yfinance / akshare / FRED / Brave + route_to_vendor()
@@ -163,7 +163,7 @@ ETFAgents/
 │       ├── agents/             #   nodes · helpers · prompts · schemas · state
 │       ├── graph/              #   full_graph LangGraph.js 装配
 │       ├── cli/commands/       #   analyze / analyze-pool / backtest / paper / detail / cache / ...
-│       └── tui/                #   Ink TUI (研究 / 报告库 / 自选 / 回测 / 纸上交易 / 错误详情)
+│       └── tui/                #   Ink TUI shell + model/runner/services/screens
 ├── tests/                      # ✅ Python unittest
 ├── docs/ · pyproject.toml · ts/package.json · .github/workflows/ci.yml
 ```

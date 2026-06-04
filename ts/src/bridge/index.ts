@@ -40,5 +40,6 @@ export type {
   ToolCallContext,
   ToolCallResult,
   ToolMetadata,
+  WatchlistEntry,
 } from "./types.js";
 export { BridgeApi } from "./types.js";

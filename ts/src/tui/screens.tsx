@@ -1,0 +1,1058 @@
+import { Box, Text } from "ink";
+import type {
+  AppState,
+  ConfigField,
+  ErrorDetail,
+  ExecutionSummary,
+  Phase,
+  SectionDef,
+} from "./model.js";
+import {
+  ANALYST_IDS,
+  backendDisplay,
+  DEFAULT_SECTIONS,
+  DEPTH_LABELS,
+  DEPTH_OPTIONS,
+  HOME_OPTIONS,
+  HOME_SUBTITLE,
+  HOME_TITLE,
+  MODELS_BY_PROVIDER,
+  modelHasOptions,
+  PROVIDERS,
+  parseTickers,
+  queueStatusLabel,
+  reportViewport,
+  sectionGroups,
+  sparkline,
+  TEAM_TABS,
+} from "./model.js";
+
+// ===========================================================================
+// Home screen
+// ===========================================================================
+
+export function HomeScreen({ state }: { state: AppState }) {
+  return (
+    <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
+      <Text bold color="cyan">
+        {HOME_TITLE}
+      </Text>
+      <Text dimColor>{HOME_SUBTITLE}</Text>
+      <Box flexDirection="column" marginTop={2} width={52}>
+        {HOME_OPTIONS.map((item, i) => {
+          const active = i === state.homeIdx;
+          return (
+            <Text
+              key={item.key}
+              bold={active}
+              {...(active ? { color: "cyan" as const } : { dimColor: true })}
+            >
+              {active ? "▶ " : "  "}
+              {item.label.padEnd(15)} {item.description}
+            </Text>
+          );
+        })}
+      </Box>
+      <Box marginTop={2}>
+        <Text dimColor>↑↓ 选择 · Enter 打开 · ? 帮助 · Esc 退出</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
+// Ticker screen
+// ===========================================================================
+
+export function TickerScreen({ state }: { state: AppState }) {
+  const tickers = parseTickers(state.ticker);
+  return (
+    <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
+      <Text bold>创建研究任务</Text>
+      <Box marginY={1}>
+        <Text dimColor>ETF 代码 </Text>
+        <Text color="yellow">{state.ticker || "▌"}</Text>
+      </Box>
+      <Text dimColor>
+        支持多个代码，用逗号或空格分隔
+        {tickers.length > 0 ? ` · 已识别 ${tickers.length} 个` : ""}
+      </Text>
+      <Text dimColor>输入代码后按 Enter 配置分析参数</Text>
+
+      {/* P3: watchlist cards derived from recent report history. */}
+      {state.watchlist.length > 0 && (
+        <Box flexDirection="column" marginTop={1} borderStyle="round" paddingX={2}>
+          <Text bold>⭐ 自选 / 最近研究</Text>
+          <Box marginTop={1} flexWrap="wrap">
+            {state.watchlist.map((ticker, i) => (
+              <Box key={ticker} marginRight={1}>
+                <Text
+                  {...(i === state.watchlistIdx ? { color: "cyan" as const, bold: true } : {})}
+                  dimColor={i !== state.watchlistIdx}
+                >
+                  {i === state.watchlistIdx ? "▶ " : "  "}
+                  {ticker}
+                </Text>
+              </Box>
+            ))}
+          </Box>
+          <Text dimColor>↑↓ 选择 · Tab 加入输入</Text>
+        </Box>
+      )}
+      <Box marginTop={1}>
+        <Text dimColor>Ctrl+L 报告库 · Ctrl+B 回测 · Ctrl+P 模拟盘 · ? 帮助 · Esc 返回</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
+// Config modal
+// ===========================================================================
+
+export function ConfigModal({ state }: { state: AppState }) {
+  const showModelSelect = modelHasOptions(state);
+  const vllmPending = state.provider.toLowerCase() === "vllm" && state.vllmModels === null;
+  const focus = (f: ConfigField) => state.focus === f;
+
+  return (
+    <Box flexDirection="column" flexGrow={1} justifyContent="center" alignItems="center">
+      <Box flexDirection="column" borderStyle="round" paddingX={4} paddingY={1}>
+        <Box marginBottom={1}>
+          <Text bold>分析配置</Text>
+          <Text dimColor> — {state.ticker}</Text>
+        </Box>
+        <FieldRow label="日期" value={state.date} focused={focus("date")} hint="YYYY-MM-DD" />
+        <SelectFieldRow
+          label="提供商"
+          value={state.provider}
+          focused={focus("provider")}
+          open={state.selectOpen === "provider"}
+          options={PROVIDERS}
+          selectedIdx={state.selectIdx}
+          hint="选择 LLM 提供商"
+        />
+        {showModelSelect ? (
+          <SelectFieldRow
+            label="模型"
+            value={state.model}
+            focused={focus("model")}
+            open={state.selectOpen === "model"}
+            options={
+              state.provider.toLowerCase() === "vllm"
+                ? (state.vllmModels ?? [])
+                : (MODELS_BY_PROVIDER[state.provider.toLowerCase()] ?? [])
+            }
+            selectedIdx={state.selectIdx}
+            hint="选择模型"
+          />
+        ) : vllmPending ? (
+          <Box>
+            <Text dimColor>{"模型".padEnd(6)}</Text>
+            <Text color="yellow">正在获取 vllm 模型列表…</Text>
+          </Box>
+        ) : (
+          <FieldRow
+            label="模型"
+            value={state.model}
+            focused={focus("model")}
+            hint={state.provider ? "输入模型名称" : "请先选择提供商"}
+          />
+        )}
+        <SelectFieldRow
+          label="研究深度"
+          value={DEPTH_LABELS[state.depth]}
+          focused={focus("depth")}
+          open={state.selectOpen === "depth"}
+          options={DEPTH_OPTIONS.map((opt) => DEPTH_LABELS[opt])}
+          selectedIdx={state.selectIdx}
+          hint="选择研究深度"
+        />
+        <AnalystToggleRow state={state} focused={focus("analysts")} />
+        <RoundStepperRow
+          label="辩论轮数"
+          value={state.debateRounds}
+          focused={focus("debateRounds")}
+        />
+        <RoundStepperRow label="风险轮数" value={state.riskRounds} focused={focus("riskRounds")} />
+        <Box>
+          <Text dimColor>{"后端".padEnd(8)}</Text>
+          <Text dimColor>{backendDisplay(state.provider, state.backendUrl)}</Text>
+        </Box>
+
+        <Box marginTop={1} justifyContent="center">
+          <Text color="green">Tab 切换字段 · Enter 开始分析</Text>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+function AnalystToggleRow({ state, focused }: { state: AppState; focused: boolean }) {
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Text dimColor>{"分析师".padEnd(6)}</Text>
+        {focused ? (
+          <Text color="yellow" dimColor>
+            (←→ 移动 · 空格 开关)
+          </Text>
+        ) : (
+          <Text dimColor>
+            已选 {ANALYST_IDS.filter((id) => state.selectedAnalysts[id]).length}/
+            {ANALYST_IDS.length}
+          </Text>
+        )}
+      </Box>
+      {focused && (
+        <Box flexWrap="wrap" marginLeft={2}>
+          {ANALYST_IDS.map((id, i) => {
+            const on = state.selectedAnalysts[id] !== false;
+            const title = DEFAULT_SECTIONS.find((s) => s.id === id)?.title ?? id;
+            const isCursor = i === state.analystCursor;
+            return (
+              <Box key={id} marginRight={1}>
+                <Text
+                  {...(isCursor ? { color: "cyan" as const, bold: true } : {})}
+                  dimColor={!isCursor}
+                >
+                  {on ? "☑" : "☐"} {title}
+                </Text>
+              </Box>
+            );
+          })}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function RoundStepperRow({
+  label,
+  value,
+  focused,
+}: {
+  label: string;
+  value: number;
+  focused: boolean;
+}) {
+  return (
+    <Box>
+      <Text dimColor>{label.padEnd(8)}</Text>
+      {focused ? (
+        <Text color="yellow">
+          ◀ {value} ▶ <Text dimColor>(←→ 调整)</Text>
+        </Text>
+      ) : (
+        <Text>{value}</Text>
+      )}
+    </Box>
+  );
+}
+
+function FieldRow({
+  label,
+  value,
+  focused,
+  hint,
+}: {
+  label: string;
+  value: string;
+  focused: boolean;
+  hint: string;
+}) {
+  return (
+    <Box>
+      <Text dimColor>{label.padEnd(8)}</Text>
+      {focused ? <Text color="yellow">{value || "▌"}</Text> : <Text>{value || hint}</Text>}
+    </Box>
+  );
+}
+
+function SelectFieldRow({
+  label,
+  value,
+  focused,
+  open,
+  options,
+  selectedIdx,
+  hint,
+}: {
+  label: string;
+  value: string;
+  focused: boolean;
+  open: boolean;
+  options: readonly string[];
+  selectedIdx: number;
+  hint: string;
+}) {
+  return (
+    <Box flexDirection="column">
+      <Box>
+        <Text dimColor>{label.padEnd(8)}</Text>
+        {focused ? (
+          <Text color="yellow">
+            {value || (open ? "▾" : "▸")}{" "}
+            <Text dimColor>{open ? "(↑↓ 选择, Enter 确认)" : "(Enter 展开)"}</Text>
+          </Text>
+        ) : (
+          <Text>{value || hint}</Text>
+        )}
+      </Box>
+      {open && (
+        <Box flexDirection="column" marginLeft={2}>
+          {options.map((opt, i) => {
+            const color = i === selectedIdx ? "cyan" : undefined;
+            return (
+              <Text key={opt} {...(color ? { color } : {})}>
+                {i === selectedIdx ? "▶ " : "  "}
+                {opt === value ? (
+                  <Text bold color="green">
+                    {opt}
+                  </Text>
+                ) : (
+                  <Text>{opt}</Text>
+                )}
+              </Text>
+            );
+          })}
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+// ===========================================================================
+// Dashboard (Python-aligned layout)
+// ===========================================================================
+
+export function Dashboard({ state, elapsed }: { state: AppState; elapsed: number }) {
+  const groups = sectionGroups(state.selectedAnalysts);
+  const done = state.sectionDone;
+
+  function countDone(key: string): number {
+    return (groups[key] ?? []).filter((s) => done.has(s.id)).length;
+  }
+  function total(key: string): number {
+    return (groups[key] ?? []).length;
+  }
+
+  const el = fmtElapsed(elapsed);
+
+  // Totals reflect only the sections active for the current analyst selection.
+  const activeSectionIds = Object.values(groups).flat();
+  const agentsTotal = activeSectionIds.length;
+  const agentsDone = activeSectionIds.filter((s) => done.has(s.id)).length;
+  const reportsTotal = agentsTotal;
+  const reportsDone = agentsDone;
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      {/* Main two-column layout */}
+      <Box flexDirection="row" flexGrow={1}>
+        {/* Left pane — 22ch */}
+        <Box flexDirection="column" width={22} borderStyle="single" paddingX={1}>
+          {/* ETF card */}
+          <Box flexDirection="column" marginBottom={1}>
+            <Text bold>📊 基本信息</Text>
+            {state.etfDetail?.loading ? (
+              <Text dimColor>加载中…</Text>
+            ) : state.etfDetail?.error ? (
+              <Text color="red">{state.etfDetail.error.slice(0, 18)}</Text>
+            ) : (
+              <>
+                <Text>{state.etfDetail?.name || state.ticker}</Text>
+                {state.etfDetail?.close !== undefined && (
+                  <Text>
+                    现价: <Text bold>{state.etfDetail.close.toFixed(3)}</Text>
+                    {state.etfDetail.pctChg !== undefined && (
+                      <Text
+                        {...(state.etfDetail.pctChg > 0
+                          ? { color: "red" as const }
+                          : state.etfDetail.pctChg < 0
+                            ? { color: "green" as const }
+                            : {})}
+                      >
+                        {" "}
+                        {state.etfDetail.pctChg > 0 ? "+" : ""}
+                        {state.etfDetail.pctChg.toFixed(2)}%
+                      </Text>
+                    )}
+                  </Text>
+                )}
+                {state.etfDetail?.history && state.etfDetail.history.length > 1 && (
+                  <Text color="cyan">{sparkline(state.etfDetail.history)}</Text>
+                )}
+                {(state.etfDetail?.high !== undefined || state.etfDetail?.low !== undefined) && (
+                  <Text dimColor>
+                    H/L: {state.etfDetail.high?.toFixed(3) ?? "—"}/
+                    {state.etfDetail.low?.toFixed(3) ?? "—"}
+                  </Text>
+                )}
+                {state.etfDetail?.volume !== undefined && (
+                  <Text dimColor>
+                    量: {Math.round(state.etfDetail.volume).toLocaleString()}
+                    {state.etfDetail.volumeChangePct !== undefined
+                      ? ` (${state.etfDetail.volumeChangePct > 0 ? "+" : ""}${state.etfDetail.volumeChangePct.toFixed(1)}%)`
+                      : ""}
+                  </Text>
+                )}
+                <Text dimColor>{state.date}</Text>
+              </>
+            )}
+            {state.status === "running" ? (
+              <Text color="yellow">分析中…</Text>
+            ) : state.status === "done" ? (
+              <Text color="green">分析完成</Text>
+            ) : state.status === "error" ? (
+              <Text color="red">分析失败</Text>
+            ) : (
+              <Text dimColor>等待中</Text>
+            )}
+          </Box>
+
+          {/* Metadata */}
+          <Box flexDirection="column" marginBottom={1}>
+            <Text bold>📋 分析元数据</Text>
+            <Text dimColor>日期: {state.date}</Text>
+            <Text dimColor>提供商: {state.provider || "—"}</Text>
+            <Text dimColor>模型: {state.model || "—"}</Text>
+            <Text dimColor>标的: {state.tickers.length || parseTickers(state.ticker).length}</Text>
+          </Box>
+
+          {/* Cancel button */}
+          <Box marginBottom={1}>
+            {state.status === "running" ? (
+              <Text dimColor>Esc 取消并返回</Text>
+            ) : (
+              <Text dimColor>Enter 返回首页</Text>
+            )}
+          </Box>
+
+          {/* Queue — shows tickers being analyzed */}
+          <Box flexDirection="column" flexGrow={1}>
+            <Text bold>🧠 研究队列</Text>
+            <Text dimColor>
+              状态:{" "}
+              {state.status === "error"
+                ? "🔴"
+                : state.status === "done"
+                  ? "🟢"
+                  : state.status === "running"
+                    ? "🟡"
+                    : "⚪"}{" "}
+              {state.queue.filter((item) => item.status === "done").length}/
+              {state.queue.length || 1}
+              {state.status === "error"
+                ? " 有失败"
+                : state.status === "done"
+                  ? " 已完成"
+                  : state.status === "running"
+                    ? " 分析中"
+                    : " 等待中"}
+            </Text>
+            <Box flexDirection="column" marginTop={1}>
+              {state.queue.length > 0 ? (
+                state.queue.slice(0, 8).map((item, index) => (
+                  <Text key={item.ticker}>
+                    <Text
+                      {...(() => {
+                        const color =
+                          item.status === "done"
+                            ? "green"
+                            : item.status === "failed" || item.status === "cancelled"
+                              ? "red"
+                              : item.status === "running"
+                                ? "yellow"
+                                : undefined;
+                        return color ? { color: color as "green" | "red" | "yellow" } : {};
+                      })()}
+                    >
+                      {index === state.currentTickerIdx ? "> " : "  "}
+                      {item.ticker}
+                    </Text>
+                    <Text dimColor> ({queueStatusLabel(item.status)})</Text>
+                  </Text>
+                ))
+              ) : (
+                <Text dimColor>等待分析启动…</Text>
+              )}
+            </Box>
+          </Box>
+        </Box>
+
+        {/* Right pane */}
+        <Box flexDirection="column" flexGrow={1} paddingLeft={1}>
+          {/* Team tabs (top) */}
+          <Box marginBottom={1}>
+            {TEAM_TABS.map((tab) => (
+              <Box key={tab.key} marginRight={1}>
+                <TabButton
+                  label={tab.label}
+                  done={countDone(tab.key)}
+                  total={total(tab.key)}
+                  active={state.activeTab === tab.key}
+                />
+              </Box>
+            ))}
+          </Box>
+
+          {/* Tabbed section view + progress (bottom) */}
+          <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1}>
+            <TabContent state={state} groups={groups} />
+          </Box>
+        </Box>
+      </Box>
+
+      {/* Stats bar */}
+      <Box marginTop={1} justifyContent="space-between">
+        <Text color="cyan">
+          ◎ Agents {agentsDone}/{agentsTotal}{" "}
+          {state.status === "running"
+            ? "· 分析中"
+            : state.status === "done"
+              ? "· 完成"
+              : state.status === "error"
+                ? "· 错误"
+                : "· 等待"}
+        </Text>
+        <Text dimColor>
+          {state.activeSection
+            ? `当前 ${DEFAULT_SECTIONS.find((s) => s.id === state.activeSection)?.title ?? state.activeSection}`
+            : state.rating
+              ? `评级 ${state.rating}`
+              : "完整流水线"}
+        </Text>
+        <Text color="green">
+          Nodes {state.stats.llm_calls} · Toolset {state.stats.tool_calls} · Reports {reportsDone}/
+          {reportsTotal}
+        </Text>
+        <Text dimColor>{el} ←→ 团队 · ↑↓ 章节 · PgUp/PgDn 滚动 · e 错误 · Enter 返回</Text>
+      </Box>
+    </Box>
+  );
+}
+
+/**
+ * Right-pane body. Shows the progress log for the analysts tab while running,
+ * and the per-section report content for the selected team tab. Falls back to
+ * the progress log until a section has produced output.
+ */
+function TabContent({ state, groups }: { state: AppState; groups: Record<string, SectionDef[]> }) {
+  const sections = groups[state.activeTab] ?? [];
+  const tabMeta = TEAM_TABS.find((t) => t.key === state.activeTab);
+
+  // P0: the selected section for this tab (default to the first section).
+  const selectedId = state.selectedSectionByTab[state.activeTab] ?? sections[0]?.id;
+  const selected = sections.find((s) => s.id === selectedId);
+  const selectedStatus = selectedId ? (state.sectionStatus[selectedId] ?? "pending") : "pending";
+  const selectedBody = selectedId ? (state.reports[selectedId] ?? "") : "";
+  const scroll = selectedId ? (state.reportScrollBySection[selectedId] ?? 0) : 0;
+  const view = reportViewport(selectedBody, scroll);
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      <Text bold>{tabMeta?.label ?? "整体进度"}</Text>
+
+      {/* P0: section checklist with the selected section highlighted. */}
+      <Box flexDirection="column" marginTop={1}>
+        {sections.map((s) => {
+          const status = state.sectionStatus[s.id] ?? "pending";
+          const isDone = status === "done";
+          const hasBody = Boolean(state.reports[s.id]?.trim());
+          const isSelected = s.id === selectedId;
+          const mark =
+            status === "done"
+              ? "✓"
+              : status === "failed"
+                ? "×"
+                : status === "running"
+                  ? "◐"
+                  : state.status === "running"
+                    ? "○"
+                    : "·";
+          const colorProps = isSelected
+            ? { color: "cyan" as const }
+            : isDone
+              ? { color: "green" as const }
+              : status === "failed"
+                ? { color: "red" as const }
+                : hasBody || status === "running"
+                  ? { color: "yellow" as const }
+                  : {};
+          return (
+            <Text
+              key={s.id}
+              bold={isSelected}
+              dimColor={!isSelected && !isDone && !hasBody}
+              {...colorProps}
+            >
+              {isSelected ? "▶ " : "  "}
+              {mark} {s.title}
+            </Text>
+          );
+        })}
+      </Box>
+
+      {/* Decision tab keeps the structured execution-summary panel. */}
+      {state.activeTab === "decision" && state.executionSummary && (
+        <ExecutionSummaryView summary={state.executionSummary} />
+      )}
+
+      {/* P0: selected section body viewport, or status/progress fallback. */}
+      <Box flexDirection="column" marginTop={1} flexGrow={1}>
+        {selected && selectedBody.trim() ? (
+          <>
+            <Text bold color="cyan">
+              ── {selected.title} ── <Text dimColor>({selectedStatus})</Text>
+            </Text>
+            {view.lines.map((line, i) => (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: scrolled snapshot */
+              <ReportLine key={`${selectedId}-${i}`} line={line} />
+            ))}
+            <Text dimColor>
+              {view.atTop ? "顶部" : "↑"} · {view.atBottom ? "底部" : "↓"} ·{" "}
+              {scroll + view.lines.length}/{view.total} 行 · PgUp/PgDn 滚动 · ↑↓ 选择章节
+            </Text>
+          </>
+        ) : selectedStatus === "running" ? (
+          <>
+            <Text color="yellow">{selected?.title ?? ""} 运行中…</Text>
+            {state.logs.slice(-8).map((log, i) => (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
+              <Text key={`${i}`} dimColor>
+                • {log}
+              </Text>
+            ))}
+          </>
+        ) : selectedStatus === "failed" ? (
+          <>
+            <Text color="red">{selected?.title ?? ""} 失败</Text>
+            <Text color="red">{state.errorMsg.slice(0, 200)}</Text>
+            {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
+          </>
+        ) : (
+          <>
+            <Text dimColor>整体进度</Text>
+            {state.logs.length > 0 ? (
+              state.logs.slice(-12).map((log, i) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: append-only log */
+                <Text key={`${i}`} dimColor={log.startsWith("──") || log.startsWith("✓")}>
+                  {log.startsWith("──") || log.startsWith("✓") ? `  ${log}` : `• ${log}`}
+                </Text>
+              ))
+            ) : (
+              <Text dimColor>{selected ? `${selected.title} 等待中` : "准备开始分析。"}</Text>
+            )}
+            {state.status === "error" && (
+              <Box marginTop={1} flexDirection="column">
+                <Text color="red">{state.errorMsg.slice(0, 120)}</Text>
+                {state.errorDetail && <Text dimColor>按 e 查看错误详情</Text>}
+              </Box>
+            )}
+          </>
+        )}
+      </Box>
+    </Box>
+  );
+}
+
+function TabButton({
+  label,
+  done,
+  total,
+  active,
+}: {
+  label: string;
+  done: number;
+  total: number;
+  active: boolean;
+}) {
+  const allDone = done === total && total > 0;
+  return (
+    <Box flexDirection="column" borderStyle={active ? "round" : "single"} paddingX={1}>
+      <Text bold={active} {...(active ? { color: "cyan" as const } : {})}>
+        {label} {active ? "▾" : "▸"}
+      </Text>
+      <Text color={allDone ? "green" : "yellow"}>
+        {done}/{total}
+      </Text>
+    </Box>
+  );
+}
+
+function ExecutionSummaryView({ summary }: { summary: ExecutionSummary }) {
+  const range =
+    summary.targetWeightMinPct !== undefined && summary.targetWeightMaxPct !== undefined
+      ? `${summary.targetWeightMinPct.toFixed(1)}%-${summary.targetWeightMaxPct.toFixed(1)}%`
+      : summary.targetWeightPct !== undefined
+        ? `${summary.targetWeightPct.toFixed(1)}%`
+        : "—";
+  const weight = summary.targetWeightPct ?? summary.targetWeightMaxPct ?? 0;
+  const filled = Math.max(0, Math.min(10, Math.round(weight / 10)));
+  return (
+    <Box flexDirection="column" marginTop={1} marginBottom={1}>
+      <Text bold color="cyan">
+        ── 执行摘要 ──
+      </Text>
+      <Text>
+        评级: <Text bold>{summary.rating ?? "—"}</Text> · 目标仓位: {range}{" "}
+        <Text color="green">{"█".repeat(filled)}</Text>
+        <Text dimColor>{"░".repeat(10 - filled)}</Text>
+      </Text>
+      <Text dimColor>执行节奏: {summary.executionDelay || "—"}</Text>
+      <SummaryLine label="加仓条件" values={summary.addConditions} />
+      <SummaryLine label="减仓条件" values={summary.reduceConditions} />
+      <SummaryLine label="风险控制" values={summary.riskControls} />
+    </Box>
+  );
+}
+
+function SummaryLine({ label, values }: { label: string; values: string[] }) {
+  return (
+    <Text dimColor>
+      {label}: {values.length > 0 ? values.join("；").slice(0, 100) : "—"}
+    </Text>
+  );
+}
+
+const NUMBER_TOKEN_RE =
+  /(\d{4}-\d{2}-\d{2}|[+-]?\d+(?:\.\d+)?\s*(?:%|％|倍|万手|亿份|元|日|天|周|月)?)/g;
+
+function ReportLine({ line }: { line: string }) {
+  if (!line) return <Text> </Text>;
+  const trimmed = line.trim();
+  if (trimmed.startsWith("#")) {
+    return (
+      <Text bold color="cyan">
+        {trimmed.replace(/^#+\s*/, "")}
+      </Text>
+    );
+  }
+  if (/^[-*•]\s+/.test(trimmed)) {
+    return (
+      <Text>
+        <Text dimColor>• </Text>
+        <HighlightedText text={trimmed.replace(/^[-*•]\s+/, "")} />
+      </Text>
+    );
+  }
+  return (
+    <Text>
+      <HighlightedText text={line} />
+    </Text>
+  );
+}
+
+function HighlightedText({ text }: { text: string }) {
+  const parts = text.split(NUMBER_TOKEN_RE);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (!part) return null;
+        const isNumber = NUMBER_TOKEN_RE.test(part);
+        NUMBER_TOKEN_RE.lastIndex = 0;
+        return (
+          // biome-ignore lint/suspicious/noArrayIndexKey: split text fragments are stable for a line
+          <Text key={i} bold={isNumber} {...(isNumber ? { color: "yellow" as const } : {})}>
+            {part}
+          </Text>
+        );
+      })}
+    </>
+  );
+}
+
+function fmtElapsed(s: number): string {
+  const m = Math.floor(s / 60);
+  return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+}
+
+// ===========================================================================
+// P2: Report library screen
+// ===========================================================================
+
+export function ReportLibrary({ state }: { state: AppState }) {
+  const { reports, selectedIdx, body, bodyLoading, loading, error, scroll } = state.library;
+  const view = reportViewport(body, scroll);
+  return (
+    <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Text bold>📚 报告库</Text>
+      <Box flexDirection="row" flexGrow={1} marginTop={1}>
+        {/* Left: report list */}
+        <Box flexDirection="column" width={28} borderStyle="single" paddingX={1}>
+          <Text bold>历史报告</Text>
+          {loading ? (
+            <Text dimColor>加载中…</Text>
+          ) : error ? (
+            <Text color="red">{error.slice(0, 24)}</Text>
+          ) : reports.length === 0 ? (
+            <Text dimColor>暂无报告</Text>
+          ) : (
+            reports.slice(0, 18).map((r, i) => (
+              <Text
+                key={r.path}
+                {...(i === selectedIdx ? { color: "cyan" as const, bold: true } : {})}
+                dimColor={i !== selectedIdx}
+              >
+                {i === selectedIdx ? "▶ " : "  "}
+                {r.ticker.padEnd(12)} {r.date}
+              </Text>
+            ))
+          )}
+          <Box marginTop={1}>
+            <Text dimColor>↑↓ 选择 · r 刷新 · Esc 返回</Text>
+          </Box>
+        </Box>
+        {/* Right: body viewer (reuses the P0 viewport math) */}
+        <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1} marginLeft={1}>
+          {reports[selectedIdx] && (
+            <Text bold color="cyan">
+              {reports[selectedIdx]?.ticker} · {reports[selectedIdx]?.date}
+            </Text>
+          )}
+          {bodyLoading ? (
+            <Text dimColor>读取中…</Text>
+          ) : body ? (
+            <>
+              {view.lines.map((line, i) => (
+                /* biome-ignore lint/suspicious/noArrayIndexKey: scrolled snapshot */
+                <ReportLine key={`lib-${i}`} line={line} />
+              ))}
+              <Text dimColor>
+                {view.atBottom ? "底部" : "↓"} · {scroll + view.lines.length}/{view.total} 行 ·
+                PgUp/PgDn 滚动
+              </Text>
+            </>
+          ) : (
+            <Text dimColor>选择左侧报告查看内容。</Text>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
+// P4: Backtest viewer screen
+// ===========================================================================
+
+function fmtPct(v: unknown): string {
+  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(2)}%` : "—";
+}
+function fmtNum(v: unknown): string {
+  return typeof v === "number" && Number.isFinite(v) ? v.toFixed(4) : "—";
+}
+
+export function BacktestScreen({ state }: { state: AppState }) {
+  const { records, selectedIdx, view, loading, error } = state.backtest;
+  const selected = records[selectedIdx];
+  const metrics = view?.metrics ?? {};
+  const health = view?.health ?? null;
+  return (
+    <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Text bold>📈 回测结果</Text>
+      <Box flexDirection="row" flexGrow={1} marginTop={1}>
+        <Box flexDirection="column" width={28} borderStyle="single" paddingX={1}>
+          <Text bold>回测记录</Text>
+          {loading ? (
+            <Text dimColor>加载中…</Text>
+          ) : error ? (
+            <Text color="red">{error.slice(0, 24)}</Text>
+          ) : records.length === 0 ? (
+            <Text dimColor>暂无回测产物</Text>
+          ) : (
+            records.slice(0, 16).map((r, i) => (
+              <Text
+                key={r.path}
+                {...(i === selectedIdx ? { color: "cyan" as const, bold: true } : {})}
+                dimColor={i !== selectedIdx}
+              >
+                {i === selectedIdx ? "▶ " : "  "}
+                {(r.tickers[0] ?? "?").padEnd(12)} {r.startDate}
+              </Text>
+            ))
+          )}
+          <Box marginTop={1}>
+            <Text dimColor>↑↓ 选择 · r 刷新 · Esc 返回</Text>
+          </Box>
+        </Box>
+        <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1} marginLeft={1}>
+          {selected ? (
+            <>
+              <Text bold color="cyan">
+                {selected.tickers.join(", ") || "?"} · {selected.startDate} → {selected.endDate}
+              </Text>
+              {view && view.nav.length > 1 && <Text color="cyan">{sparkline(view.nav, 40)}</Text>}
+              <Box flexDirection="column" marginTop={1}>
+                <Text>最终净值: {fmtNum(metrics.final_value)}</Text>
+                <Text>累计收益: {fmtPct(metrics.cumulative_return)}</Text>
+                <Text>年化收益: {fmtPct(metrics.annualized_return)}</Text>
+                <Text>最大回撤: {fmtPct(metrics.max_drawdown)}</Text>
+                <Text>夏普比率: {fmtNum(metrics.sharpe_ratio)}</Text>
+                <Text>交易笔数: {String(metrics.total_trades ?? view?.trades ?? "—")}</Text>
+              </Box>
+              {view && view.benchmarkMetrics.length > 0 && (
+                <Box flexDirection="column" marginTop={1}>
+                  <Text bold>基准对比</Text>
+                  {view.benchmarkMetrics.slice(0, 3).map((b, i) => (
+                    <Text key={String(b.benchmark ?? i)} dimColor>
+                      {String(b.benchmark ?? "?")}: 累计 {fmtPct(b.cumulative_return)} · 超额{" "}
+                      {fmtPct(b.excess_cumulative_return)}
+                    </Text>
+                  ))}
+                </Box>
+              )}
+              {health && Array.isArray(health.warnings) && health.warnings.length > 0 && (
+                <Box flexDirection="column" marginTop={1}>
+                  <Text bold color="yellow">
+                    ⚠ 健康提示
+                  </Text>
+                  {(health.warnings as unknown[]).slice(0, 4).map((w, i) => (
+                    /* biome-ignore lint/suspicious/noArrayIndexKey: static list */
+                    <Text key={`w-${i}`} color="yellow">
+                      • {String(w).slice(0, 80)}
+                    </Text>
+                  ))}
+                </Box>
+              )}
+            </>
+          ) : (
+            <Text dimColor>选择左侧回测记录查看详情。</Text>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
+// P5: Paper trading screen
+// ===========================================================================
+
+export function PaperScreen({ state }: { state: AppState }) {
+  const { account, positions, trades, loading, error, user } = state.paper;
+  return (
+    <Box flexDirection="column" flexGrow={1} paddingX={1}>
+      <Text bold>💼 模拟交易{user ? ` · ${user}` : ""}</Text>
+      {loading ? (
+        <Text dimColor>加载中…</Text>
+      ) : error ? (
+        <Text color="red">{error}</Text>
+      ) : (
+        <Box flexDirection="column" marginTop={1}>
+          {account && (
+            <Box flexDirection="column" marginBottom={1}>
+              <Text bold>账户</Text>
+              <Text>
+                总资产: {fmtNum(account.total_assets)} · 现金: {fmtNum(account.cash)} · 市值:{" "}
+                {fmtNum(account.market_value)}
+              </Text>
+              <Text dimColor>
+                已实现盈亏: {fmtNum(account.realized_pnl)} · 浮动盈亏:{" "}
+                {fmtNum(account.unrealized_pnl)}
+              </Text>
+            </Box>
+          )}
+          <Text bold>持仓 ({positions.length})</Text>
+          {positions.length === 0 ? (
+            <Text dimColor>无持仓</Text>
+          ) : (
+            positions.slice(0, 10).map((p) => (
+              <Text key={String(p.ticker)}>
+                {String(p.ticker).padEnd(12)} 数量 {String(p.quantity)} · 现价{" "}
+                {fmtNum(p.current_price)} · 盈亏 {fmtPct(p.pnl_pct)}
+              </Text>
+            ))
+          )}
+          <Box marginTop={1} flexDirection="column">
+            <Text bold>最近成交 ({trades.length})</Text>
+            {trades.slice(0, 8).map((t) => (
+              <Text key={String(t.id)} dimColor>
+                {String(t.created_at).slice(0, 10)} {String(t.side)} {String(t.ticker)} ×{" "}
+                {String(t.quantity)} @ {fmtNum(t.price)}
+              </Text>
+            ))}
+          </Box>
+        </Box>
+      )}
+      <Box marginTop={1}>
+        <Text dimColor>r 刷新 · Esc 返回</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
+// Help overlay
+// ===========================================================================
+
+export function HelpOverlay({ phase }: { phase: Phase }) {
+  const shared = "? 帮助 · Esc 返回/退出";
+  const lines: Record<Phase, string[]> = {
+    home: ["↑↓ 选择入口", "Enter 打开", "r/l/b/p 快速进入研究/报告/回测/模拟盘", shared],
+    ticker: ["输入 ETF 代码，逗号或空格分隔", "Enter 配置分析", "Tab 加入选中的最近研究", shared],
+    config: ["Tab 切换字段", "Enter 展开选择或开始分析", "←→ 调整分析师/轮数", shared],
+    dashboard: ["←→ 切换团队", "↑↓ 选择章节", "PgUp/PgDn 滚动正文", "Esc 取消并返回"],
+    library: ["↑↓ 选择报告", "PgUp/PgDn 滚动正文", "r 刷新", shared],
+    backtest: ["↑↓ 选择回测记录", "r 刷新", shared],
+    paper: ["r 刷新账户快照", shared],
+  };
+  return (
+    <Box flexDirection="column" borderStyle="single" paddingX={2} paddingY={1} marginTop={1}>
+      <Text bold>帮助</Text>
+      {(lines[phase] ?? lines.home).map((line) => (
+        <Text key={line} dimColor>
+          {line}
+        </Text>
+      ))}
+      <Box marginTop={1}>
+        <Text dimColor>按任意键关闭</Text>
+      </Box>
+    </Box>
+  );
+}
+
+// ===========================================================================
+// P6: Error detail overlay
+// ===========================================================================
+
+export function ErrorDetailOverlay({ detail }: { detail: ErrorDetail }) {
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="double"
+      borderColor="red"
+      paddingX={2}
+      paddingY={1}
+      marginTop={1}
+    >
+      <Text bold color="red">
+        ✗ 错误详情
+      </Text>
+      {detail.ticker && <Text>标的: {detail.ticker}</Text>}
+      {detail.section && <Text>章节: {detail.section}</Text>}
+      <Text dimColor>时间: {detail.timestamp}</Text>
+      <Box marginTop={1}>
+        <Text>{detail.message.slice(0, 400)}</Text>
+      </Box>
+      {detail.stack && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text dimColor>调用栈:</Text>
+          {detail.stack
+            .split("\n")
+            .slice(0, 8)
+            .map((line, i) => (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: static stack snapshot */
+              <Text key={`stk-${i}`} dimColor>
+                {line.slice(0, 110)}
+              </Text>
+            ))}
+        </Box>
+      )}
+      <Box marginTop={1}>
+        <Text dimColor>按任意键关闭</Text>
+      </Box>
+    </Box>
+  );
+}

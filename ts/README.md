@@ -15,15 +15,21 @@ pnpm dev backtest 510300.SH --start-date 2024-01-01 --end-date 2024-06-01
 pnpm dev detail 510300.SH               # ETF info lookup
 pnpm dev cache stats                     # cache management
 pnpm dev paper account                   # paper trading
+pnpm dev tui                             # Ink terminal dashboard
 ```
 
 ## TUI
 
 ```bash
-pnpm tui
+pnpm tui          # direct TUI script
+pnpm dev tui      # same TUI through the Commander CLI
 ```
 
-Interactive terminal UI with tab routing (Research / Results / Cache).
+Interactive terminal UI with home navigation for research, reports, backtests,
+and paper-trading views. The TUI keeps the app shell in `src/tui/index.tsx`,
+state/reducer helpers in `src/tui/model.ts`, graph execution in
+`src/tui/runner.ts`, artifact loading in `src/tui/services/`, and Ink screens
+in `src/tui/screens.tsx`.
 
 ## Project Layout
 
@@ -37,11 +43,11 @@ ts/
 │   │   ├── schemas/       # Zod schemas (TraderProposal, rating, triggers)
 │   │   └── state.ts       # LangGraph state annotation
 │   ├── bridge/            # JSON-RPC client, types, tool factories
-│   ├── cli/               # Commander CLI (8 commands)
+│   ├── cli/               # Commander CLI commands
 │   ├── graph/             # StateGraph builders (mini_spine, full_graph, routing)
 │   ├── llm/               # ChatOpenAI from bridge config
-│   └── tui/               # Ink TUI (React components)
-└── test/                  # Vitest (18 test files, 288 tests)
+│   └── tui/               # Ink TUI shell, model, runner, services, screens
+└── test/                  # Vitest
 ```
 
 ## Testing
@@ -49,8 +55,8 @@ ts/
 ```bash
 pnpm typecheck              # TypeScript strict mode
 pnpm lint                   # Biome (no errors)
-pnpm test                   # Vitest (288 tests)
-python -m unittest tests.test_bridge_protocol -q  # Python bridge (14 tests)
+pnpm test                   # Vitest (24 files, 349 tests)
+python -m unittest tests.test_bridge_protocol -q  # Python bridge (15 tests)
 ```
 
 ## Architecture
