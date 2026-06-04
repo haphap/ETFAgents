@@ -1,5 +1,10 @@
 import type { AppDispatch, BacktestMeta, ReportMeta } from "../model.js";
-import { extractPriceRows, normalizeBacktestResult, parseCsvLine } from "../model.js";
+import {
+  extractPriceRows,
+  normalizeBacktestResult,
+  parseCsvLine,
+  summarizeReportBody,
+} from "../model.js";
 
 // ===========================================================================
 // Local artifact discovery (P2 report library, P3 watchlist, P4 backtest)
@@ -21,7 +26,7 @@ export function resultsDir(): string {
 export async function loadLibrary(dispatch: AppDispatch): Promise<void> {
   dispatch({ type: "libraryLoading" });
   try {
-    const { readdir, stat } = await import("node:fs/promises");
+    const { readFile, readdir, stat } = await import("node:fs/promises");
     const root = resultsDir();
     const reports: ReportMeta[] = [];
     let tickerDirs: string[] = [];
@@ -43,9 +48,17 @@ export async function loadLibrary(dispatch: AppDispatch): Promise<void> {
       }
       for (const date of dates) {
         const path = `${tickerPath}/${date}`;
+        const reportFile = `${path}/complete_report.md`;
         try {
-          await stat(`${path}/complete_report.md`);
-          reports.push({ ticker, date, path });
+          await stat(reportFile);
+          let summary: Pick<ReportMeta, "rating" | "recommendation" | "strategy" | "riskControls"> =
+            {};
+          try {
+            summary = summarizeReportBody(await readFile(reportFile, "utf-8"));
+          } catch {
+            /* summary is optional; the reader can still open the full report */
+          }
+          reports.push({ ticker, date, path, ...summary });
         } catch {
           /* no complete report in this date dir */
         }

@@ -98,6 +98,7 @@ export const PROVIDER_BASE_URLS: Record<string, string> = {
 /** Report body viewport (lines) and wrap width used by the P0 reader. */
 export const REPORT_VIEWPORT = 18;
 export const REPORT_WIDTH = 116;
+export const LIBRARY_CARD_VIEWPORT = 5;
 export const ELAPSED_REFRESH_MS = 5000;
 
 // ===========================================================================
@@ -275,7 +276,12 @@ export interface ReportMeta {
   date: string;
   path: string;
   rating?: string;
+  recommendation?: string;
+  strategy?: string;
+  riskControls?: string;
 }
+
+export type LibraryPane = "tickers" | "reports";
 
 export interface BacktestMeta {
   path: string;
@@ -394,6 +400,9 @@ export interface AppState {
     error?: string;
     reports: ReportMeta[];
     selectedIdx: number;
+    pane: LibraryPane;
+    cardOffset: number;
+    readerOpen: boolean;
     body: string;
     bodyLoading: boolean;
     scroll: number;
@@ -478,6 +487,9 @@ export type Action =
   | { type: "libraryLoaded"; reports: ReportMeta[] }
   | { type: "libraryError"; error: string }
   | { type: "librarySelect"; delta: number }
+  | { type: "libraryPane"; pane: LibraryPane }
+  | { type: "libraryOpenReader" }
+  | { type: "libraryCloseReader" }
   | { type: "libraryBodyLoading" }
   | { type: "libraryBody"; body: string }
   | { type: "libraryScroll"; delta: number }
@@ -912,11 +924,138 @@ export function normalizeBacktestResult(
   };
 }
 
-/** P2/P4: newest-first ordering by date then ticker. */
+/** P2: ticker-first ordering; reports for the same ticker are newest-first. */
 export function sortReports(reports: ReportMeta[]): ReportMeta[] {
   return [...reports].sort((a, b) =>
-    b.date !== a.date ? b.date.localeCompare(a.date) : a.ticker.localeCompare(b.ticker),
+    a.ticker !== b.ticker ? a.ticker.localeCompare(b.ticker) : b.date.localeCompare(a.date),
   );
+}
+
+export function libraryTickers(reports: ReportMeta[]): string[] {
+  const tickers: string[] = [];
+  const seen = new Set<string>();
+  for (const report of reports) {
+    if (seen.has(report.ticker)) continue;
+    seen.add(report.ticker);
+    tickers.push(report.ticker);
+  }
+  return tickers;
+}
+
+export function reportsForTicker(reports: ReportMeta[], ticker: string | undefined): ReportMeta[] {
+  if (!ticker) return [];
+  return reports.filter((report) => report.ticker === ticker);
+}
+
+function selectedLibraryTicker(reports: ReportMeta[], selectedIdx: number): string | undefined {
+  return reports[selectedIdx]?.ticker ?? reports[0]?.ticker;
+}
+
+function libraryReportIndex(reports: ReportMeta[], target: ReportMeta | undefined): number {
+  if (!target) return 0;
+  const index = reports.findIndex((report) => report.path === target.path);
+  return index >= 0 ? index : 0;
+}
+
+function visibleCardOffset(selectedWithinTicker: number, currentOffset: number): number {
+  if (selectedWithinTicker < currentOffset) return selectedWithinTicker;
+  if (selectedWithinTicker >= currentOffset + LIBRARY_CARD_VIEWPORT) {
+    return Math.max(0, selectedWithinTicker - LIBRARY_CARD_VIEWPORT + 1);
+  }
+  return Math.max(0, currentOffset);
+}
+
+export function summarizeReportBody(
+  body: string,
+): Pick<ReportMeta, "rating" | "recommendation" | "strategy" | "riskControls"> {
+  const lines = body
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map(cleanSummaryLine)
+    .filter((line) => line.length > 0);
+  const recommendation = findSummarySnippet(lines, [
+    /分析师建议|研究结论|最终交易建议|最终配置建议|投资建议|配置建议|Recommendation|Decision/i,
+  ]);
+  const strategy = findSummarySnippet(lines, [
+    /操作策略|交易策略|执行策略|持仓建议|配置执行计划|执行计划|操作计划|Action|Strategy|Positioning/i,
+  ]);
+  const riskControls = findSummarySnippet(lines, [
+    /风险控制|风控|再平衡|止损|减仓|Risk|Control|Drawdown/i,
+  ]);
+  const rating = extractRating(recommendation ?? lines.join(" "));
+  return {
+    ...(rating ? { rating } : {}),
+    ...(recommendation ? { recommendation } : {}),
+    ...(strategy ? { strategy } : {}),
+    ...(riskControls ? { riskControls } : {}),
+  };
+}
+
+function cleanSummaryLine(line: string): string {
+  const trimmed = line.trim();
+  if (
+    !trimmed ||
+    /^```/.test(trimmed) ||
+    /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(trimmed)
+  ) {
+    return "";
+  }
+  return stripInlineMarkdown(
+    trimmed
+      .replace(/^#{1,6}\s*/, "")
+      .replace(/^[-*•]\s+/, "")
+      .replace(/^\|/, "")
+      .replace(/\|$/, "")
+      .replace(/\s*\|\s*/g, " · "),
+  ).trim();
+}
+
+function findSummarySnippet(lines: string[], patterns: RegExp[]): string | undefined {
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? "";
+    if (!patterns.some((pattern) => pattern.test(line))) continue;
+    const afterLabel = line.replace(/^.*?[：:]\s*/, "").trim();
+    if (afterLabel && afterLabel !== line) return truncateSummary(afterLabel);
+    const next = nextSummaryLine(lines, i + 1);
+    if (next) return truncateSummary(next);
+    return truncateSummary(line);
+  }
+  return undefined;
+}
+
+function nextSummaryLine(lines: string[], start: number): string | undefined {
+  for (let i = start; i < Math.min(lines.length, start + 6); i += 1) {
+    const line = lines[i] ?? "";
+    if (!line || /^[一二三四五六七八九十\d]+[、.)]\s*\S+/.test(line)) continue;
+    return line;
+  }
+  return undefined;
+}
+
+function truncateSummary(line: string, width = 118): string {
+  const text = line.replace(/\s+/g, " ").trim();
+  if (text.length <= width) return text;
+  return `${text.slice(0, width - 1)}…`;
+}
+
+function extractRating(text: string): string | undefined {
+  const rating = text.match(/买入|增持|持有|减持|卖出|BUY|OVERWEIGHT|HOLD|UNDERWEIGHT|SELL/i)?.[0];
+  if (!rating) return undefined;
+  switch (rating.toUpperCase()) {
+    case "BUY":
+      return "买入";
+    case "OVERWEIGHT":
+      return "增持";
+    case "HOLD":
+      return "持有";
+    case "UNDERWEIGHT":
+      return "减持";
+    case "SELL":
+      return "卖出";
+    default:
+      return rating;
+  }
 }
 
 /** P5: deterministic position ordering by ticker. */
@@ -1337,6 +1476,9 @@ export function initState(): AppState {
       loading: false,
       reports: [],
       selectedIdx: 0,
+      pane: "tickers",
+      cardOffset: 0,
+      readerOpen: false,
       body: "",
       bodyLoading: false,
       scroll: 0,
@@ -1794,12 +1936,16 @@ export function reducer(state: AppState, action: Action): AppState {
         selectIdx: 0,
         showHelp: false,
         showTeamDetail: false,
+        library: { ...state.library, readerOpen: false, bodyLoading: false },
       };
 
     // --- P2 library ---
     case "libraryLoading": {
       const { error: _e, ...lib } = state.library;
-      return { ...state, library: { ...lib, loading: true } };
+      return {
+        ...state,
+        library: { ...lib, loading: true, readerOpen: false, bodyLoading: false },
+      };
     }
     case "libraryLoaded": {
       const { error: _e, ...lib } = state.library;
@@ -1811,8 +1957,11 @@ export function reducer(state: AppState, action: Action): AppState {
           loading: false,
           reports,
           selectedIdx: 0,
+          pane: "tickers",
+          cardOffset: 0,
+          readerOpen: false,
           body: "",
-          bodyLoading: reports.length > 0,
+          bodyLoading: false,
           scroll: 0,
         },
       };
@@ -1820,17 +1969,104 @@ export function reducer(state: AppState, action: Action): AppState {
     case "libraryError":
       return {
         ...state,
-        library: { ...state.library, loading: false, error: action.error, reports: [] },
+        library: {
+          ...state.library,
+          loading: false,
+          error: action.error,
+          reports: [],
+          selectedIdx: 0,
+          cardOffset: 0,
+          readerOpen: false,
+          bodyLoading: false,
+        },
       };
     case "librarySelect": {
-      const n = state.library.reports.length;
-      if (n === 0) return state;
-      const selectedIdx = (state.library.selectedIdx + action.delta + n) % n;
+      const reports = state.library.reports;
+      if (reports.length === 0) return state;
+      const ticker = selectedLibraryTicker(reports, state.library.selectedIdx);
+      if (state.library.pane === "reports") {
+        const tickerReports = reportsForTicker(reports, ticker);
+        if (tickerReports.length === 0) return state;
+        const current = reports[state.library.selectedIdx];
+        const currentWithin = Math.max(
+          0,
+          tickerReports.findIndex((report) => report.path === current?.path),
+        );
+        const nextWithin =
+          (currentWithin + action.delta + tickerReports.length) % tickerReports.length;
+        const nextReport = tickerReports[nextWithin];
+        const selectedIdx = libraryReportIndex(reports, nextReport);
+        return {
+          ...state,
+          library: {
+            ...state.library,
+            selectedIdx,
+            cardOffset: visibleCardOffset(nextWithin, state.library.cardOffset),
+            readerOpen: false,
+            body: "",
+            bodyLoading: false,
+            scroll: 0,
+          },
+        };
+      }
+
+      const tickers = libraryTickers(reports);
+      const currentTickerIdx = Math.max(0, tickers.indexOf(ticker ?? ""));
+      const nextTicker =
+        tickers[(currentTickerIdx + action.delta + tickers.length) % tickers.length];
+      const selectedIdx = libraryReportIndex(
+        reports,
+        reports.find((report) => report.ticker === nextTicker),
+      );
       return {
         ...state,
-        library: { ...state.library, selectedIdx, body: "", bodyLoading: true, scroll: 0 },
+        library: {
+          ...state.library,
+          selectedIdx,
+          cardOffset: 0,
+          readerOpen: false,
+          body: "",
+          bodyLoading: false,
+          scroll: 0,
+        },
       };
     }
+    case "libraryPane": {
+      const tickerReports = reportsForTicker(
+        state.library.reports,
+        selectedLibraryTicker(state.library.reports, state.library.selectedIdx),
+      );
+      const current = state.library.reports[state.library.selectedIdx];
+      const selectedWithin = Math.max(
+        0,
+        tickerReports.findIndex((report) => report.path === current?.path),
+      );
+      return {
+        ...state,
+        library: {
+          ...state.library,
+          pane: action.pane,
+          cardOffset: visibleCardOffset(selectedWithin, state.library.cardOffset),
+        },
+      };
+    }
+    case "libraryOpenReader":
+      if (!state.library.reports[state.library.selectedIdx]) return state;
+      return {
+        ...state,
+        library: {
+          ...state.library,
+          readerOpen: true,
+          body: "",
+          bodyLoading: true,
+          scroll: 0,
+        },
+      };
+    case "libraryCloseReader":
+      return {
+        ...state,
+        library: { ...state.library, readerOpen: false, bodyLoading: false },
+      };
     case "libraryBodyLoading":
       return { ...state, library: { ...state.library, bodyLoading: true } };
     case "libraryBody":

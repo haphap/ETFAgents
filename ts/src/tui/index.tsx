@@ -9,6 +9,7 @@ import {
   ELAPSED_REFRESH_MS,
   initState,
   isSelectField,
+  LIBRARY_CARD_VIEWPORT,
   nextFocus,
   parseTickers,
   REPORT_VIEWPORT,
@@ -25,6 +26,7 @@ import {
   HomeScreen,
   PaperScreen,
   ReportLibrary,
+  ReportReaderOverlay,
   TeamDetailOverlay,
   TickerScreen,
 } from "./screens.js";
@@ -123,12 +125,6 @@ function App() {
     if (state.phase === "library") loadLibrary(dispatch);
   }, [state.phase]);
 
-  // P2: load the selected report body when the selection changes.
-  const libSel = state.library.reports[state.library.selectedIdx];
-  useEffect(() => {
-    if (state.phase === "library" && libSel) loadLibraryBody(libSel, dispatch);
-  }, [state.phase, libSel]);
-
   // P4: discover backtest artifacts when entering the screen.
   useEffect(() => {
     if (state.phase === "backtest") loadBacktests(dispatch);
@@ -191,6 +187,22 @@ function App() {
         return;
       }
       d({ type: "closeTeamDetail" });
+      return;
+    }
+
+    if (s.phase === "library" && s.library.readerOpen) {
+      if (key.escape || key.return) {
+        d({ type: "libraryCloseReader" });
+        return;
+      }
+      if (key.upArrow || key.pageUp) {
+        d({ type: "libraryScroll", delta: -REPORT_VIEWPORT });
+        return;
+      }
+      if (key.downArrow || key.pageDown || input === " ") {
+        d({ type: "libraryScroll", delta: REPORT_VIEWPORT });
+        return;
+      }
       return;
     }
 
@@ -436,6 +448,14 @@ function App() {
         loadLibrary(d);
         return;
       }
+      if (key.leftArrow) {
+        d({ type: "libraryPane", pane: "tickers" });
+        return;
+      }
+      if (key.rightArrow || key.tab) {
+        d({ type: "libraryPane", pane: "reports" });
+        return;
+      }
       if (key.upArrow) {
         d({ type: "librarySelect", delta: -1 });
         return;
@@ -445,11 +465,20 @@ function App() {
         return;
       }
       if (key.pageUp) {
-        d({ type: "libraryScroll", delta: -REPORT_VIEWPORT });
+        d({ type: "librarySelect", delta: -LIBRARY_CARD_VIEWPORT });
         return;
       }
       if (key.pageDown) {
-        d({ type: "libraryScroll", delta: REPORT_VIEWPORT });
+        d({ type: "librarySelect", delta: LIBRARY_CARD_VIEWPORT });
+        return;
+      }
+      if (key.return) {
+        const selected = s.library.reports[s.library.selectedIdx];
+        if (selected) {
+          d({ type: "libraryPane", pane: "reports" });
+          d({ type: "libraryOpenReader" });
+          loadLibraryBody(selected, d);
+        }
         return;
       }
       return;
@@ -515,6 +544,15 @@ function App() {
       {state.showTeamDetail && (
         <CenteredOverlay columns={terminalSize.columns} rows={terminalSize.rows}>
           <TeamDetailOverlay state={state} />
+        </CenteredOverlay>
+      )}
+      {state.phase === "library" && state.library.readerOpen && (
+        <CenteredOverlay columns={terminalSize.columns} rows={terminalSize.rows}>
+          <ReportReaderOverlay
+            state={state}
+            columns={terminalSize.columns}
+            rows={terminalSize.rows}
+          />
         </CenteredOverlay>
       )}
     </Box>

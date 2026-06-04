@@ -6,6 +6,7 @@ import type {
   ExecutionSummary,
   Phase,
   ReportDisplayLine,
+  ReportMeta,
   SectionDef,
 } from "./model.js";
 import {
@@ -18,6 +19,8 @@ import {
   HOME_BANNER_LINES,
   HOME_OPTIONS,
   HOME_SUBTITLE,
+  LIBRARY_CARD_VIEWPORT,
+  libraryTickers,
   MODELS_BY_PROVIDER,
   modelHasOptions,
   PROVIDERS,
@@ -25,6 +28,7 @@ import {
   priceRuler,
   queueStatusLabel,
   reportDisplayViewport,
+  reportsForTicker,
   sectionGroups,
   sparkline,
   TEAM_TABS,
@@ -956,15 +960,28 @@ function fmtElapsed(s: number): string {
 // ===========================================================================
 
 export function ReportLibrary({ state }: { state: AppState }) {
-  const { reports, selectedIdx, body, bodyLoading, loading, error, scroll } = state.library;
-  const view = reportDisplayViewport(body, scroll);
+  const { reports, selectedIdx, loading, error, pane, cardOffset } = state.library;
+  const tickers = libraryTickers(reports);
+  const selected = reports[selectedIdx];
+  const selectedTicker = selected?.ticker ?? tickers[0];
+  const tickerReports = reportsForTicker(reports, selectedTicker);
+  const selectedWithin = Math.max(
+    0,
+    tickerReports.findIndex((report) => report.path === selected?.path),
+  );
+  const tickerIndex = Math.max(0, tickers.indexOf(selectedTicker ?? ""));
+  const tickerOffset = Math.max(0, Math.min(Math.max(0, tickerIndex - 8), tickers.length - 18));
+  const visibleReports = tickerReports.slice(cardOffset, cardOffset + LIBRARY_CARD_VIEWPORT);
+
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
       <Text bold>📚 报告库</Text>
       <Box flexDirection="row" flexGrow={1} marginTop={1}>
-        {/* Left: report list */}
+        {/* Left: ticker list */}
         <Box flexDirection="column" width={28} borderStyle="single" paddingX={1}>
-          <Text bold>历史报告</Text>
+          <Text bold {...(pane === "tickers" ? { color: "cyan" as const } : {})}>
+            股票代码
+          </Text>
           {loading ? (
             <Text dimColor>加载中…</Text>
           ) : error ? (
@@ -972,46 +989,165 @@ export function ReportLibrary({ state }: { state: AppState }) {
           ) : reports.length === 0 ? (
             <Text dimColor>暂无报告</Text>
           ) : (
-            reports.slice(0, 18).map((r, i) => (
-              <Text
-                key={r.path}
-                {...(i === selectedIdx ? { color: "cyan" as const, bold: true } : {})}
-                dimColor={i !== selectedIdx}
-              >
-                {i === selectedIdx ? "▶ " : "  "}
-                {r.ticker.padEnd(12)} {r.date}
-              </Text>
-            ))
+            tickers.slice(tickerOffset, tickerOffset + 18).map((ticker) => {
+              const active = ticker === selectedTicker;
+              const count = reportsForTicker(reports, ticker).length;
+              return (
+                <Text
+                  key={ticker}
+                  {...(active ? { color: "cyan" as const, bold: true } : {})}
+                  dimColor={!active}
+                >
+                  {active ? "▶ " : "  "}
+                  {ticker.padEnd(12)} {String(count).padStart(2)} 份
+                </Text>
+              );
+            })
           )}
           <Box marginTop={1}>
-            <Text dimColor>↑↓ 选择 · r 刷新 · Esc 返回首页</Text>
+            <Text dimColor>←→ 切换区域 · ↑↓ 选择 · r 刷新 · Esc 返回首页</Text>
           </Box>
         </Box>
-        {/* Right: body viewer (reuses the P0 viewport math) */}
+
+        {/* Right: report cards */}
         <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1} marginLeft={1}>
-          {reports[selectedIdx] && (
-            <Text bold color="cyan">
-              {reports[selectedIdx]?.ticker} · {reports[selectedIdx]?.date}
+          {selectedTicker && (
+            <Text bold {...(pane === "reports" ? { color: "cyan" as const } : {})}>
+              {selectedTicker} · {tickerReports.length} 份报告
             </Text>
           )}
-          {bodyLoading ? (
-            <Text dimColor>读取中…</Text>
-          ) : body ? (
+          {reports.length === 0 && !loading ? (
+            <Text dimColor>暂无可展示的历史报告。</Text>
+          ) : (
             <>
-              {view.lines.map((line, i) => (
-                /* biome-ignore lint/suspicious/noArrayIndexKey: scrolled snapshot */
-                <ReportLine key={`lib-${i}`} line={line} />
+              {visibleReports.map((report) => (
+                <ReportCard
+                  key={report.path}
+                  report={report}
+                  active={report.path === selected?.path}
+                  focused={pane === "reports"}
+                />
               ))}
               <Text dimColor>
-                {view.atBottom ? "底部" : "↓"} · {scroll + view.lines.length}/{view.total} 行 ·
-                PgUp/PgDn 滚动
+                {tickerReports.length > LIBRARY_CARD_VIEWPORT
+                  ? `${selectedWithin + 1}/${tickerReports.length} · PgUp/PgDn 快速移动 · `
+                  : ""}
+                Enter 阅读全文 · Esc 返回首页
               </Text>
             </>
-          ) : (
-            <Text dimColor>选择左侧报告查看内容。</Text>
           )}
         </Box>
       </Box>
+    </Box>
+  );
+}
+
+function ReportCard({
+  report,
+  active,
+  focused,
+}: {
+  report: ReportMeta;
+  active: boolean;
+  focused: boolean;
+}) {
+  const color = active ? "cyan" : undefined;
+  const rating = ratingLabel(report.rating);
+  const ratingTextColor = reportRatingColor(report.rating);
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle={active ? "round" : "single"}
+      borderColor={color}
+      borderDimColor={!active}
+      paddingX={1}
+      marginTop={1}
+    >
+      <Box justifyContent="space-between">
+        <Text bold={active} {...(color ? { color } : {})}>
+          {active ? "▶ " : "  "}
+          {report.date}
+        </Text>
+        <Text bold={active} {...(ratingTextColor ? { color: ratingTextColor } : {})}>
+          {rating}
+        </Text>
+      </Box>
+      <Text>
+        <Text dimColor>分析师建议: </Text>
+        {fitText(report.recommendation, 104)}
+      </Text>
+      <Text>
+        <Text dimColor>操作策略: </Text>
+        {fitText(report.strategy, 106)}
+      </Text>
+      <Text>
+        <Text dimColor>风控: </Text>
+        {fitText(report.riskControls, 110)}
+      </Text>
+      {active && focused && <Text dimColor>Enter 打开阅读弹窗</Text>}
+    </Box>
+  );
+}
+
+function reportRatingColor(rating: string | undefined): "green" | "yellow" | "red" | undefined {
+  switch ((rating ?? "").toUpperCase()) {
+    case "买入":
+    case "BUY":
+    case "增持":
+    case "OVERWEIGHT":
+      return "green";
+    case "卖出":
+    case "SELL":
+    case "减持":
+    case "UNDERWEIGHT":
+      return "red";
+    case "持有":
+    case "HOLD":
+      return "yellow";
+    default:
+      return undefined;
+  }
+}
+
+export function ReportReaderOverlay({
+  state,
+  columns = 120,
+  rows = 32,
+}: {
+  state: AppState;
+  columns?: number;
+  rows?: number;
+}) {
+  const report = state.library.reports[state.library.selectedIdx];
+  const width = Math.max(72, Math.min(118, columns - 8));
+  const viewport = Math.max(8, Math.min(24, rows - 10));
+  const view = reportDisplayViewport(state.library.body, state.library.scroll, viewport, width - 6);
+  return (
+    <Box flexDirection="column" width={width} borderStyle="single" paddingX={2} paddingY={1}>
+      <Box justifyContent="space-between">
+        <Text bold color="cyan">
+          {report ? `${report.ticker} · ${report.date}` : "报告阅读"}
+        </Text>
+        <Text dimColor>Esc 关闭</Text>
+      </Box>
+      {state.library.bodyLoading ? (
+        <Text dimColor>读取中…</Text>
+      ) : state.library.body ? (
+        <>
+          <Box flexDirection="column" marginTop={1}>
+            {view.lines.map((line, i) => (
+              /* biome-ignore lint/suspicious/noArrayIndexKey: scrolled snapshot */
+              <ReportLine key={`reader-${i}`} line={line} />
+            ))}
+          </Box>
+          <Text dimColor>
+            {view.atTop ? "顶部" : "↑"} · {view.atBottom ? "底部" : "↓"} ·{" "}
+            {view.scroll + view.lines.length}/{view.total} 行 · PgUp/PgDn 滚动
+          </Text>
+        </>
+      ) : (
+        <Text dimColor>暂无正文。</Text>
+      )}
     </Box>
   );
 }
@@ -1266,7 +1402,14 @@ export function HelpOverlay({ phase }: { phase: Phase }) {
       "PgUp/PgDn 滚动正文",
       "Esc 取消并返回首页 · Ctrl+C 退出",
     ],
-    library: ["↑↓ 选择报告", "PgUp/PgDn 滚动正文", "r 刷新", shared],
+    library: [
+      "←→/Tab 切换代码与报告卡片",
+      "↑↓ 选择代码或日期卡片",
+      "Enter 打开阅读弹窗",
+      "弹窗中 PgUp/PgDn 滚动正文，Esc 关闭",
+      "r 刷新",
+      shared,
+    ],
     backtest: ["↑↓ 选择回测记录", "r 刷新", shared],
     paper: ["r 刷新账户快照", shared],
   };

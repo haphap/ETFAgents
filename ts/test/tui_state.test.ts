@@ -7,16 +7,19 @@ import {
   clampRound,
   extractPriceRows,
   initState,
+  libraryTickers,
   nextSectionId,
   normalizeBacktestResult,
   parseTickers,
   priceRuler,
   reducer,
   reportDisplayViewport,
+  reportsForTicker,
   reportViewport,
   selectedAnalystIds,
   sortByTicker,
   sortReports,
+  summarizeReportBody,
   wrapToWidth,
 } from "../src/tui/index.js";
 
@@ -598,13 +601,22 @@ describe("Home navigation", () => {
 // ===========================================================================
 
 describe("P2 report library", () => {
-  it("sorts discovered reports newest-first", () => {
+  it("sorts reports by ticker, then newest date within each ticker", () => {
     const sorted = sortReports([
       { ticker: "510300.SH", date: "2026-01-01", path: "a" },
       { ticker: "159915.SZ", date: "2026-05-01", path: "b" },
       { ticker: "510300.SH", date: "2026-03-01", path: "c" },
     ]);
-    expect(sorted.map((r) => r.date)).toEqual(["2026-05-01", "2026-03-01", "2026-01-01"]);
+    expect(sorted.map((r) => `${r.ticker}:${r.date}`)).toEqual([
+      "159915.SZ:2026-05-01",
+      "510300.SH:2026-03-01",
+      "510300.SH:2026-01-01",
+    ]);
+    expect(libraryTickers(sorted)).toEqual(["159915.SZ", "510300.SH"]);
+    expect(reportsForTicker(sorted, "510300.SH").map((r) => r.date)).toEqual([
+      "2026-03-01",
+      "2026-01-01",
+    ]);
   });
 
   it("renders an empty state instead of throwing for no reports", () => {
@@ -613,16 +625,65 @@ describe("P2 report library", () => {
     expect(s.library.bodyLoading).toBe(false);
   });
 
-  it("opens a report body using the shared viewport state", () => {
+  it("moves between ticker groups and selectable report cards", () => {
+    let s = reducer(initState(), {
+      type: "libraryLoaded",
+      reports: [
+        { ticker: "510300.SH", date: "2026-01-01", path: "a" },
+        { ticker: "159915.SZ", date: "2026-05-01", path: "b" },
+        { ticker: "510300.SH", date: "2026-03-01", path: "c" },
+      ],
+    });
+    expect(s.library.reports[s.library.selectedIdx]?.ticker).toBe("159915.SZ");
+
+    s = reducer(s, { type: "librarySelect", delta: 1 });
+    expect(s.library.reports[s.library.selectedIdx]).toMatchObject({
+      ticker: "510300.SH",
+      date: "2026-03-01",
+    });
+
+    s = reducer(s, { type: "libraryPane", pane: "reports" });
+    s = reducer(s, { type: "librarySelect", delta: 1 });
+    expect(s.library.reports[s.library.selectedIdx]).toMatchObject({
+      ticker: "510300.SH",
+      date: "2026-01-01",
+    });
+  });
+
+  it("opens a selected report in a reader overlay using the shared viewport state", () => {
     let s = reducer(initState(), {
       type: "libraryLoaded",
       reports: [{ ticker: "510300.SH", date: "2026-05-01", path: "p" }],
     });
+    s = reducer(s, { type: "libraryOpenReader" });
+    expect(s.library.readerOpen).toBe(true);
+    expect(s.library.bodyLoading).toBe(true);
     s = reducer(s, { type: "libraryBody", body: "line a\nline b" });
     expect(s.library.body).toContain("line a");
     expect(s.library.scroll).toBe(0);
     const view = reportViewport(s.library.body, s.library.scroll);
     expect(view.lines).toContain("line a");
+
+    s = reducer(s, { type: "libraryCloseReader" });
+    expect(s.library.readerOpen).toBe(false);
+  });
+
+  it("extracts report-card summaries from markdown body", () => {
+    const summary = summarizeReportBody(
+      [
+        "## 投资组合经理决策",
+        "研究结论: **增持**，建议维持核心仓位。",
+        "## 持仓建议",
+        "目标仓位 20%-30%，回踩支撑后加仓。",
+        "## 再平衡与风险控制",
+        "跌破 3.72 元先减仓，放量跌破止损。",
+      ].join("\n"),
+    );
+
+    expect(summary.rating).toBe("增持");
+    expect(summary.recommendation).toContain("增持");
+    expect(summary.strategy).toContain("目标仓位");
+    expect(summary.riskControls).toContain("3.72");
   });
 });
 
