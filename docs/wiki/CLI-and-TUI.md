@@ -38,6 +38,10 @@ etfagents backtest --tickers 510300.SH,159915.SZ --benchmark-tickers equal_weigh
   --start-date 2026-01-02 --end-date 2026-03-31
 ```
 
+`etfagents tui` is a legacy Python Textual TUI entrypoint. It now prints a
+migration notice and does not launch the old TUI. Use `pnpm dev tui` or
+`pnpm tui` for the Ink dashboard.
+
 ## TUI screens (Ink)
 
 The TUI (`pnpm dev tui` or `pnpm tui`) opens in the terminal alternate screen,

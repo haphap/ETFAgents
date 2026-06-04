@@ -127,6 +127,8 @@ etfagents backtest --tickers 510300.SH,159915.SZ --benchmark-tickers equal_weigh
   --start-date 2026-01-02 --end-date 2026-03-31
 ```
 
+> `etfagents tui` 是旧版 Python Textual TUI 入口，现已降级为迁移提示；交互式仪表盘请使用 `pnpm dev tui` / `pnpm tui`。
+
 > ⚙️ 输出语言由 `output_language` 配置（中文 / English）。保留完整代码与交易所后缀（如 `510300.SH` / `159915.SZ` / `7203.T`）。
 
 ---
@@ -155,7 +157,7 @@ ETFAgents/
 │   ├── backtest/               #   Backtrader 引擎 + 结果产物 (nav/metrics/trades/...)
 │   ├── paper_trading/          #   A 股 ETF 纸上交易 (T+1 / 佣金 / 最小单位 / 多用户)
 │   ├── watchlist.py · detail.py · cache_manager.py · default_config.py
-├── cli/                        # ⌨️ Typer/Rich Python CLI (etfagents 控制台脚本) + Textual TUI
+├── cli/                        # ⌨️ Typer/Rich Python CLI (etfagents 控制台脚本；Textual TUI legacy)
 ├── ts/                         # 🟦 TypeScript 前端
 │   └── src/
 │       ├── bridge/             #   BridgeClient + 类型化 RPC 封装

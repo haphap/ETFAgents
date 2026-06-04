@@ -46,6 +46,8 @@ pnpm dev analyze 510300.SH --provider ollama --base-url http://localhost:11434/v
 ## Python CLI (`etfagents`)
 
 The Python CLI is available for interactive analysis and watchlist management.
+The legacy `etfagents tui` command now prints a migration notice; use the
+TypeScript Ink dashboard (`pnpm dev tui` or `pnpm tui`) for the terminal TUI.
 
 ```bash
 etfagents analyze
