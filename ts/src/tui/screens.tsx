@@ -84,6 +84,25 @@ function homeShortcut(key: (typeof HOME_OPTIONS)[number]["key"]): string {
   }
 }
 
+function fitText(value: unknown, width: number): string {
+  const text = String(value ?? "—")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text.length <= width) return text;
+  if (width <= 1) return text.slice(0, width);
+  return `${text.slice(0, width - 1)}…`;
+}
+
+function MetaLine({ label, value }: { label: string; value: unknown }) {
+  const labelText = `${label}:`;
+  const valueWidth = Math.max(4, LEFT_CONTENT_WIDTH - labelText.length - 1);
+  return (
+    <Text dimColor>
+      {labelText} {fitText(value, valueWidth)}
+    </Text>
+  );
+}
+
 // ===========================================================================
 // Ticker screen
 // ===========================================================================
@@ -350,6 +369,9 @@ function SelectFieldRow({
 // Dashboard (Python-aligned layout)
 // ===========================================================================
 
+const LEFT_PANE_WIDTH = 26;
+const LEFT_CONTENT_WIDTH = LEFT_PANE_WIDTH - 4;
+
 export function Dashboard({
   state,
   elapsed,
@@ -383,18 +405,18 @@ export function Dashboard({
     <Box flexDirection="column" flexGrow={1}>
       {/* Main two-column layout */}
       <Box flexDirection="row" flexGrow={1}>
-        {/* Left pane — 22ch */}
-        <Box flexDirection="column" width={22} borderStyle="single" paddingX={1}>
+        {/* Left pane */}
+        <Box flexDirection="column" width={LEFT_PANE_WIDTH} borderStyle="single" paddingX={1}>
           {/* ETF card */}
           <Box flexDirection="column" marginBottom={1}>
             <Text bold>📊 基本信息</Text>
             {state.etfDetail?.loading ? (
               <Text dimColor>加载中…</Text>
             ) : state.etfDetail?.error ? (
-              <Text color="red">{state.etfDetail.error.slice(0, 18)}</Text>
+              <Text color="red">{fitText(state.etfDetail.error, LEFT_CONTENT_WIDTH)}</Text>
             ) : (
               <>
-                <Text>{state.etfDetail?.name || state.ticker}</Text>
+                <Text>{fitText(state.etfDetail?.name || state.ticker, LEFT_CONTENT_WIDTH)}</Text>
                 {state.etfDetail?.close !== undefined && (
                   <Text>
                     现价: <Text bold>{state.etfDetail.close.toFixed(3)}</Text>
@@ -414,23 +436,25 @@ export function Dashboard({
                   </Text>
                 )}
                 {state.etfDetail?.history && state.etfDetail.history.length > 1 && (
-                  <Text color="cyan">{sparkline(state.etfDetail.history)}</Text>
+                  <Text color="cyan">{sparkline(state.etfDetail.history, LEFT_CONTENT_WIDTH)}</Text>
                 )}
                 {(state.etfDetail?.high !== undefined || state.etfDetail?.low !== undefined) && (
-                  <Text dimColor>
-                    H/L: {state.etfDetail.high?.toFixed(3) ?? "—"}/
-                    {state.etfDetail.low?.toFixed(3) ?? "—"}
-                  </Text>
+                  <MetaLine
+                    label="H/L"
+                    value={`${state.etfDetail.high?.toFixed(3) ?? "—"}/${state.etfDetail.low?.toFixed(3) ?? "—"}`}
+                  />
                 )}
                 {state.etfDetail?.volume !== undefined && (
-                  <Text dimColor>
-                    量: {Math.round(state.etfDetail.volume).toLocaleString()}
-                    {state.etfDetail.volumeChangePct !== undefined
-                      ? ` (${state.etfDetail.volumeChangePct > 0 ? "+" : ""}${state.etfDetail.volumeChangePct.toFixed(1)}%)`
-                      : ""}
-                  </Text>
+                  <MetaLine
+                    label="量"
+                    value={`${Math.round(state.etfDetail.volume).toLocaleString()}${
+                      state.etfDetail.volumeChangePct !== undefined
+                        ? ` ${state.etfDetail.volumeChangePct > 0 ? "+" : ""}${state.etfDetail.volumeChangePct.toFixed(1)}%`
+                        : ""
+                    }`}
+                  />
                 )}
-                <Text dimColor>{state.date}</Text>
+                <MetaLine label="日期" value={state.date} />
               </>
             )}
             {state.status === "running" ? (
@@ -447,10 +471,13 @@ export function Dashboard({
           {/* Metadata */}
           <Box flexDirection="column" marginBottom={1}>
             <Text bold>📋 分析元数据</Text>
-            <Text dimColor>日期: {state.date}</Text>
-            <Text dimColor>提供商: {state.provider || "—"}</Text>
-            <Text dimColor>模型: {state.model || "—"}</Text>
-            <Text dimColor>标的: {state.tickers.length || parseTickers(state.ticker).length}</Text>
+            <MetaLine label="日期" value={state.date} />
+            <MetaLine label="提供商" value={state.provider || "—"} />
+            <MetaLine label="模型" value={state.model || "—"} />
+            <MetaLine
+              label="标的"
+              value={state.tickers.length || parseTickers(state.ticker).length}
+            />
           </Box>
 
           {/* Cancel button */}
@@ -466,23 +493,22 @@ export function Dashboard({
           <Box flexDirection="column" flexGrow={1}>
             <Text bold>🧠 研究队列</Text>
             <Text dimColor>
-              状态:{" "}
               {state.status === "error"
-                ? "🔴"
+                ? "🔴 "
                 : state.status === "done"
-                  ? "🟢"
+                  ? "🟢 "
                   : state.status === "running"
-                    ? "🟡"
-                    : "⚪"}{" "}
+                    ? "🟡 "
+                    : "⚪ "}
               {state.queue.filter((item) => item.status === "done").length}/
-              {state.queue.length || 1}
+              {state.queue.length || 1} ·{" "}
               {state.status === "error"
-                ? " 有失败"
+                ? "失败"
                 : state.status === "done"
-                  ? " 已完成"
+                  ? "完成"
                   : state.status === "running"
-                    ? " 分析中"
-                    : " 等待中"}
+                    ? "运行"
+                    : "等待"}
             </Text>
             <Box flexDirection="column" marginTop={1}>
               {state.queue.length > 0 ? (
@@ -501,10 +527,12 @@ export function Dashboard({
                         return color ? { color: color as "green" | "red" | "yellow" } : {};
                       })()}
                     >
-                      {index === state.currentTickerIdx ? "> " : "  "}
-                      {item.ticker}
+                      {fitText(
+                        `${index === state.currentTickerIdx ? "> " : "  "}${item.ticker}`,
+                        14,
+                      )}
                     </Text>
-                    <Text dimColor> ({queueStatusLabel(item.status)})</Text>
+                    <Text dimColor> {fitText(queueStatusLabel(item.status), 4)}</Text>
                   </Text>
                 ))
               ) : (
