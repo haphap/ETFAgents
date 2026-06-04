@@ -29,6 +29,11 @@ interface AnalyzeMiniOptions {
   maxTokens?: string;
 }
 
+function positionSizingFromConfig(config: Record<string, unknown>) {
+  const budget = Number(config.max_drawdown_budget);
+  return Number.isFinite(budget) && budget > 0 ? { maxDrawdownBudget: budget } : {};
+}
+
 export function registerAnalyzeMini(program: Command): void {
   program
     .command("analyze-mini <ticker>")
@@ -72,6 +77,7 @@ export function registerAnalyzeMini(program: Command): void {
           llm: llmHandle.llm,
           marketFlowTools: tools,
           promptContext,
+          positionSizing: positionSizingFromConfig(config as Record<string, unknown>),
         });
 
         console.log(

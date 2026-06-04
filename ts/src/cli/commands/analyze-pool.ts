@@ -23,6 +23,11 @@ interface CandidateResult {
   signal: Record<string, unknown>;
 }
 
+function positionSizingFromConfig(config: Record<string, unknown>) {
+  const budget = Number(config.max_drawdown_budget);
+  return Number.isFinite(budget) && budget > 0 ? { maxDrawdownBudget: budget } : {};
+}
+
 export function registerAnalyzeCandidatePool(program: Command): void {
   program
     .command("analyze-pool <tickers...>")
@@ -130,6 +135,7 @@ export function registerAnalyzeCandidatePool(program: Command): void {
             quickLlm: quickHandle.llm,
             tools: toolSets,
             promptContext,
+            positionSizing: positionSizingFromConfig(config as Record<string, unknown>),
             memoryConfig,
             persistMemory,
           });

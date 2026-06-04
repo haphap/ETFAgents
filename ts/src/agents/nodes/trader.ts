@@ -16,6 +16,7 @@ import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages
 import { buildTraderBacktestSignal } from "../helpers/backtest_signal.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
 import { formatAgentSignalsForPrompt, signalUpdate } from "../helpers/output_schema.js";
+import type { PositionSizingOptions } from "../helpers/position_sizing.js";
 import { appendTraderOutputSchema, renderTraderProposal } from "../helpers/render.js";
 import { normalizeChineseManagerTerms } from "../helpers/role_terms.js";
 import { invokeStructuredOrFreetext } from "../helpers/structured_output.js";
@@ -42,6 +43,7 @@ import type { SpineStateType, SpineStateUpdate } from "../state.js";
 export interface TraderNodeOptions {
   llm: BaseChatModel;
   promptContext: PromptContext;
+  positionSizing?: PositionSizingOptions;
 }
 
 export function createTraderNode(opts: TraderNodeOptions) {
@@ -121,6 +123,12 @@ export function createTraderNode(opts: TraderNodeOptions) {
         state.trade_date ?? "",
         postProcessed,
         _structured,
+        {
+          agentSignals: state.agent_signals,
+          ...(opts.positionSizing?.maxDrawdownBudget !== undefined
+            ? { maxDrawdownBudget: opts.positionSizing.maxDrawdownBudget }
+            : {}),
+        },
       ) as unknown as Record<string, unknown>,
       sender: "Trader",
     };

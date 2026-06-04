@@ -33,6 +33,7 @@ import { HumanMessage, RemoveMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
+import type { PositionSizingOptions } from "../agents/helpers/position_sizing.js";
 import { createAggressiveDebatorNode } from "../agents/nodes/aggressive_debator.js";
 import { createBearResearcherNode } from "../agents/nodes/bear_researcher.js";
 import { createBullResearcherNode } from "../agents/nodes/bull_researcher.js";
@@ -99,6 +100,8 @@ export interface BuildFullGraphOptions {
   /** Effective runtime config forwarded to the memory store (so user/runtime
    * memory settings reach AnalysisMemoryStore instead of DEFAULT_CONFIG). */
   memoryConfig?: Record<string, unknown>;
+  /** Risk-budget controls for deterministic trader position sizing. */
+  positionSizing?: PositionSizingOptions;
 }
 
 /** Canonical analyst order, mirroring Python ETFGraphSetup.DEFAULT_SELECTED_ANALYSTS. */
@@ -327,7 +330,11 @@ export function buildFullGraph(opts: BuildFullGraphOptions) {
     promptContext: ctx,
   });
 
-  const trader = createTraderNode({ llm: opts.llm, promptContext: ctx });
+  const trader = createTraderNode({
+    llm: opts.llm,
+    promptContext: ctx,
+    ...(opts.positionSizing ? { positionSizing: opts.positionSizing } : {}),
+  });
 
   // --- Risk debators (quick tier) + portfolio manager (deep tier) ---
   const aggressiveDebator = createAggressiveDebatorNode({

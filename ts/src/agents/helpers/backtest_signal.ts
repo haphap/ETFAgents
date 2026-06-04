@@ -13,6 +13,7 @@
 
 import type { TraderProposal } from "../schemas/trader_proposal.js";
 import { type AgentOutputSignal, parseAgentOutputSchema } from "./output_schema.js";
+import { applyPositionSizingPolicy, type PositionSizingContext } from "./position_sizing.js";
 
 // ===========================================================================
 // Types
@@ -47,7 +48,15 @@ export interface BacktestSignal {
   target_weight_pct: number | null;
   target_weight_min_pct: number | null;
   target_weight_max_pct: number | null;
+  raw_target_weight_pct?: number | null;
+  raw_target_weight_min_pct?: number | null;
+  raw_target_weight_max_pct?: number | null;
   weight_source: string;
+  position_sizing_multiplier?: number;
+  position_sizing_reasons?: string[];
+  position_sizing_inputs?: Record<string, string | number>;
+  max_drawdown_budget?: number;
+  estimated_drawdown?: number;
   execution_delay: string;
   starter_size_text: string;
   add_triggers: BacktestTriggerRule[];
@@ -188,8 +197,9 @@ export function buildTraderBacktestSignal(
   decisionDate: string,
   renderedText: string,
   structuredPlan: TraderProposal | null = null,
+  sizingContext: PositionSizingContext = {},
 ): BacktestSignal {
-  const schemaSignal = structuredPlan ? null : parseAgentOutputSchema(renderedText, "trader");
+  const schemaSignal = parseAgentOutputSchema(renderedText, "trader");
   const rating = normalizeRating(
     (structuredPlan?.rating as string | undefined) ??
       schemaFieldString(schemaSignal, "allocation_action") ??
@@ -212,6 +222,7 @@ export function buildTraderBacktestSignal(
     secondaryText: riskText,
     structuredPlan,
     schemaSignal,
+    sizingContext,
   });
 }
 
@@ -229,6 +240,7 @@ interface BuildSignalOptions {
   secondaryText: string;
   structuredPlan: TraderProposal | null;
   schemaSignal: AgentOutputSignal | null;
+  sizingContext: PositionSizingContext;
 }
 
 function buildSignal(opts: BuildSignalOptions): BacktestSignal {
@@ -242,6 +254,7 @@ function buildSignal(opts: BuildSignalOptions): BacktestSignal {
     secondaryText,
     structuredPlan,
     schemaSignal,
+    sizingContext,
   } = opts;
 
   // Target weight: structured plan → parsed Output Schema → prose → rating defaults
@@ -280,16 +293,36 @@ function buildSignal(opts: BuildSignalOptions): BacktestSignal {
     .filter(Boolean)
     .join("\n");
 
+  const sizing = applyPositionSizingPolicy({
+    rating,
+    targetWeightPct,
+    targetWeightMinPct,
+    targetWeightMaxPct,
+    ...sizingContext,
+    traderSchemaSignal: schemaSignal,
+    ...(structuredPlan?.confidence !== undefined && structuredPlan.confidence !== null
+      ? { traderConfidence: structuredPlan.confidence }
+      : {}),
+  });
+
   return {
     ticker,
     decision_date: decisionDate,
     source,
     source_section: sourceSection,
     rating,
-    target_weight_pct: targetWeightPct,
-    target_weight_min_pct: targetWeightMinPct,
-    target_weight_max_pct: targetWeightMaxPct,
+    target_weight_pct: sizing.targetWeightPct,
+    target_weight_min_pct: sizing.targetWeightMinPct,
+    target_weight_max_pct: sizing.targetWeightMaxPct,
+    raw_target_weight_pct: sizing.rawTargetWeightPct,
+    raw_target_weight_min_pct: sizing.rawTargetWeightMinPct,
+    raw_target_weight_max_pct: sizing.rawTargetWeightMaxPct,
     weight_source: weightSource,
+    position_sizing_multiplier: sizing.multiplier,
+    position_sizing_reasons: sizing.reasons,
+    position_sizing_inputs: sizing.inputs,
+    max_drawdown_budget: sizing.maxDrawdownBudget,
+    estimated_drawdown: sizing.estimatedDrawdown,
     execution_delay: extractExecutionTiming(structuredPlan, schemaSignal),
     starter_size_text: extractSentenceWithHints(primaryText, INITIAL_HINTS),
     add_triggers: structuredTriggers.add_triggers,

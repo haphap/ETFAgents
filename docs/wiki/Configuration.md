@@ -26,6 +26,7 @@ Legacy `TRADINGAGENTS_RESULTS_DIR` / `TRADINGAGENTS_CACHE_DIR` are still honored
 | `max_debate_rounds` / `max_risk_discuss_rounds` | Research / risk debate rounds (default 1) |
 | `research_depth_name` | Research depth label (`标准` etc.) |
 | `report_context_char_limit` | Per-report prompt truncation budget |
+| `max_drawdown_budget` | Trader position-sizing drawdown budget used to calibrate target ETF weight (default `0.12` = 12%) |
 | `results_dir` / `data_cache_dir` | Result and cache roots |
 | `memory_mode` | `full` / `continuity-only` / `lesson` / `disabled` |
 

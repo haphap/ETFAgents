@@ -37,6 +37,7 @@ DEFAULT_CONFIG = {
     "max_recur_limit": 100,
     "report_context_char_limit": 16000,
     "debate_history_char_limit": 12000,
+    "max_drawdown_budget": 0.12,
     "memory_min_similarity": 0.15,
     "benchmark_ticker": os.getenv(
         "ETFAGENTS_BENCHMARK_TICKER",

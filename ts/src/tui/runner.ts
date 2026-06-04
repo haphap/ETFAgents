@@ -21,6 +21,11 @@ function runtimeBaseUrl(state: AppState): string | undefined {
   return url;
 }
 
+function positionSizingFromConfig(config: Record<string, unknown>) {
+  const budget = Number(config.max_drawdown_budget);
+  return Number.isFinite(budget) && budget > 0 ? { maxDrawdownBudget: budget } : {};
+}
+
 export async function fetchVllmModels(dispatch: AppDispatch) {
   for (const baseUrl of VLLM_BASE_URLS) {
     try {
@@ -151,6 +156,7 @@ export async function runAnalysis(
           riskDebate: [],
         },
         promptContext,
+        positionSizing: positionSizingFromConfig(config as Record<string, unknown>),
         maxDebateRounds: state.debateRounds,
         maxRiskRounds: state.riskRounds,
         selectedAnalysts: selectedAnalystList,
