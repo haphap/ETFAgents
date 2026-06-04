@@ -2,6 +2,7 @@
 import { pathToFileURL } from "node:url";
 import type { Instance, RenderOptions } from "ink";
 import { Box, render, useApp, useInput, useStdout } from "ink";
+import type { ReactNode } from "react";
 import { useEffect, useReducer, useRef, useState } from "react";
 import {
   ANALYST_IDS,
@@ -487,12 +488,43 @@ function App() {
       height={terminalSize.rows}
     >
       {content}
-      {/* P6: error detail overlay */}
       {state.showErrorDetail && state.errorDetail && (
-        <ErrorDetailOverlay detail={state.errorDetail} />
+        <CenteredOverlay columns={terminalSize.columns} rows={terminalSize.rows}>
+          <ErrorDetailOverlay detail={state.errorDetail} />
+        </CenteredOverlay>
       )}
-      {state.showHelp && <HelpOverlay phase={state.phase} />}
-      {state.showTeamDetail && <TeamDetailOverlay state={state} />}
+      {state.showHelp && (
+        <CenteredOverlay columns={terminalSize.columns} rows={terminalSize.rows}>
+          <HelpOverlay phase={state.phase} />
+        </CenteredOverlay>
+      )}
+      {state.showTeamDetail && (
+        <CenteredOverlay columns={terminalSize.columns} rows={terminalSize.rows}>
+          <TeamDetailOverlay state={state} />
+        </CenteredOverlay>
+      )}
+    </Box>
+  );
+}
+
+function CenteredOverlay({
+  children,
+  columns,
+  rows,
+}: {
+  children: ReactNode;
+  columns: number;
+  rows: number;
+}) {
+  return (
+    <Box
+      position="absolute"
+      width={columns}
+      height={rows}
+      justifyContent="center"
+      alignItems="center"
+    >
+      {children}
     </Box>
   );
 }
