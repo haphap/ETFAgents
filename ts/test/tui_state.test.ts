@@ -3,12 +3,14 @@ import { buildEffectiveMemoryConfig } from "../src/agents/nodes/memory_writer.js
 import {
   appendTickerToInput,
   backendDisplay,
+  buildExecutionSummary,
   clampRound,
   extractPriceRows,
   initState,
   nextSectionId,
   normalizeBacktestResult,
   parseTickers,
+  priceRuler,
   reducer,
   reportDisplayViewport,
   reportViewport,
@@ -71,6 +73,73 @@ trade_date,open,high,low,close,vol
 
     expect(rows[1]?.pctChg).toBeCloseTo(10, 5);
     expect(rows[1]?.volume).toBe(120);
+  });
+
+  it("builds a Python-style execution summary from structured trigger rules", () => {
+    const summary = buildExecutionSummary({
+      trader_backtest_signal: {
+        rating: "OVERWEIGHT",
+        target_weight_pct: 25,
+        target_weight_min_pct: 20,
+        target_weight_max_pct: 30,
+        execution_delay: "next_open",
+        add_triggers: [
+          {
+            metric: "close",
+            op: ">=",
+            threshold: 3.95,
+            action: "add",
+            note: "放量突破后加仓",
+          },
+        ],
+        reduce_triggers: [],
+        exit_triggers: [],
+        risk_rules: [
+          {
+            metric: "close",
+            op: "<",
+            threshold: 3.72,
+            action: "exit",
+            note: "跌破支撑止损",
+          },
+        ],
+        add_conditions: ["价格站上3.95元后加仓"],
+        reduce_conditions: [],
+        risk_controls: ["跌破3.72元止损"],
+      },
+    });
+
+    expect(summary).toMatchObject({
+      rating: "OVERWEIGHT",
+      targetWeightPct: 25,
+      targetWeightMinPct: 20,
+      targetWeightMaxPct: 30,
+      targetPrice: 3.95,
+      stopPrice: 3.72,
+      executionDelay: "next_open",
+    });
+    expect(summary?.addConditions[0]).toContain("close >= 3.950");
+    expect(summary?.riskControls[0]).toContain("close < 3.720");
+  });
+
+  it("falls back to Chinese condition text when trigger prices are not structured", () => {
+    const summary = buildExecutionSummary({
+      trader_backtest_signal: {
+        rating: "HOLD",
+        add_conditions: ["若价格突破3.95元并维持两日，可小幅加仓。"],
+        reduce_conditions: ["若价格跌破3.72元，先降低仓位。"],
+        risk_controls: [],
+      },
+    });
+
+    expect(summary?.targetPrice).toBe(3.95);
+    expect(summary?.stopPrice).toBe(3.72);
+  });
+
+  it("draws a sorted price ruler with the current marker", () => {
+    expect(priceRuler(3.72, 3.88, 3.95, 12)).toContain("止损价 3.720");
+    expect(priceRuler(3.72, 3.88, 3.95, 12)).toContain("╋ 现价 3.880");
+    expect(priceRuler(3.72, 3.88, 3.95, 12)).toContain("目标价 3.950");
   });
 
   it("parses and deduplicates multi-ticker input for the research queue", () => {

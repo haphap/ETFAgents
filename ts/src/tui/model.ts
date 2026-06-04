@@ -292,6 +292,8 @@ export interface ExecutionSummary {
   targetWeightPct?: number;
   targetWeightMinPct?: number;
   targetWeightMaxPct?: number;
+  targetPrice?: number;
+  stopPrice?: number;
   executionDelay?: string;
   addConditions: string[];
   reduceConditions: string[];
@@ -1084,6 +1086,140 @@ export function listFromUnknown(value: unknown): string[] {
     .slice(0, 3);
 }
 
+const PRICE_RULE_METRICS = new Set(["close", "price", "nav"]);
+const PRICE_TEXT_RE = /(\d+(?:\.\d+)?)(?:\s*元)/g;
+const CONDITION_STRIP_RE = /^\s*\d+[.、)）]\s*|^[-*•]\s*|`[^`]*`/g;
+
+function signalNumber(value: unknown, suffix = ""): string {
+  const n = asNumber(value);
+  if (n === undefined) return "--";
+  return `${Number.isInteger(n) ? n.toFixed(0) : n.toFixed(3)}${suffix}`;
+}
+
+function cleanConditionText(text: string): string {
+  return text
+    .replace(CONDITION_STRIP_RE, "")
+    .replace(/^[\w_]+\s*[:：]\s*/, "")
+    .replace(/^[`「『].*?[`」』]\s*[-–—]\s*/, "")
+    .trim();
+}
+
+function signalThreshold(rule: Record<string, unknown>): string {
+  const threshold = rule.threshold;
+  if (Array.isArray(threshold) && threshold.length === 2) {
+    return `${signalNumber(threshold[0])}-${signalNumber(threshold[1])}`;
+  }
+  return signalNumber(threshold);
+}
+
+function ruleLine(rule: Record<string, unknown>): string {
+  const note = String(rule.note ?? rule.action ?? "").trim();
+  const metric = String(rule.metric ?? "").trim();
+  const op = String(rule.op ?? "").trim();
+  const threshold = signalThreshold(rule);
+  const prefix = [metric, op, threshold].filter((part) => part && part !== "--").join(" ");
+  return note ? `${prefix} ${note}`.trim() : prefix;
+}
+
+function signalLines(signal: Record<string, unknown>, keys: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const key of keys) {
+    const value = signal[key];
+    if (!Array.isArray(value)) continue;
+    for (const item of value) {
+      if (typeof item === "string") {
+        const cleaned = cleanConditionText(item);
+        if (cleaned) out.push(cleaned);
+      } else if (item && typeof item === "object") {
+        const line = ruleLine(item as Record<string, unknown>);
+        if (line) out.push(line);
+      }
+      if (out.length >= 3) return out;
+    }
+  }
+  return out;
+}
+
+function extractPriceRule(
+  signal: Record<string, unknown>,
+  ruleKeys: readonly string[],
+  actionHints: readonly string[],
+): number | undefined {
+  for (const key of ruleKeys) {
+    const rules = signal[key];
+    if (!Array.isArray(rules)) continue;
+    for (const rule of rules) {
+      if (!rule || typeof rule !== "object") continue;
+      const record = rule as Record<string, unknown>;
+      const metric = String(record.metric ?? "").toLowerCase();
+      const action = String(record.action ?? "").toLowerCase();
+      if (!PRICE_RULE_METRICS.has(metric)) continue;
+      if (actionHints.length > 0 && !actionHints.some((hint) => action.includes(hint))) continue;
+      const threshold = record.threshold;
+      if (typeof threshold === "number") return threshold;
+    }
+  }
+  return undefined;
+}
+
+function extractPriceFromText(
+  signal: Record<string, unknown>,
+  textKeys: readonly string[],
+  hints: readonly string[],
+): number | undefined {
+  for (const key of textKeys) {
+    const items = signal[key];
+    if (!Array.isArray(items)) continue;
+    for (const item of items) {
+      if (typeof item !== "string") continue;
+      PRICE_TEXT_RE.lastIndex = 0;
+      for (const match of item.matchAll(PRICE_TEXT_RE)) {
+        const raw = match[1];
+        if (!raw || match.index === undefined) continue;
+        const price = Number.parseFloat(raw);
+        const start = Math.max(0, match.index - 40);
+        const end = Math.min(item.length, match.index + 40);
+        const context = item.slice(start, end).toLowerCase();
+        if (hints.some((hint) => context.includes(hint.toLowerCase()))) return price;
+      }
+    }
+  }
+  return undefined;
+}
+
+export function priceRuler(stop: number, current: number, target: number, width = 30): string {
+  const ordered: Array<[string, number]> = [
+    ["止损价", stop],
+    ["现价", current],
+    ["目标价", target],
+  ];
+  ordered.sort((a, b) => a[1] - b[1]);
+  const grouped: Array<{ value: number; labels: string[] }> = [];
+  for (const [label, value] of ordered) {
+    const last = grouped[grouped.length - 1];
+    if (last && last.value === value) last.labels.push(label);
+    else grouped.push({ value, labels: [label] });
+  }
+  const first = grouped[0];
+  const last = grouped[grouped.length - 1];
+  if (!first || !last) return "";
+  const span = last.value - first.value;
+  if (!span || span <= 0) return "";
+  const parts: string[] = [];
+  for (let i = 0; i < grouped.length; i += 1) {
+    const item = grouped[i];
+    if (!item) continue;
+    if (i > 0) {
+      const prev = grouped[i - 1];
+      const distance = prev ? item.value - prev.value : 0;
+      parts.push("─".repeat(Math.max(3, Math.round((distance / span) * width))));
+    }
+    const marker = item.labels.includes("现价") ? "╋ " : "";
+    parts.push(`${marker}${item.labels.join("/")} ${signalNumber(item.value)}`);
+  }
+  return parts.join(" ");
+}
+
 export function queueStatusLabel(status: QueueItem["status"]): string {
   switch (status) {
     case "pending":
@@ -1105,9 +1241,14 @@ export function buildExecutionSummary(
   const signal = finalState.trader_backtest_signal as Record<string, unknown> | undefined;
   if (!signal) return null;
   const summary: ExecutionSummary = {
-    addConditions: listFromUnknown(signal.add_conditions),
-    reduceConditions: listFromUnknown(signal.reduce_conditions),
-    riskControls: listFromUnknown(signal.risk_controls),
+    addConditions: signalLines(signal, ["add_triggers", "add_conditions"]),
+    reduceConditions: signalLines(signal, [
+      "reduce_triggers",
+      "reduce_conditions",
+      "exit_triggers",
+      "exit_conditions",
+    ]),
+    riskControls: signalLines(signal, ["risk_rules", "risk_controls"]),
   };
   const rating = signal.rating;
   if (typeof rating === "string" && rating) summary.rating = rating;
@@ -1117,6 +1258,22 @@ export function buildExecutionSummary(
   if (targetMin !== undefined) summary.targetWeightMinPct = targetMin;
   const targetMax = asNumber(signal.target_weight_max_pct);
   if (targetMax !== undefined) summary.targetWeightMaxPct = targetMax;
+  const targetPrice =
+    extractPriceRule(signal, ["add_triggers", "rebalance_triggers"], ["add", "buy", "rebalance"]) ??
+    extractPriceFromText(signal, ["add_conditions"], ["突破", "加仓", "目标", "上方", "上行"]);
+  if (targetPrice !== undefined) summary.targetPrice = targetPrice;
+  const stopPrice =
+    extractPriceRule(
+      signal,
+      ["risk_rules", "reduce_triggers", "exit_triggers"],
+      ["reduce", "exit", "sell", "stop", "cap"],
+    ) ??
+    extractPriceFromText(
+      signal,
+      ["risk_controls", "reduce_conditions"],
+      ["止损", "跌破", "防守", "下方", "stop"],
+    );
+  if (stopPrice !== undefined) summary.stopPrice = stopPrice;
   const delay = signal.execution_delay;
   if (typeof delay === "string" && delay) summary.executionDelay = delay;
   return summary;

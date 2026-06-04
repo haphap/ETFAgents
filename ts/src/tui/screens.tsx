@@ -21,6 +21,7 @@ import {
   modelHasOptions,
   PROVIDERS,
   parseTickers,
+  priceRuler,
   queueStatusLabel,
   reportDisplayViewport,
   sectionGroups,
@@ -617,7 +618,7 @@ function TabContent({
   const selectedStatus = selectedId ? (state.sectionStatus[selectedId] ?? "pending") : "pending";
   const selectedBody = selectedId ? (state.reports[selectedId] ?? "") : "";
   const scroll = selectedId ? (state.reportScrollBySection[selectedId] ?? 0) : 0;
-  const summaryRows = state.activeTab === "decision" && state.executionSummary ? 5 : 0;
+  const summaryRows = state.activeTab === "decision" && state.executionSummary ? 9 : 0;
   const bodyRows = Math.max(4, viewportRows - summaryRows - 2);
   const bodyAreaRows = bodyRows + 2;
   const view = reportDisplayViewport(selectedBody, scroll, bodyRows);
@@ -634,7 +635,11 @@ function TabContent({
       </Box>
 
       {state.activeTab === "decision" && state.executionSummary && (
-        <ExecutionSummaryView summary={state.executionSummary} />
+        <ExecutionSummaryView
+          summary={state.executionSummary}
+          history={state.etfDetail?.history ?? []}
+          current={state.etfDetail?.close}
+        />
       )}
       {selected && selectedBody.trim() ? (
         <>
@@ -750,7 +755,15 @@ function TabButton({
   );
 }
 
-function ExecutionSummaryView({ summary }: { summary: ExecutionSummary }) {
+function ExecutionSummaryView({
+  summary,
+  history,
+  current,
+}: {
+  summary: ExecutionSummary;
+  history: number[];
+  current: number | undefined;
+}) {
   const range =
     summary.targetWeightMinPct !== undefined && summary.targetWeightMaxPct !== undefined
       ? `${summary.targetWeightMinPct.toFixed(1)}%-${summary.targetWeightMaxPct.toFixed(1)}%`
@@ -758,29 +771,87 @@ function ExecutionSummaryView({ summary }: { summary: ExecutionSummary }) {
         ? `${summary.targetWeightPct.toFixed(1)}%`
         : "—";
   const weight = summary.targetWeightPct ?? summary.targetWeightMaxPct ?? 0;
-  const filled = Math.max(0, Math.min(10, Math.round(weight / 10)));
+  const filled = Math.max(0, Math.min(12, Math.round((weight / 50) * 12)));
+  const recent = history.filter((value) => Number.isFinite(value));
+  const low = recent.length > 0 ? Math.min(...recent) : undefined;
+  const high = recent.length > 0 ? Math.max(...recent) : undefined;
+  const ruler =
+    current !== undefined && summary.stopPrice !== undefined && summary.targetPrice !== undefined
+      ? priceRuler(summary.stopPrice, current, summary.targetPrice)
+      : "";
+  const ratingTextColor = ratingColor(summary.rating);
   return (
     <Box flexDirection="column" marginTop={1} marginBottom={1}>
       <Text bold color="cyan">
-        ── 执行摘要 ──
+        ── 核心执行摘要 ──
       </Text>
       <Text>
-        评级: <Text bold>{summary.rating ?? "—"}</Text> · 目标仓位: {range}{" "}
-        <Text color="green">{"█".repeat(filled)}</Text>
-        <Text dimColor>{"░".repeat(10 - filled)}</Text>
+        研报结论:{" "}
+        <Text bold {...(ratingTextColor ? { color: ratingTextColor } : {})}>
+          {ratingLabel(summary.rating)}
+        </Text>{" "}
+        · 推荐仓位: <Text color="cyan">{"█".repeat(filled)}</Text>
+        <Text dimColor>{"░".repeat(12 - filled)}</Text> <Text bold>{range}</Text>
       </Text>
+      <Text>
+        价格趋势:{" "}
+        {recent.length >= 2 ? (
+          <Text color="cyan">{sparkline(recent, 44)}</Text>
+        ) : (
+          <Text dimColor>—</Text>
+        )}
+      </Text>
+      <Text dimColor>
+        区间: {low !== undefined ? fmtNum(low) : "—"} - {high !== undefined ? fmtNum(high) : "—"}
+        {current !== undefined ? ` · 现价 ${fmtNum(current)}` : ""}
+        {summary.stopPrice !== undefined ? ` · 止损 ${fmtNum(summary.stopPrice)}` : ""}
+        {summary.targetPrice !== undefined ? ` · 目标 ${fmtNum(summary.targetPrice)}` : ""}
+      </Text>
+      <Text dimColor>{ruler || "价格标尺: 等待目标价与止损价"}</Text>
       <Text dimColor>执行节奏: {summary.executionDelay || "—"}</Text>
-      <SummaryLine label="加仓条件" values={summary.addConditions} />
-      <SummaryLine label="减仓条件" values={summary.reduceConditions} />
-      <SummaryLine label="风险控制" values={summary.riskControls} />
+      <SummaryLine label="加仓依据" values={summary.addConditions} />
+      <SummaryLine label="减仓依据" values={summary.reduceConditions} />
+      <SummaryLine label="风控规则" values={summary.riskControls} />
     </Box>
   );
+}
+
+function ratingLabel(rating: string | undefined): string {
+  switch ((rating ?? "").toUpperCase()) {
+    case "BUY":
+      return "买入";
+    case "OVERWEIGHT":
+      return "增持";
+    case "HOLD":
+      return "持有";
+    case "UNDERWEIGHT":
+      return "减持";
+    case "SELL":
+      return "卖出";
+    default:
+      return rating || "—";
+  }
+}
+
+function ratingColor(rating: string | undefined): "green" | "yellow" | "red" | undefined {
+  switch ((rating ?? "").toUpperCase()) {
+    case "BUY":
+    case "OVERWEIGHT":
+      return "green";
+    case "SELL":
+    case "UNDERWEIGHT":
+      return "red";
+    case "HOLD":
+      return "yellow";
+    default:
+      return undefined;
+  }
 }
 
 function SummaryLine({ label, values }: { label: string; values: string[] }) {
   return (
     <Text dimColor>
-      {label}: {values.length > 0 ? values.join("；").slice(0, 100) : "—"}
+      {label}: {values.length > 0 ? values.join("；").slice(0, 112) : "—"}
     </Text>
   );
 }
