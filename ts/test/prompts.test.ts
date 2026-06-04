@@ -1,8 +1,16 @@
 import { describe, expect, it } from "vitest";
 import { buildAggressiveDebatorSystemMessage } from "../src/agents/prompts/aggressive_debator.js";
+import { buildBearResearcherSystemMessage } from "../src/agents/prompts/bear_researcher.js";
+import { buildBullResearcherSystemMessage } from "../src/agents/prompts/bull_researcher.js";
+import { buildCatalystSentimentSystemMessage } from "../src/agents/prompts/catalyst_sentiment.js";
 import { buildConservativeDebatorSystemMessage } from "../src/agents/prompts/conservative_debator.js";
+import { buildHoldingsIndustrySystemMessage } from "../src/agents/prompts/holdings_industry.js";
+import { buildMacroRegimeSystemMessage } from "../src/agents/prompts/macro_regime.js";
 import { buildMarketFlowSystemMessage } from "../src/agents/prompts/market_flow.js";
+import { buildMesoCommoditySystemMessage } from "../src/agents/prompts/meso_commodity.js";
 import { buildNeutralDebatorSystemMessage } from "../src/agents/prompts/neutral_debator.js";
+import { buildPortfolioManagerSystemMessage } from "../src/agents/prompts/portfolio_manager.js";
+import { buildResearchManagerSystemMessage } from "../src/agents/prompts/research_manager.js";
 import {
   buildInstrumentContext,
   collapseBlankLines,
@@ -11,6 +19,7 @@ import {
   getLanguageInstruction,
   truncateForPrompt,
 } from "../src/agents/prompts/shared.js";
+import { buildTopHoldingsSystemMessage } from "../src/agents/prompts/top_holdings.js";
 import {
   buildTraderSystemMessage,
   STRUCTURED_FIELD_POPULATION_INSTRUCTION,
@@ -99,18 +108,38 @@ describe("trader prompt", () => {
   });
 });
 
-describe("risk debator prompts", () => {
+describe("visible agent prompts", () => {
   it("inherit the configured Chinese output language", () => {
     const ctx = { language: "Chinese" };
+    const catalystData = {
+      etfInfo: "",
+      etfHoldings: "",
+      tickerNews: "",
+      holdingsNews: "",
+      globalNews: "",
+    };
+    const prompts = [
+      ["market_flow", buildMarketFlowSystemMessage(ctx)],
+      ["macro_regime", buildMacroRegimeSystemMessage(ctx)],
+      ["meso_commodity", buildMesoCommoditySystemMessage(ctx)],
+      ["catalyst_sentiment", buildCatalystSentimentSystemMessage(ctx, catalystData)],
+      ["holdings_industry", buildHoldingsIndustrySystemMessage(ctx)],
+      ["top_holdings", buildTopHoldingsSystemMessage(ctx)],
+      ["bull_researcher", buildBullResearcherSystemMessage(ctx)],
+      ["bear_researcher", buildBearResearcherSystemMessage(ctx)],
+      ["research_manager", buildResearchManagerSystemMessage(ctx)],
+      ["trader", buildTraderSystemMessage(ctx)],
+      ["aggressive_debator", buildAggressiveDebatorSystemMessage(ctx)],
+      ["conservative_debator", buildConservativeDebatorSystemMessage(ctx)],
+      ["neutral_debator", buildNeutralDebatorSystemMessage(ctx)],
+      ["portfolio_manager", buildPortfolioManagerSystemMessage(ctx)],
+    ] as const;
 
-    expect(buildAggressiveDebatorSystemMessage(ctx)).toContain(
-      "Write your entire response in Chinese",
-    );
-    expect(buildConservativeDebatorSystemMessage(ctx)).toContain(
-      "Write your entire response in Chinese",
-    );
-    expect(buildNeutralDebatorSystemMessage(ctx)).toContain(
-      "Write your entire response in Chinese",
-    );
+    for (const [name, prompt] of prompts) {
+      expect({
+        name,
+        hasChineseLanguageInstruction: prompt.includes("Write your entire response in Chinese"),
+      }).toEqual({ name, hasChineseLanguageInstruction: true });
+    }
   });
 });
