@@ -568,7 +568,8 @@ export type ReportDisplayLineKind =
   | "bullet"
   | "ordered"
   | "table"
-  | "quote";
+  | "quote"
+  | "code";
 
 export interface ReportDisplayLine {
   text: string;
@@ -598,6 +599,22 @@ function emphasizedHeadingText(text: string): string | null {
   return null;
 }
 
+function numberedHeadingText(text: string): string | null {
+  const stripped = stripInlineMarkdown(text).trim();
+  const numbered = stripped.match(
+    /^(([一二三四五六七八九十]+[、.)])|([（(][一二三四五六七八九十]+[）)])|(\d+[.)、]))\s*(\S.+)$/,
+  );
+  if (!numbered) return null;
+  const marker = numbered[1] ?? "";
+  const title = numbered[5] ?? "";
+  const likelyTitle =
+    /[：:]/.test(title) ||
+    /^[一二三四五六七八九十]+[、.)]/.test(marker) ||
+    /^[（(][一二三四五六七八九十]+[）)]/.test(marker);
+  if (!likelyTitle || stripped.length > 96 || /[。.!！?？]$/.test(stripped)) return null;
+  return stripped;
+}
+
 function classifyReportLine(line: string): {
   text: string;
   kind: ReportDisplayLineKind;
@@ -617,6 +634,11 @@ function classifyReportLine(line: string): {
   const emphasizedHeading = emphasizedHeadingText(trimmed);
   if (emphasizedHeading) {
     return { text: emphasizedHeading, kind: "subheading", level: 4 };
+  }
+
+  const numberedHeading = numberedHeadingText(trimmed);
+  if (numberedHeading) {
+    return { text: numberedHeading, kind: "subheading", level: 4 };
   }
 
   if (
@@ -727,12 +749,36 @@ function renderMarkdownTableBlock(lines: string[], width: number): ReportDisplay
   return out;
 }
 
+function renderCodeBlock(lines: string[], width: number): ReportDisplayLine[] {
+  const out: ReportDisplayLine[] = [];
+  for (const line of lines) {
+    for (const wrapped of wrapToWidth(line.replace(/\t/g, "  "), width, "  ")) {
+      out.push({ text: wrapped, kind: "code" });
+    }
+  }
+  return out;
+}
+
 function reportDisplayLines(body: string, width: number): ReportDisplayLine[] {
   const out: ReportDisplayLine[] = [];
   let previousBlank = true;
   const rawLines = body.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   for (let i = 0; i < rawLines.length; i += 1) {
     const raw = rawLines[i] ?? "";
+    if (/^\s*```/.test(raw)) {
+      const codeLines: string[] = [];
+      while (i + 1 < rawLines.length) {
+        i += 1;
+        const codeLine = rawLines[i] ?? "";
+        if (/^\s*```/.test(codeLine)) break;
+        codeLines.push(codeLine);
+      }
+      if (!previousBlank) out.push({ text: "", kind: "blank" });
+      out.push(...renderCodeBlock(codeLines, width));
+      previousBlank = false;
+      continue;
+    }
+
     if (isMarkdownTableLine(raw)) {
       const tableLines = [raw];
       while (i + 1 < rawLines.length && isMarkdownTableLine(rawLines[i + 1] ?? "")) {

@@ -272,6 +272,29 @@ describe("P0 report reader", () => {
     expect(view.lines[1]?.text).toBe("正文段落。");
   });
 
+  it("treats standalone Chinese numbered lines as headings", () => {
+    const view = reportDisplayViewport(
+      "二、真实需求确认：成交与份额同步改善\n正文段落。",
+      0,
+      10,
+      80,
+    );
+
+    expect(view.lines[0]).toMatchObject({
+      kind: "subheading",
+      text: "二、真实需求确认：成交与份额同步改善",
+    });
+    expect(view.lines[1]?.kind).toBe("paragraph");
+  });
+
+  it("renders fenced code blocks as code lines", () => {
+    const view = reportDisplayViewport("```text\nrating: buy\nweight: 20%\n```\n后续。", 0, 10, 40);
+
+    expect(view.lines[0]).toMatchObject({ kind: "code", text: "rating: buy" });
+    expect(view.lines[1]).toMatchObject({ kind: "code", text: "weight: 20%" });
+    expect(view.lines[2]?.kind).toBe("paragraph");
+  });
+
   it("wraps list items with continuation indentation", () => {
     const view = reportDisplayViewport(
       "- 资金流连续改善但仍需要等待成交量确认后再提高仓位",

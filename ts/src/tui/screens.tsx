@@ -783,6 +783,9 @@ function ReportLine({ line }: { line: ReportDisplayLine }) {
   if (line.kind === "quote") {
     return <Text dimColor>│ {text}</Text>;
   }
+  if (line.kind === "code") {
+    return <Text dimColor>{`  ${text}`}</Text>;
+  }
   if (line.kind === "bullet" || line.kind === "ordered") {
     return (
       <Text>
