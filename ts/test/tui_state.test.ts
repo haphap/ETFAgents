@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildEffectiveMemoryConfig } from "../src/agents/nodes/memory_writer.js";
 import {
   appendTickerToInput,
+  backendDisplay,
   clampRound,
   extractPriceRows,
   initState,
@@ -90,6 +91,34 @@ trade_date,open,high,low,close,vol
       { ticker: "510300.SH", status: "pending" },
       { ticker: "159915.SZ", status: "pending" },
     ]);
+  });
+
+  it("stores the discovered vLLM backend URL for the analysis runner", () => {
+    const state = reducer(initState(), {
+      type: "vllmModelsFetched",
+      models: ["local-model"],
+      baseUrl: "http://127.0.0.1:8020/v1",
+    });
+
+    expect(state.vllmModels).toEqual(["local-model"]);
+    expect(state.backendUrl).toBe("http://127.0.0.1:8020/v1");
+    expect(backendDisplay("vllm", state.backendUrl)).toBe("http://127.0.0.1:8020/v1");
+  });
+
+  it("clears a stale backend URL when switching providers", () => {
+    const state = reducer(
+      {
+        ...initState(),
+        provider: "vllm",
+        backendUrl: "http://127.0.0.1:8020/v1",
+        selectOpen: "provider",
+        selectIdx: 0,
+      },
+      { type: "selectPick" },
+    );
+
+    expect(state.provider).toBe("openai");
+    expect(state.backendUrl).toBe("");
   });
 
   it("resets per-ticker section state when the next ticker starts", () => {

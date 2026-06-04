@@ -79,7 +79,7 @@ export const PROVIDER_BASE_URLS: Record<string, string> = {
   xai: "https://api.x.ai/v1",
   openrouter: "https://openrouter.ai/api/v1",
   ollama: "http://localhost:11434/v1",
-  vllm: "http://localhost:8000/v1",
+  vllm: "http://127.0.0.1:8020/v1",
   minimax: "https://api.minimax.chat/v1",
   deepseek: "https://api.deepseek.com/v1",
 };
@@ -447,7 +447,7 @@ export type Action =
       history?: number[];
     }
   | { type: "etfDetailError"; error: string }
-  | { type: "vllmModelsFetched"; models: string[] }
+  | { type: "vllmModelsFetched"; models: string[]; baseUrl?: string }
   | { type: "vllmModelsFailed" }
   // P1 config
   | { type: "toggleAnalyst"; id: string }
@@ -978,6 +978,7 @@ export function reducer(state: AppState, action: Action): AppState {
         selectIdx: 0,
         analystCursor: 0,
         vllmModels: null,
+        backendUrl: "",
         errorMsg: "",
         status: "idle",
         logs: [],
@@ -1057,10 +1058,12 @@ export function reducer(state: AppState, action: Action): AppState {
         state.selectOpen === "provider" && newProvider.toLowerCase() !== "vllm"
           ? null
           : state.vllmModels;
+      const backendUrl = state.selectOpen === "provider" ? "" : state.backendUrl;
       return {
         ...state,
         provider: newProvider,
         model: newModel,
+        backendUrl,
         [state.selectOpen]: value,
         selectOpen: null,
         selectIdx: 0,
@@ -1239,7 +1242,11 @@ export function reducer(state: AppState, action: Action): AppState {
     case "etfDetailError":
       return { ...state, etfDetail: { loading: false, error: action.error } };
     case "vllmModelsFetched":
-      return { ...state, vllmModels: action.models };
+      return {
+        ...state,
+        vllmModels: action.models,
+        ...(action.baseUrl ? { backendUrl: action.baseUrl } : {}),
+      };
     case "vllmModelsFailed":
       return { ...state, vllmModels: [] };
 

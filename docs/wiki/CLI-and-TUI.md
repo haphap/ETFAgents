@@ -40,14 +40,17 @@ etfagents backtest --tickers 510300.SH,159915.SZ --benchmark-tickers equal_weigh
 
 ## TUI screens (Ink)
 
-The TUI (`pnpm dev tui` or `pnpm tui`) provides an Ink terminal app with home
-navigation and several workflow screens:
+The TUI (`pnpm dev tui` or `pnpm tui`) opens in the terminal alternate screen,
+restores the previous terminal contents on exit, and provides home navigation
+across several workflow screens:
 
 - **Research dashboard** — ticker input → config → live dashboard. Team tabs
   (analysts / research / trader / risk / decision), a per-section reader with
   scroll (`↑↓` select section, `PgUp/PgDn` scroll), an ETF info card, a
   multi-ticker queue, and a stats bar.
-- **Config screen** — date, provider, model (incl. vLLM model discovery),
+- **Config screen** — date, provider, model (incl. vLLM model discovery that
+  probes `http://127.0.0.1:8020/v1` before `http://localhost:8000/v1` and uses
+  the discovered endpoint),
   research depth (`快速=1/1`, `标准=2/2`, `深度=3/3` debate/risk rounds),
   analyst selection, and manual round steppers.
 - **Report library** (`Ctrl+L`) — browse historical reports from the results
@@ -64,7 +67,8 @@ navigation and several workflow screens:
 Implementation note: `ts/src/tui/index.tsx` is only the Ink app shell. Shared
 state/reducer helpers live in `ts/src/tui/model.ts`, graph execution in
 `ts/src/tui/runner.ts`, artifact loading in `ts/src/tui/services/`, and screen
-components in `ts/src/tui/screens.tsx`.
+components in `ts/src/tui/screens.tsx`. Full-screen terminal lifecycle code
+lives in `ts/src/tui/terminal.ts`.
 
 > Output language is set by the `output_language` config (中文 / English).
 > Always preserve full exchange-suffixed tickers (`510300.SH`, `159915.SZ`).

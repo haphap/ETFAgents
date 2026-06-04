@@ -13,17 +13,24 @@ import {
 // vllm model discovery
 // ===========================================================================
 
-const VLLM_URLS = ["http://127.0.0.1:8020/v1/models", "http://localhost:8000/v1/models"];
+const VLLM_BASE_URLS = ["http://127.0.0.1:8020/v1", "http://localhost:8000/v1"];
+
+function runtimeBaseUrl(state: AppState): string | undefined {
+  const url = state.backendUrl.trim();
+  if (!state.provider || !/^https?:\/\//.test(url)) return undefined;
+  return url;
+}
 
 export async function fetchVllmModels(dispatch: AppDispatch) {
-  for (const url of VLLM_URLS) {
+  for (const baseUrl of VLLM_BASE_URLS) {
     try {
+      const url = `${baseUrl}/models`;
       const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
       if (!res.ok) continue;
       const data = (await res.json()) as { data?: { id: string }[] };
       const models = (data.data ?? []).map((m) => m.id);
       if (models.length > 0) {
-        dispatch({ type: "vllmModelsFetched", models });
+        dispatch({ type: "vllmModelsFetched", models, baseUrl });
         return;
       }
     } catch {
@@ -72,6 +79,8 @@ export async function runAnalysis(
       const llmOpts: LlmOptions = { tier: "deep" };
       if (state.provider) llmOpts.provider = state.provider;
       if (state.model) llmOpts.model = state.model;
+      const baseUrl = runtimeBaseUrl(state);
+      if (baseUrl) llmOpts.baseUrl = baseUrl;
       dispatchIfCurrent({
         type: "appendLog",
         msg: `── LLM: ${llmOpts.provider ?? config.llm_provider}/${llmOpts.model ?? "default"}`,
@@ -84,6 +93,7 @@ export async function runAnalysis(
       const quickOpts: LlmOptions = { tier: "quick" };
       if (state.provider) quickOpts.provider = state.provider;
       if (state.model) quickOpts.model = state.model;
+      if (baseUrl) quickOpts.baseUrl = baseUrl;
       const quickHandle = createLlmFromConfig(config, quickOpts);
       dispatchIfCurrent({ type: "setBackend", url: llmHandle.baseUrl ?? "OpenAI SDK default" });
 

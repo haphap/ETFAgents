@@ -114,7 +114,7 @@ pnpm dev backtest 510300.SH --start-date 2024-01-01 --end-date 2024-06-01
 pnpm dev paper account                          # 纸上交易账户
 pnpm dev detail 510300.SH                       # ETF 信息查询
 pnpm dev cache stats                            # 缓存管理
-pnpm dev tui                                    # 交互式 Ink 终端仪表盘（也可 pnpm tui）
+pnpm dev tui                                    # 全屏交互式 Ink 终端仪表盘（也可 pnpm tui）
 ```
 
 **Python CLI**（`pip install .` 后提供 `etfagents` 控制台脚本）：

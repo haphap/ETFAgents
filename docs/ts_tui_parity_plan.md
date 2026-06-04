@@ -13,10 +13,11 @@ pnpm dev tui
 pnpm tui
 ```
 
-The app now uses a home screen instead of a permanently rendered banner. Work
-screens use a compact layout to reduce terminal redraw noise. The dashboard
-timer refreshes at a lower cadence, and report readers preserve scroll unless
-the user is already at the bottom.
+The app now starts in the terminal alternate screen, uses a home screen instead
+of a permanently rendered banner, and restores the previous terminal contents on
+exit. Work screens use a compact layout to reduce terminal redraw noise. The
+dashboard timer refreshes at a lower cadence, and report readers preserve scroll
+unless the user is already at the bottom.
 
 Implemented screens and overlays:
 
@@ -42,6 +43,7 @@ ts/src/tui/
   model.ts               # constants, types, helpers, reducer, test exports
   runner.ts              # vLLM discovery + full graph execution
   services/artifacts.ts  # reports, watchlist, backtest, paper snapshot loading
+  terminal.ts            # alternate-screen terminal lifecycle
   screens.tsx            # Ink screen and overlay components
 ```
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { pathToFileURL } from "node:url";
-import { Box, render, useInput } from "ink";
+import type { Instance, RenderOptions } from "ink";
+import { Box, render, useApp, useInput } from "ink";
 import { useEffect, useReducer, useRef, useState } from "react";
 import {
   ANALYST_IDS,
@@ -33,11 +34,18 @@ import {
   loadPaper,
   loadWatchlist,
 } from "./services/artifacts.js";
+import { enterFullscreen } from "./terminal.js";
 
 export * from "./model.js";
 export { runAnalysis } from "./runner.js";
+export { ENTER_FULLSCREEN, EXIT_FULLSCREEN, enterFullscreen } from "./terminal.js";
+
+export type RunTuiOptions = RenderOptions & {
+  fullscreen?: boolean;
+};
 
 function App() {
+  const { exit } = useApp();
   const [state, dispatch] = useReducer(reducer, undefined, initState);
 
   const stateRef = useRef(state);
@@ -140,7 +148,8 @@ function App() {
 
     if (key.escape) {
       if (s.phase === "home") {
-        process.exit(0);
+        exit();
+        return;
       }
       if (s.phase === "config") {
         d({ type: "backToTicker" });
@@ -160,7 +169,8 @@ function App() {
         d({ type: "goPhase", phase: "home" });
         return;
       }
-      process.exit(0);
+      exit();
+      return;
     }
 
     if (s.phase === "home") {
@@ -433,8 +443,13 @@ function App() {
   );
 }
 
-export function runTui() {
-  render(<App />);
+export function runTui(options: RunTuiOptions = {}): Instance {
+  const { fullscreen = true, ...renderOptions } = options;
+  const screen =
+    fullscreen === true ? enterFullscreen(renderOptions.stdout ?? process.stdout) : null;
+  const instance = render(<App />, renderOptions);
+  if (screen) void instance.waitUntilExit().finally(screen.restore);
+  return instance;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -15,7 +15,7 @@ pnpm dev backtest 510300.SH --start-date 2024-01-01 --end-date 2024-06-01
 pnpm dev detail 510300.SH               # ETF info lookup
 pnpm dev cache stats                     # cache management
 pnpm dev paper account                   # paper trading
-pnpm dev tui                             # Ink terminal dashboard
+pnpm dev tui                             # full-screen Ink terminal dashboard
 ```
 
 ## TUI
@@ -26,10 +26,16 @@ pnpm dev tui      # same TUI through the Commander CLI
 ```
 
 Interactive terminal UI with home navigation for research, reports, backtests,
-and paper-trading views. The TUI keeps the app shell in `src/tui/index.tsx`,
-state/reducer helpers in `src/tui/model.ts`, graph execution in
-`src/tui/runner.ts`, artifact loading in `src/tui/services/`, and Ink screens
-in `src/tui/screens.tsx`.
+and paper-trading views. It starts in the terminal alternate screen and restores
+the previous terminal contents on exit. The TUI keeps the app shell in
+`src/tui/index.tsx`, state/reducer helpers in `src/tui/model.ts`, graph
+execution in `src/tui/runner.ts`, artifact loading in `src/tui/services/`,
+terminal screen control in `src/tui/terminal.ts`, and Ink screens in
+`src/tui/screens.tsx`.
+
+For local vLLM, the TUI probes `http://127.0.0.1:8020/v1` first and
+`http://localhost:8000/v1` second, then uses the endpoint that returned the
+model list for the analysis run.
 
 ## Project Layout
 
