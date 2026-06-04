@@ -4,6 +4,7 @@ import {
   normalizeBacktestResult,
   normalizeReportSummary,
   parseCsvLine,
+  REPORT_SUMMARY_VERSION,
   reportSummaryToMeta,
   summarizeReportBody,
 } from "../model.js";
@@ -13,8 +14,9 @@ import {
 // ===========================================================================
 //
 // Mirrors cli/tui/services.py ReportRepository / BacktestViewer, reading the
-// same on-disk conventions under results_dir. We do not invent a new TS-only
-// persistence format; we read what the Python pipeline already writes.
+// same on-disk report/backtest conventions under results_dir. Report cards may
+// additionally write a small TS-side `summary.json` cache next to legacy
+// `complete_report.md`; stale cache versions are rebuilt from the markdown.
 
 const SKIP_REPORT_DIRS = new Set(["backtest", "memory"]);
 
@@ -63,7 +65,10 @@ export async function loadLibrary(dispatch: AppDispatch): Promise<void> {
                 reportDate: date,
               },
             );
-            if (cached) summary = reportSummaryToMeta(cached);
+            if (!cached || cached.schemaVersion !== REPORT_SUMMARY_VERSION) {
+              throw new Error("stale report summary");
+            }
+            summary = reportSummaryToMeta(cached);
           } catch {
             try {
               const derived = summarizeReportBody(await readFile(reportFile, "utf-8"), {

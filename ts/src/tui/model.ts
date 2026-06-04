@@ -1048,8 +1048,12 @@ export function normalizeReportSummary(
   const riskControls = cleanSummaryField(raw.riskControls);
   const targetWeight = cleanSummaryField(raw.targetWeight);
   const priceRange = cleanSummaryField(raw.priceRange);
+  const schemaVersion =
+    typeof raw.schemaVersion === "number" && Number.isFinite(raw.schemaVersion)
+      ? raw.schemaVersion
+      : 0;
   const summary: ReportCardSummary = {
-    schemaVersion: REPORT_SUMMARY_VERSION,
+    schemaVersion,
     ...(ticker ? { ticker } : {}),
     ...(reportDate ? { reportDate } : {}),
     ...(analysisDate ? { analysisDate } : {}),
@@ -1253,7 +1257,8 @@ function extractAnalysisDate(lines: string[]): string | undefined {
 }
 
 function extractRating(text: string): string | undefined {
-  const rating = text.match(/买入|增持|持有|减持|卖出|BUY|OVERWEIGHT|HOLD|UNDERWEIGHT|SELL/i)?.[0];
+  const ratings = text.match(/买入|增持|持有|减持|卖出|BUY|OVERWEIGHT|HOLD|UNDERWEIGHT|SELL/gi);
+  const rating = ratings?.at(-1);
   if (!rating) return undefined;
   switch (rating.toUpperCase()) {
     case "BUY":

@@ -27,6 +27,21 @@ describe("TUI report artifacts", () => {
         ].join("\n"),
         "utf-8",
       );
+      await writeFile(
+        join(reportDir, "summary.json"),
+        JSON.stringify(
+          {
+            schemaVersion: 0,
+            ticker: "510300.SH",
+            reportDate: "2026-06-04",
+            rating: "卖出",
+            source: "markdown-derived",
+          },
+          null,
+          2,
+        ),
+        "utf-8",
+      );
 
       const actions: Action[] = [];
       await loadLibrary((action) => actions.push(action));
@@ -48,6 +63,7 @@ describe("TUI report artifacts", () => {
         schemaVersion: 1,
         ticker: "510300.SH",
         reportDate: "2026-06-04",
+        rating: "增持",
         source: "markdown-derived",
       });
     } finally {

@@ -713,6 +713,13 @@ describe("P2 report library", () => {
       source: "summary-json",
     });
   });
+
+  it("uses the last explicit rating term for upgraded report language", () => {
+    const summary = summarizeReportBody("研究结论: 由减持上调至增持，资金结构改善。");
+
+    expect(summary.rating).toBe("增持");
+    expect(summary.recommendation).toContain("增持");
+  });
 });
 
 // ===========================================================================
