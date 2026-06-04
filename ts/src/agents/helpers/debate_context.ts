@@ -23,9 +23,13 @@ const DEBATE_REPORT_CONTEXT_LIMIT = 5_000;
 
 /** The six analyst reports, labelled, skipping any that are still empty. */
 export function buildReportsBlock(state: SpineStateType, ctx?: PromptContext): string {
+  const reportContextCharLimit = Math.min(
+    ctx?.reportContextCharLimit ?? DEBATE_REPORT_CONTEXT_LIMIT,
+    DEBATE_REPORT_CONTEXT_LIMIT,
+  );
   const promptContext: PromptContext = {
     language: ctx?.language ?? "Chinese",
-    reportContextCharLimit: ctx?.reportContextCharLimit ?? DEBATE_REPORT_CONTEXT_LIMIT,
+    reportContextCharLimit,
     ...(ctx?.validationMode ? { validationMode: ctx.validationMode } : {}),
   };
   const rows: Array<[string, string]> = [
@@ -40,11 +44,7 @@ export function buildReportsBlock(state: SpineStateType, ctx?: PromptContext): s
     .filter(([, body]) => body?.trim())
     .map(
       ([label, body]) =>
-        `### ${label}\n${reportForDecisionContext(
-          body,
-          promptContext,
-          promptContext.reportContextCharLimit ?? DEBATE_REPORT_CONTEXT_LIMIT,
-        )}`,
+        `### ${label}\n${reportForDecisionContext(body, promptContext, reportContextCharLimit)}`,
     );
   return blocks.length
     ? `## 分析师报告\n\n优先使用每份报告中的「决策信号摘要」；报告摘录只作为证据核对，不要把长篇正文重新复述。\n\n${blocks.join("\n\n")}`

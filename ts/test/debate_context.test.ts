@@ -83,4 +83,23 @@ describe("debate context builders", () => {
     expect(ctx).toContain("OPENING_SIGNAL");
     expect(ctx).toContain("CLOSING_SIGNAL");
   });
+
+  it("caps debate report excerpts even when the global prompt limit is larger", () => {
+    const longState = stateWith({});
+    longState.market_flow_report =
+      "OPENING_SIGNAL\n" +
+      "MIDDLE_NOISE".repeat(2_000) +
+      "\n**决策信号摘要**\n方向: 中性\n置信度: 中\n时间窗口: 1周\nETF传导路径: 技术面 -> ETF\n核心证据: 动量分歧\n最大反证条件: 放量突破\n配置含义: 持有ETF\n下一步观察: 均线和份额\n" +
+      "CLOSING_SIGNAL";
+
+    const ctx = buildReportsBlock(longState, {
+      language: "Chinese",
+      reportContextCharLimit: 16_000,
+    });
+    expect(ctx.length).toBeLessThan(5_800);
+    expect(ctx).toContain("[Decision signal summary]");
+    expect(ctx).toContain("方向: 中性");
+    expect(ctx).toContain("OPENING_SIGNAL");
+    expect(ctx).toContain("CLOSING_SIGNAL");
+  });
 });

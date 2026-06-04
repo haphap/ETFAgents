@@ -67,11 +67,23 @@ describe("prompt helpers", () => {
   it("truncateForPrompt preserves opening and closing excerpts with a clear marker", () => {
     const long = `OPENING-${"x".repeat(20_000)}-CLOSING`;
     const out = truncateForPrompt(long, { language: "Chinese", reportContextCharLimit: 1000 });
-    expect(out).toContain("[Content trimmed, omitted");
+    expect(out.length).toBeLessThanOrEqual(1000);
+    expect(out).toContain("[Content trimmed for prompt");
     expect(out).toContain("[Opening excerpt]");
     expect(out).toContain("[Closing excerpt]");
     expect(out).toContain("OPENING-");
     expect(out).toContain("-CLOSING");
+  });
+
+  it("truncateForPrompt stays within small user-configured limits", () => {
+    const report =
+      "OPEN\n" +
+      "x".repeat(8_000) +
+      "\n**决策信号摘要**\n方向: 偏多\n置信度: 中\n时间窗口: 1周\nETF传导路径: 资金流 -> ETF\n核心证据: 份额增加\n最大反证条件: 放量跌破支撑\n配置含义: 增持ETF\n下一步观察: 成交量\n" +
+      "CLOSE";
+    const out = truncateForPrompt(report, { language: "Chinese", reportContextCharLimit: 250 });
+    expect(out.length).toBeLessThanOrEqual(250);
+    expect(out).toContain("[Decision signal summary]");
   });
 
   it("extractDecisionSignalSummary finds the final summary block", () => {
@@ -88,6 +100,7 @@ describe("prompt helpers", () => {
       "x".repeat(8_000) +
       "\n**决策信号摘要**\n方向: 偏空\n置信度: 高\n时间窗口: 1周\nETF传导路径: 利率 -> ETF\n核心证据: 量能恶化\n最大反证条件: 放量收复均线\n配置含义: 减持ETF\n下一步观察: 成交量";
     const out = reportForDecisionContext(report, { language: "Chinese" }, 1_200);
+    expect(out.length).toBeLessThanOrEqual(1_200);
     expect(out).toContain("[Decision signal summary]");
     expect(out).toContain("方向: 偏空");
     expect(out).toContain("OPEN");

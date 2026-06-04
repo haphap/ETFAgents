@@ -31,6 +31,15 @@ const DEFAULT_DECISION_CONTEXT_CHAR_LIMIT = 6_000;
 const SUMMARY_CONTEXT_CHAR_LIMIT = 2_400;
 const DECISION_SIGNAL_SUMMARY_MARKERS = ["决策信号摘要", "Decision Signal Summary"] as const;
 
+function findDecisionSignalSummaryIndex(text: string): number {
+  let bestIdx = -1;
+  for (const marker of DECISION_SIGNAL_SUMMARY_MARKERS) {
+    const idx = text.lastIndexOf(marker);
+    if (idx > bestIdx) bestIdx = idx;
+  }
+  return bestIdx;
+}
+
 export function getDecisionSignalSummaryInstruction(ctx: PromptContext): string {
   if (isChinese(ctx.language)) {
     return (
@@ -57,37 +66,70 @@ export function extractDecisionSignalSummary(
 ): string {
   if (!text?.trim()) return "";
   const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  let bestIdx = -1;
-  for (const marker of DECISION_SIGNAL_SUMMARY_MARKERS) {
-    const idx = normalized.lastIndexOf(marker);
-    if (idx > bestIdx) bestIdx = idx;
-  }
-  if (bestIdx < 0) return "";
-  const summary = normalized.slice(bestIdx).trim();
+  const summaryIdx = findDecisionSignalSummaryIndex(normalized);
+  if (summaryIdx < 0) return "";
+  const summary = normalized.slice(summaryIdx).trim();
   if (summary.length <= maxChars) return summary;
   return `${summary.slice(0, maxChars).trimEnd()}\n[Decision signal summary trimmed]`;
+}
+
+function appendPromptBlock(
+  parts: string[],
+  label: string,
+  body: string,
+  desiredChars: number,
+  fromEnd = false,
+): void {
+  const current = parts.join("\n\n");
+  const gapChars = parts.length > 0 ? 2 : 0;
+  const available = desiredChars - current.length - gapChars;
+  const prefix = `${label}\n`;
+  if (available <= prefix.length + 20) return;
+  const payloadChars = available - prefix.length;
+  const payload = fromEnd
+    ? body.slice(-payloadChars).trimStart()
+    : body.slice(0, payloadChars).trimEnd();
+  parts.push(`${prefix}${payload}`);
 }
 
 export function truncateForPrompt(text: string | undefined, ctx: PromptContext): string {
   if (!text) return "";
   const limit = ctx.reportContextCharLimit ?? DEFAULT_REPORT_CHAR_LIMIT;
   if (limit <= 0 || text.length <= limit) return text;
-  const omitted = text.length - limit;
-  const marker = `[Content trimmed, omitted ${omitted} characters]`;
-  const summary = extractDecisionSignalSummary(text, Math.min(SUMMARY_CONTEXT_CHAR_LIMIT, limit));
-  const summaryBlock = summary ? `[Decision signal summary]\n${summary}\n\n` : "";
-  const remaining = Math.max(0, limit - marker.length - summaryBlock.length - 40);
-  if (remaining <= 300) {
-    return `${marker}\n${summaryBlock}${text.slice(-Math.max(300, limit - marker.length))}`.trim();
+  const marker = `[Content trimmed for prompt, original ${text.length} characters, limit ${limit}]`;
+  if (limit <= marker.length + 1) return marker.slice(0, limit);
+
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const summaryIdx = findDecisionSignalSummaryIndex(normalized);
+  const maxSummaryChars = Math.min(
+    SUMMARY_CONTEXT_CHAR_LIMIT,
+    Math.max(0, Math.floor(limit * 0.45)),
+  );
+  const summary = summaryIdx >= 0 ? extractDecisionSignalSummary(normalized, maxSummaryChars) : "";
+  const excerptSource = summaryIdx >= 0 ? normalized.slice(0, summaryIdx).trimEnd() : normalized;
+  const parts = [marker];
+
+  if (summary) {
+    appendPromptBlock(
+      parts,
+      "[Decision signal summary]",
+      summary,
+      Math.min(limit, marker.length + 2 + "[Decision signal summary]\n".length + summary.length),
+    );
   }
-  const headChars = Math.floor(remaining * 0.55);
-  const tailChars = remaining - headChars;
-  return (
-    `${marker}\n` +
-    summaryBlock +
-    `[Opening excerpt]\n${text.slice(0, headChars).trimEnd()}\n\n` +
-    `[Closing excerpt]\n${text.slice(-tailChars).trimStart()}`
-  ).trim();
+
+  const used = parts.join("\n\n").length;
+  const remaining = limit - used - (parts.length > 0 ? 2 : 0);
+  if (remaining > 220) {
+    const openBudget = Math.floor(remaining * 0.5);
+    appendPromptBlock(parts, "[Opening excerpt]", excerptSource, used + 2 + openBudget);
+    appendPromptBlock(parts, "[Closing excerpt]", excerptSource, limit, true);
+  } else if (remaining > 80) {
+    appendPromptBlock(parts, "[Closing excerpt]", excerptSource, limit, true);
+  }
+
+  const output = parts.join("\n\n").trim();
+  return output.length <= limit ? output : output.slice(0, limit).trimEnd();
 }
 
 export function reportForDecisionContext(
