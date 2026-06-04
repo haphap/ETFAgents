@@ -59,6 +59,13 @@ function App() {
   const runSeqRef = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
 
+  const quitApp = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    runSeqRef.current += 1;
+    exit();
+  };
+
   useEffect(() => {
     const update = () => setTerminalSize(readTerminalSize(stdout));
     stdout.on("resize", update);
@@ -142,6 +149,11 @@ function App() {
     const s = stateRef.current;
     const d = dispatchRef.current;
 
+    if ((key.ctrl && input.toLowerCase() === "c") || input === "\u0003") {
+      quitApp();
+      return;
+    }
+
     // P6: an open error-detail overlay swallows the next key (close on any).
     if (s.showErrorDetail) {
       d({ type: "toggleErrorDetail" });
@@ -188,29 +200,7 @@ function App() {
     }
 
     if (key.escape) {
-      if (s.phase === "home") {
-        exit();
-        return;
-      }
-      if (s.phase === "config") {
-        d({ type: "backToTicker" });
-        return;
-      }
-      if (s.phase === "dashboard") {
-        abortRef.current?.abort();
-        runSeqRef.current += 1;
-        d({ type: "goPhase", phase: "home" });
-        return;
-      }
-      if (s.phase === "library" || s.phase === "backtest" || s.phase === "paper") {
-        d({ type: "goPhase", phase: "home" });
-        return;
-      }
-      if (s.phase === "ticker") {
-        d({ type: "goPhase", phase: "home" });
-        return;
-      }
-      exit();
+      quitApp();
       return;
     }
 
@@ -539,7 +529,7 @@ export function runTui(options: RunTuiOptions = {}): Instance {
   const { fullscreen = true, ...renderOptions } = options;
   const screen =
     fullscreen === true ? enterFullscreen(renderOptions.stdout ?? process.stdout) : null;
-  const instance = render(<App />, renderOptions);
+  const instance = render(<App />, { ...renderOptions, exitOnCtrlC: false });
   if (screen) void instance.waitUntilExit().finally(screen.restore);
   return instance;
 }

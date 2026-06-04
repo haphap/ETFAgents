@@ -171,7 +171,7 @@ export function TickerScreen({ state }: { state: AppState }) {
         </Box>
       )}
       <Box marginTop={1}>
-        <Text dimColor>Ctrl+L 报告库 · Ctrl+B 回测 · Ctrl+P 模拟盘 · ? 帮助 · Esc 返回</Text>
+        <Text dimColor>Ctrl+L 报告库 · Ctrl+B 回测 · Ctrl+P 模拟盘 · ? 帮助 · Esc 退出</Text>
       </Box>
     </Box>
   );
@@ -511,9 +511,9 @@ export function Dashboard({
           {/* Cancel button */}
           <Box marginBottom={1}>
             {state.status === "running" ? (
-              <Text dimColor>Esc 取消并返回</Text>
+              <Text dimColor>Esc 取消并退出</Text>
             ) : (
-              <Text dimColor>Esc 返回首页</Text>
+              <Text dimColor>Esc 退出</Text>
             )}
           </Box>
 
@@ -616,7 +616,7 @@ export function Dashboard({
           Nodes {state.stats.llm_calls} · Toolset {state.stats.tool_calls} · Reports {reportsDone}/
           {reportsTotal}
         </Text>
-        <Text dimColor>{el} ←→ 团队 · Enter 团队详情 · PgUp/PgDn 滚动 · e 错误 · Esc 返回</Text>
+        <Text dimColor>{el} ←→ 团队 · Enter 团队详情 · PgUp/PgDn 滚动 · e 错误 · Esc 退出</Text>
       </Box>
     </Box>
   );
@@ -984,7 +984,7 @@ export function ReportLibrary({ state }: { state: AppState }) {
             ))
           )}
           <Box marginTop={1}>
-            <Text dimColor>↑↓ 选择 · r 刷新 · Esc 返回</Text>
+            <Text dimColor>↑↓ 选择 · r 刷新 · Esc 退出</Text>
           </Box>
         </Box>
         {/* Right: body viewer (reuses the P0 viewport math) */}
@@ -1057,7 +1057,7 @@ export function BacktestScreen({ state }: { state: AppState }) {
             ))
           )}
           <Box marginTop={1}>
-            <Text dimColor>↑↓ 选择 · r 刷新 · Esc 返回</Text>
+            <Text dimColor>↑↓ 选择 · r 刷新 · Esc 退出</Text>
           </Box>
         </Box>
         <Box flexDirection="column" flexGrow={1} borderStyle="single" paddingX={1} marginLeft={1}>
@@ -1160,7 +1160,7 @@ export function PaperScreen({ state }: { state: AppState }) {
         </Box>
       )}
       <Box marginTop={1}>
-        <Text dimColor>r 刷新 · Esc 返回</Text>
+        <Text dimColor>r 刷新 · Esc 退出</Text>
       </Box>
     </Box>
   );
@@ -1244,7 +1244,7 @@ export function TeamDetailOverlay({ state }: { state: AppState }) {
 // ===========================================================================
 
 export function HelpOverlay({ phase }: { phase: Phase }) {
-  const shared = "? 帮助 · Esc 返回/退出";
+  const shared = "? 帮助 · Esc 退出";
   const lines: Record<Phase, string[]> = {
     home: ["↑↓ 选择入口", "Enter 打开", "r/l/b/p 快速进入研究/报告/回测/模拟盘", shared],
     ticker: ["输入 ETF 代码，逗号或空格分隔", "Enter 配置分析", "Tab 加入选中的最近研究", shared],
@@ -1254,7 +1254,7 @@ export function HelpOverlay({ phase }: { phase: Phase }) {
       "Enter 打开团队详情",
       "详情中 ↑↓ 选择章节",
       "PgUp/PgDn 滚动正文",
-      "Esc 取消并返回",
+      "Esc 取消并退出",
     ],
     library: ["↑↓ 选择报告", "PgUp/PgDn 滚动正文", "r 刷新", shared],
     backtest: ["↑↓ 选择回测记录", "r 刷新", shared],
