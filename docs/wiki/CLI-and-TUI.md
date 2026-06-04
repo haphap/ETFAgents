@@ -59,7 +59,9 @@ across several workflow screens:
   research depth (`快速=1/1`, `标准=2/2`, `深度=3/3` debate/risk rounds),
   analyst selection, and manual round steppers.
 - **Report library** (`Ctrl+L`) — browse historical reports from the results
-  directory and read them with the same scroll viewer.
+  directory and read them with the same scroll viewer. The library prefers
+  `summary.json` for card content; if an older report only has
+  `complete_report.md`, the TUI derives and writes a structured summary on scan.
 - **Watchlist** — quick-select real watchlist entries when available, falling
   back to recent report tickers.
 - **Backtest viewer** (`Ctrl+B`) — NAV sparkline, metrics, benchmark

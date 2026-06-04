@@ -1074,6 +1074,12 @@ function ReportCard({ report, active }: { report: ReportMeta; active: boolean })
   const rating = ratingLabel(report.rating);
   const ratingTextColor = reportRatingColor(report.rating);
   const analysisDate = report.analysisDate ?? report.date;
+  const allocationLine = [
+    report.targetWeight ? `仓位 ${report.targetWeight}` : undefined,
+    report.priceRange,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <Box
       flexDirection="column"
@@ -1098,11 +1104,12 @@ function ReportCard({ report, active }: { report: ReportMeta; active: boolean })
         </Text>
       </Box>
       <Text dimColor wrap="truncate-end">
-        分析时点: {analysisDate}
+        时点: {analysisDate}
+        {allocationLine ? ` · ${allocationLine}` : ""}
       </Text>
       <Text wrap="truncate-end">
-        <Text dimColor>建议: </Text>
-        {fitText(report.recommendation, 72)}
+        <Text dimColor>结论: </Text>
+        {fitText(report.keyTakeaway ?? report.recommendation, 72)}
       </Text>
       <Text wrap="truncate-end">
         <Text dimColor>策略: </Text>

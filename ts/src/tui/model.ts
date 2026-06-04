@@ -99,6 +99,7 @@ export const PROVIDER_BASE_URLS: Record<string, string> = {
 export const REPORT_VIEWPORT = 18;
 export const REPORT_WIDTH = 116;
 export const LIBRARY_CARD_VIEWPORT = 3;
+export const REPORT_SUMMARY_VERSION = 1;
 export const ELAPSED_REFRESH_MS = 5000;
 
 // ===========================================================================
@@ -275,11 +276,36 @@ export interface ReportMeta {
   ticker: string;
   date: string;
   path: string;
+  summaryVersion?: number;
   analysisDate?: string;
   rating?: string;
+  keyTakeaway?: string;
   recommendation?: string;
   strategy?: string;
   riskControls?: string;
+  targetWeight?: string;
+  priceRange?: string;
+  summarySource?: string;
+}
+
+export interface ReportCardSummary {
+  schemaVersion: number;
+  ticker?: string;
+  reportDate?: string;
+  analysisDate?: string;
+  rating?: string;
+  keyTakeaway?: string;
+  recommendation?: string;
+  strategy?: string;
+  riskControls?: string;
+  targetWeight?: string;
+  priceRange?: string;
+  source: "markdown-derived" | "summary-json";
+}
+
+export interface ReportSummaryContext {
+  ticker?: string;
+  reportDate?: string;
 }
 
 export type LibraryPane = "tickers" | "reports";
@@ -968,7 +994,8 @@ function visibleCardOffset(selectedWithinTicker: number, currentOffset: number):
 
 export function summarizeReportBody(
   body: string,
-): Pick<ReportMeta, "analysisDate" | "rating" | "recommendation" | "strategy" | "riskControls"> {
+  context: ReportSummaryContext = {},
+): ReportCardSummary {
   const lines = body
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
@@ -976,22 +1003,92 @@ export function summarizeReportBody(
     .map(cleanSummaryLine)
     .filter((line) => line.length > 0);
   const analysisDate = extractAnalysisDate(lines);
-  const recommendation = findSummarySnippet(lines, [
-    /分析师建议|研究结论|最终交易建议|最终配置建议|投资建议|配置建议|Recommendation|Decision/i,
+  const targetWeight = extractTargetWeight(lines);
+  const priceRange = extractPriceRange(lines);
+  const keyTakeaway = findSummarySnippet(lines, [
+    /核心结论|关键结论|最终决策|最终配置建议|投资组合经理决策|投资结论|研究结论|配置结论|Portfolio Manager Decision|Final Decision|Key Takeaway/i,
   ]);
   const strategy = findSummarySnippet(lines, [
-    /操作策略|交易策略|执行策略|持仓建议|配置执行计划|执行计划|操作计划|Action|Strategy|Positioning/i,
+    /操作策略|交易策略|执行策略|持仓建议|配置执行计划|执行计划|操作计划|加仓|减仓|回踩|突破|Action|Strategy|Positioning/i,
   ]);
   const riskControls = findSummarySnippet(lines, [
     /风险控制|风控|再平衡|止损|减仓|Risk|Control|Drawdown/i,
   ]);
-  const rating = extractRating(recommendation ?? lines.join(" "));
+  const rating = extractRating([keyTakeaway, strategy, riskControls, lines.join(" ")].join("\n"));
+  const recommendation = composeRecommendation(rating, targetWeight, keyTakeaway);
   return {
+    schemaVersion: REPORT_SUMMARY_VERSION,
+    ...(context.ticker ? { ticker: context.ticker } : {}),
+    ...(context.reportDate ? { reportDate: context.reportDate } : {}),
     ...(analysisDate ? { analysisDate } : {}),
     ...(rating ? { rating } : {}),
+    ...(keyTakeaway ? { keyTakeaway } : {}),
     ...(recommendation ? { recommendation } : {}),
     ...(strategy ? { strategy } : {}),
     ...(riskControls ? { riskControls } : {}),
+    ...(targetWeight ? { targetWeight } : {}),
+    ...(priceRange ? { priceRange } : {}),
+    source: "markdown-derived",
+  };
+}
+
+export function normalizeReportSummary(
+  value: unknown,
+  context: ReportSummaryContext = {},
+): ReportCardSummary | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const raw = value as Record<string, unknown>;
+  const ticker = cleanSummaryField(raw.ticker) ?? context.ticker;
+  const reportDate = cleanSummaryField(raw.reportDate) ?? context.reportDate;
+  const analysisDate = cleanSummaryField(raw.analysisDate);
+  const rating = cleanSummaryField(raw.rating);
+  const keyTakeaway = cleanSummaryField(raw.keyTakeaway);
+  const recommendation = cleanSummaryField(raw.recommendation);
+  const strategy = cleanSummaryField(raw.strategy);
+  const riskControls = cleanSummaryField(raw.riskControls);
+  const targetWeight = cleanSummaryField(raw.targetWeight);
+  const priceRange = cleanSummaryField(raw.priceRange);
+  const summary: ReportCardSummary = {
+    schemaVersion: REPORT_SUMMARY_VERSION,
+    ...(ticker ? { ticker } : {}),
+    ...(reportDate ? { reportDate } : {}),
+    ...(analysisDate ? { analysisDate } : {}),
+    ...(rating ? { rating } : {}),
+    ...(keyTakeaway ? { keyTakeaway } : {}),
+    ...(recommendation ? { recommendation } : {}),
+    ...(strategy ? { strategy } : {}),
+    ...(riskControls ? { riskControls } : {}),
+    ...(targetWeight ? { targetWeight } : {}),
+    ...(priceRange ? { priceRange } : {}),
+    source: "summary-json",
+  };
+  if (
+    !summary.analysisDate &&
+    !summary.rating &&
+    !summary.keyTakeaway &&
+    !summary.recommendation &&
+    !summary.strategy &&
+    !summary.riskControls &&
+    !summary.targetWeight &&
+    !summary.priceRange
+  ) {
+    return null;
+  }
+  return summary;
+}
+
+export function reportSummaryToMeta(summary: ReportCardSummary): Partial<ReportMeta> {
+  return {
+    summaryVersion: summary.schemaVersion,
+    ...(summary.analysisDate ? { analysisDate: summary.analysisDate } : {}),
+    ...(summary.rating ? { rating: summary.rating } : {}),
+    ...(summary.keyTakeaway ? { keyTakeaway: summary.keyTakeaway } : {}),
+    ...(summary.recommendation ? { recommendation: summary.recommendation } : {}),
+    ...(summary.strategy ? { strategy: summary.strategy } : {}),
+    ...(summary.riskControls ? { riskControls: summary.riskControls } : {}),
+    ...(summary.targetWeight ? { targetWeight: summary.targetWeight } : {}),
+    ...(summary.priceRange ? { priceRange: summary.priceRange } : {}),
+    summarySource: summary.source,
   };
 }
 
@@ -1014,6 +1111,12 @@ function cleanSummaryLine(line: string): string {
   ).trim();
 }
 
+function cleanSummaryField(value: unknown, width = 72): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = truncateSummary(value.replace(/\s+/g, " ").trim(), width);
+  return text || undefined;
+}
+
 function findSummarySnippet(lines: string[], patterns: RegExp[]): string | undefined {
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i] ?? "";
@@ -1030,10 +1133,28 @@ function findSummarySnippet(lines: string[], patterns: RegExp[]): string | undef
 function nextSummaryLine(lines: string[], start: number): string | undefined {
   for (let i = start; i < Math.min(lines.length, start + 6); i += 1) {
     const line = lines[i] ?? "";
-    if (!line || /^[一二三四五六七八九十\d]+[、.)]\s*\S+/.test(line)) continue;
+    if (!line || looksLikeReportHeading(line) || looksLikeReportMetadata(line)) continue;
     return line;
   }
   return undefined;
+}
+
+function looksLikeReportMetadata(line: string): boolean {
+  return /^(?:Trade Date|Date|Generated|分析日期|分析时点|生成时间|数据日期)\s*[：:]/i.test(
+    line.trim(),
+  );
+}
+
+function looksLikeReportHeading(line: string): boolean {
+  const text = line.trim();
+  return (
+    /^[IVX]+\.\s+\S+/i.test(text) ||
+    /^[一二三四五六七八九十\d]+[、.)]\s*\S+/.test(text) ||
+    /^(?:Market|Sentiment|Macro|Meso|ETF|Bull|Bear|Trader|Portfolio|Research|Risk)\b/i.test(text) ||
+    /^(?:市场与资金流|舆情与事件|宏观框架|中观大宗|持仓行业|头部持仓|交易员|投资组合经理|研究团队|风险管理)/.test(
+      text,
+    )
+  );
 }
 
 function conciseCardText(line: string, width = 46): string {
@@ -1065,6 +1186,54 @@ function truncateSummary(line: string, width = 46): string {
   const text = line.replace(/\s+/g, " ").trim();
   if (text.length <= width) return text;
   return `${text.slice(0, width - 1)}…`;
+}
+
+function composeRecommendation(
+  rating: string | undefined,
+  targetWeight: string | undefined,
+  keyTakeaway: string | undefined,
+): string | undefined {
+  const parts = [rating, targetWeight ? `仓位 ${targetWeight}` : undefined, keyTakeaway]
+    .filter((part): part is string => Boolean(part))
+    .map((part) => part.trim());
+  if (parts.length === 0) return undefined;
+  return truncateSummary(parts.join(" · "), 64);
+}
+
+function extractTargetWeight(lines: string[]): string | undefined {
+  const text = lines.join("\n");
+  const labeled = text.match(
+    /(?:目标|建议|推荐|配置|target).{0,10}(?:仓位|权重|weight).{0,16}?(\d+(?:\.\d+)?\s*%)(?:\s*(?:-|~|—|至|到)\s*(\d+(?:\.\d+)?\s*%))?/i,
+  );
+  if (labeled?.[1]) {
+    return labeled[2]
+      ? `${labeled[1].replace(/\s+/g, "")}-${labeled[2].replace(/\s+/g, "")}`
+      : labeled[1].replace(/\s+/g, "");
+  }
+  const structured = text.match(/target_weight_(?:min_|max_)?pct["']?\s*[:=]\s*(\d+(?:\.\d+)?)/i);
+  return structured?.[1] ? `${structured[1]}%` : undefined;
+}
+
+function extractPriceRange(lines: string[]): string | undefined {
+  const target = extractLabeledPrice(lines, /目标价|目标|上方|突破|target/i);
+  const stop = extractLabeledPrice(lines, /止损|跌破|防守|下方|stop|risk/i);
+  if (stop && target) return `止损 ${stop} / 目标 ${target}`;
+  if (target) return `目标 ${target}`;
+  if (stop) return `止损 ${stop}`;
+  return undefined;
+}
+
+function extractLabeledPrice(lines: string[], label: RegExp): string | undefined {
+  for (const line of lines) {
+    if (/(?:仓位|权重|weight|%|％)/i.test(line)) continue;
+    if (!label.test(line)) continue;
+    label.lastIndex = 0;
+    const price = line.match(
+      /(?:目标价|止损价|价格|价位|跌破|突破|上方|下方|target|stop).{0,16}?(\d+(?:\.\d+)?)\s*(?:元|CNY|RMB)?/i,
+    )?.[1];
+    if (price) return Number(price).toFixed(price.includes(".") ? 3 : 2);
+  }
+  return undefined;
 }
 
 function extractAnalysisDate(lines: string[]): string | undefined {

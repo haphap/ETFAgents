@@ -2,7 +2,9 @@ import type { AppDispatch, BacktestMeta, ReportMeta } from "../model.js";
 import {
   extractPriceRows,
   normalizeBacktestResult,
+  normalizeReportSummary,
   parseCsvLine,
+  reportSummaryToMeta,
   summarizeReportBody,
 } from "../model.js";
 
@@ -26,7 +28,7 @@ export function resultsDir(): string {
 export async function loadLibrary(dispatch: AppDispatch): Promise<void> {
   dispatch({ type: "libraryLoading" });
   try {
-    const { readFile, readdir, stat } = await import("node:fs/promises");
+    const { readFile, readdir, stat, writeFile } = await import("node:fs/promises");
     const root = resultsDir();
     const reports: ReportMeta[] = [];
     let tickerDirs: string[] = [];
@@ -49,16 +51,34 @@ export async function loadLibrary(dispatch: AppDispatch): Promise<void> {
       for (const date of dates) {
         const path = `${tickerPath}/${date}`;
         const reportFile = `${path}/complete_report.md`;
+        const summaryFile = `${path}/summary.json`;
         try {
           await stat(reportFile);
-          let summary: Pick<
-            ReportMeta,
-            "analysisDate" | "rating" | "recommendation" | "strategy" | "riskControls"
-          > = {};
+          let summary: Partial<ReportMeta> = {};
           try {
-            summary = summarizeReportBody(await readFile(reportFile, "utf-8"));
+            const cached = normalizeReportSummary(
+              JSON.parse(await readFile(summaryFile, "utf-8")),
+              {
+                ticker,
+                reportDate: date,
+              },
+            );
+            if (cached) summary = reportSummaryToMeta(cached);
           } catch {
-            /* summary is optional; the reader can still open the full report */
+            try {
+              const derived = summarizeReportBody(await readFile(reportFile, "utf-8"), {
+                ticker,
+                reportDate: date,
+              });
+              summary = reportSummaryToMeta(derived);
+              try {
+                await writeFile(summaryFile, JSON.stringify(derived, null, 2), "utf-8");
+              } catch {
+                /* derived summary remains usable even if the directory is read-only */
+              }
+            } catch {
+              /* summary is optional; the reader can still open the full report */
+            }
           }
           reports.push({ ticker, date, path, ...summary });
         } catch {

@@ -10,6 +10,7 @@ import {
   libraryTickers,
   nextSectionId,
   normalizeBacktestResult,
+  normalizeReportSummary,
   parseTickers,
   priceRuler,
   reducer,
@@ -683,10 +684,34 @@ describe("P2 report library", () => {
 
     expect(summary.analysisDate).toBe("2026-06-03");
     expect(summary.rating).toBe("增持");
+    expect(summary.keyTakeaway).toContain("增持");
     expect(summary.recommendation).toContain("增持");
     expect(summary.recommendation).not.toContain("整段原文");
+    expect(summary.targetWeight).toBe("20%-30%");
     expect(summary.strategy).toContain("目标仓位");
     expect(summary.riskControls).toContain("3.72");
+  });
+
+  it("normalizes cached report-card summary JSON", () => {
+    const summary = normalizeReportSummary(
+      {
+        schemaVersion: 1,
+        analysisDate: "2026-06-03",
+        rating: "OVERWEIGHT",
+        keyTakeaway: "资金与持仓结构改善，维持核心配置。",
+        targetWeight: "20%-30%",
+      },
+      { ticker: "510300.SH", reportDate: "2026-06-04" },
+    );
+
+    expect(summary).toMatchObject({
+      ticker: "510300.SH",
+      reportDate: "2026-06-04",
+      analysisDate: "2026-06-03",
+      keyTakeaway: "资金与持仓结构改善，维持核心配置。",
+      targetWeight: "20%-30%",
+      source: "summary-json",
+    });
   });
 });
 
