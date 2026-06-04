@@ -13,13 +13,19 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import type { PromptContext } from "./shared.js";
-import { getDecisionSignalSummaryInstruction, getLanguageInstruction } from "./shared.js";
+import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
+  getDecisionSignalSummaryInstruction,
+  getLanguageInstruction,
+} from "./shared.js";
 
 export const RESEARCH_MANAGER_REPORT_SPEC: AnalystReportSpec = {
   analystName: "research_manager",
   requiredTopSections: [],
   requiredTailTokens: [],
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("research_manager"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否评估了多空双方在整个辩论中的优劣？\n" +
@@ -52,6 +58,7 @@ export function buildResearchManagerSystemMessage(ctx: PromptContext): string {
       "- 包含交易员可执行的信息：初始仓位区间、加/减/轮动条件、再平衡触发、风险控制和下一步监控。\n\n" +
       "结论必须果断，且每个关键判断都要有证据来源、置信度和反证条件。" +
       getDecisionSignalSummaryInstruction(ctx) +
+      getAgentOutputSchemaInstruction("research_manager", ctx) +
       getLanguageInstruction(ctx)
     );
   }
@@ -104,6 +111,7 @@ export function buildResearchManagerSystemMessage(ctx: PromptContext): string {
     "Be decisive and ground every conclusion in specific evidence from " +
     "the debate." +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("research_manager", ctx) +
     getLanguageInstruction(ctx)
   );
 }

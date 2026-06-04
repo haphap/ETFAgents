@@ -45,6 +45,8 @@ export interface AnalystReportSpec {
   requireTailTable?: boolean;
   /** Whether the report must end with a decision-oriented signal summary. */
   requireDecisionSignalSummary?: boolean;
+  /** Plain-text output schema fields required in/after the decision summary. */
+  requiredOutputSchemaFields?: ReadonlyArray<string>;
   /** Free-form rules forwarded verbatim to the LLM judge prompt. */
   customRulesMarkdown?: string;
 }
@@ -105,6 +107,15 @@ function bodyWithoutDecisionSignalSummary(report: string): string {
     if (idx > bestIdx) bestIdx = idx;
   }
   return bestIdx >= 0 ? report.slice(0, bestIdx) : report;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasSchemaField(text: string, field: string): boolean {
+  const re = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(field)}\\s*[:：]`);
+  return re.test(text);
 }
 
 export function staticValidate(report: string, spec: AnalystReportSpec): StaticVerdict {
@@ -173,6 +184,19 @@ export function staticValidate(report: string, spec: AnalystReportSpec): StaticV
     }
   }
 
+  if (spec.requiredOutputSchemaFields?.length) {
+    const summary = extractDecisionSignalSummary(report);
+    if (!summary || (!summary.includes("输出Schema") && !summary.includes("Output Schema"))) {
+      verdict.missingElements.push("缺少末尾『输出Schema』");
+    }
+    const schemaText = summary || report;
+    for (const field of spec.requiredOutputSchemaFields) {
+      if (!hasSchemaField(schemaText, field)) {
+        verdict.missingElements.push(`输出Schema缺少字段『${field}』`);
+      }
+    }
+  }
+
   const bodyOnly = bodyWithoutDecisionSignalSummary(report);
   if (containsQaLabelArtifacts(bodyOnly)) {
     verdict.criticalIssues.push("出现『判断：』『证据：』『结论：』等标签式结构");
@@ -206,6 +230,7 @@ const JUDGE_BASE_RULES =
   "- 开篇第一句是否直接陈述核心结论或判断（偏多/偏空/中性及原因），而非「本报告将…」等场景设置？\n\n" +
   "### 决策价值\n" +
   "- 末尾是否包含「决策信号摘要」或「Decision Signal Summary」，且包含方向、置信度、时间窗口、ETF传导路径、核心证据、最大反证条件、配置含义和下一步观察？\n" +
+  "- 决策信号摘要之后是否包含「输出Schema」或「Output Schema」，并按角色专属schema逐项填写字段、枚举值、key_drivers和confidence？\n" +
   "- 方向是否明确为偏多/偏空/中性或 bullish/bearish/neutral，而不是含糊描述？\n" +
   "- 配置含义是否落到ETF整体仓位的增持、持有、减持或回避，而不是停留在行业评论或成分股交易？\n" +
   "- 是否至少给出一个能推翻当前判断的反证条件，以及2-3条带数据或来源的核心证据？\n\n" +

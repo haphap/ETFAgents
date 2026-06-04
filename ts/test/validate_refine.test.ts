@@ -22,6 +22,12 @@ const SUMMARY_REQUIRED_SPEC: AnalystReportSpec = {
   requireDecisionSignalSummary: true,
 };
 
+const SCHEMA_REQUIRED_SPEC: AnalystReportSpec = {
+  analystName: "schema_required",
+  requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: ["agent", "confidence"],
+};
+
 const DECISION_SUMMARY =
   "\n\n**决策信号摘要**\n" +
   "方向: 偏多\n" +
@@ -32,6 +38,8 @@ const DECISION_SUMMARY =
   "最大反证条件: 放量跌破支撑\n" +
   "配置含义: 增持ETF整体仓位\n" +
   "下一步观察: 成交量和份额变化";
+
+const OUTPUT_SCHEMA = "\n\n**输出Schema**\n" + "agent: market_flow\n" + "confidence: 0.72";
 
 const COMPLETE_REPORT =
   "概览段：偏多结构成立，MACD与RSI同步确认。\n\n" +
@@ -108,6 +116,26 @@ describe("staticValidate", () => {
     );
     expect(verdict.missingElements.some((m) => m.includes("置信度"))).toBe(true);
     expect(verdict.missingElements.some((m) => m.includes("最大反证条件"))).toBe(true);
+  });
+
+  it("enforces required output schema fields after the decision summary", () => {
+    const missingSchema = staticValidate(
+      `概览段。\n\n一、正文\n内容。${DECISION_SUMMARY}`,
+      SCHEMA_REQUIRED_SPEC,
+    );
+    expect(missingSchema.missingElements).toContain("缺少末尾『输出Schema』");
+
+    const missingField = staticValidate(
+      `概览段。\n\n一、正文\n内容。${DECISION_SUMMARY}\n\n**输出Schema**\nagent: market_flow`,
+      SCHEMA_REQUIRED_SPEC,
+    );
+    expect(missingField.missingElements).toContain("输出Schema缺少字段『confidence』");
+
+    const complete = staticValidate(
+      `概览段。\n\n一、正文\n内容。${DECISION_SUMMARY}${OUTPUT_SCHEMA}`,
+      SCHEMA_REQUIRED_SPEC,
+    );
+    expect(staticVerdictHasIssues(complete)).toBe(false);
   });
 });
 

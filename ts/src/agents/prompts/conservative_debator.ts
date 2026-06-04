@@ -14,6 +14,8 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
   getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
   type PromptContext,
@@ -23,6 +25,7 @@ export const CONSERVATIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
   analystName: "conservative_debator",
   requiredTopSections: [],
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("conservative_debator"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否积极挑战激进方和中立方观点？\n" +
@@ -42,6 +45,7 @@ export function buildConservativeDebatorSystemMessage(ctx: PromptContext): strin
       "哪些价格、资金流或基本面信号触发继续降风险；哪些条件出现后才允许恢复仓位。" +
       "不要只写'谨慎观察'，必须把风险预算和失效条件说具体。" +
       getDecisionSignalSummaryInstruction(ctx) +
+      getAgentOutputSchemaInstruction("conservative_debator", ctx) +
       getLanguageInstruction(ctx)
     );
   }
@@ -68,6 +72,7 @@ export function buildConservativeDebatorSystemMessage(ctx: PromptContext): strin
     "demonstrate the strength of a low-risk strategy over their approaches. " +
     "Output conversationally, then end with the required decision signal summary." +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("conservative_debator", ctx) +
     getLanguageInstruction(ctx)
   );
 }

@@ -2,6 +2,8 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
   getConciseHeadingInstruction,
   getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
@@ -16,6 +18,7 @@ export const TOP_HOLDINGS_REPORT_SPEC: AnalystReportSpec = {
   requiredTopSections: ["一", "二", "三", "四"],
   requireTopSectionLeads: true,
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("top_holdings"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否逐份分析每份个股报告的论点、数据和评级？\n" +
@@ -63,6 +66,7 @@ export function buildTopHoldingsSystemMessage(ctx: PromptContext): string {
     "    表格列为：券商/来源、覆盖持仓、ETF权重、评级/目标价、核心证据、ETF含义、触发或风险。\n\n" +
     "写作纪律：不得停留在个股推荐；不得写买卖某个成分股；缺失数据直接省略；每个关键判断都要回到ETF整体仓位、归因或风险上限。" +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("top_holdings", ctx) +
     getLanguageInstruction(ctx)
   );
 }

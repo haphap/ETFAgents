@@ -31,6 +31,157 @@ const DEFAULT_DECISION_CONTEXT_CHAR_LIMIT = 6_000;
 const SUMMARY_CONTEXT_CHAR_LIMIT = 2_400;
 const DECISION_SIGNAL_SUMMARY_MARKERS = ["决策信号摘要", "Decision Signal Summary"] as const;
 
+export type AgentOutputSchemaId =
+  | "market_flow"
+  | "catalyst_sentiment"
+  | "macro_regime"
+  | "meso_commodity"
+  | "holdings_industry"
+  | "top_holdings"
+  | "bull_researcher"
+  | "bear_researcher"
+  | "research_manager"
+  | "trader"
+  | "aggressive_debator"
+  | "conservative_debator"
+  | "neutral_debator"
+  | "portfolio_manager";
+
+const AGENT_OUTPUT_SCHEMAS: Record<AgentOutputSchemaId, ReadonlyArray<string>> = {
+  market_flow: [
+    "agent: market_flow",
+    "price_regime: TREND_UP | TREND_DOWN | RANGE | BREAKOUT | BREAKDOWN",
+    "flow_regime: ACCUMULATION | DISTRIBUTION | NEUTRAL | CROWDED",
+    "volatility_regime: EXPANDING | CONTRACTING | NORMAL",
+    "execution_bias: ADD | HOLD | REDUCE | WAIT | EXIT",
+    'key_levels: ["<2-4 个关键价位/阈值>"]',
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  catalyst_sentiment: [
+    "agent: catalyst_sentiment",
+    "event_regime: SUPPORTIVE | ADVERSE | MIXED | QUIET",
+    "sentiment_regime: POSITIVE | NEGATIVE | NEUTRAL | DIVERGENT",
+    'top_catalysts: ["<1-3 个可定价事件>"]',
+    "noise_level: LOW | MEDIUM | HIGH",
+    "etf_price_impact: UP | DOWN | NEUTRAL | VOLATILE",
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  macro_regime: [
+    "agent: macro_regime",
+    "rates_regime: EASING | TIGHTENING | STABLE | VOLATILE",
+    "credit_regime: EXPANDING | TIGHTENING | STABLE | STRESS",
+    "policy_regime: SUPPORTIVE | RESTRICTIVE | NEUTRAL | UNCERTAIN",
+    "growth_signal: ACCELERATING | STEADY | DECELERATING",
+    "macro_risk_bias: RISK_ON | RISK_OFF | NEUTRAL",
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  meso_commodity: [
+    "agent: commodities",
+    "oil_regime: BACKWARDATION | CONTANGO | NEUTRAL",
+    "metals_regime: RISK_ON | RISK_OFF | ROTATING",
+    "ag_regime: TIGHT | BALANCED | GLUT",
+    "china_demand_signal: ACCELERATING | STEADY | DECELERATING",
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  holdings_industry: [
+    "agent: holdings_industry",
+    "industry_regime: UP_CYCLE | DOWN_CYCLE | MIXED | TRANSITION",
+    "policy_impact: SUPPORTIVE | RESTRICTIVE | NEUTRAL | UNCERTAIN",
+    "earnings_transmission: POSITIVE | NEGATIVE | MIXED | WEAK",
+    "broker_consensus: BULLISH | BEARISH | MIXED | THIN",
+    "etf_weight_impact: HIGH | MEDIUM | LOW",
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  top_holdings: [
+    "agent: top_holdings",
+    "earnings_revision: UPGRADING | DOWNGRADING | STABLE | MIXED",
+    "valuation_regime: CHEAP | FAIR | EXPENSIVE | DISPERSION",
+    "concentration_risk: HIGH | MEDIUM | LOW",
+    "broker_rating_bias: BULLISH | BEARISH | MIXED | THIN",
+    "weighted_holding_impact: POSITIVE | NEGATIVE | NEUTRAL | MIXED",
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  bull_researcher: [
+    "agent: bull_researcher",
+    "bull_case_strength: STRONG | MODERATE | WEAK",
+    "upside_asymmetry: HIGH | MEDIUM | LOW",
+    "confirmation_quality: CONFIRMED | PARTIAL | UNCONFIRMED",
+    'best_counter_to_bear: "<最强反驳>"',
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  bear_researcher: [
+    "agent: bear_researcher",
+    "bear_case_strength: STRONG | MODERATE | WEAK",
+    "downside_asymmetry: HIGH | MEDIUM | LOW",
+    "fragility_signal: HIGH | MEDIUM | LOW",
+    'best_counter_to_bull: "<最强反驳>"',
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  research_manager: [
+    "agent: research_manager",
+    "debate_winner: BULL | BEAR | HOLD",
+    "research_view: BUY | OVERWEIGHT | HOLD | UNDERWEIGHT | SELL",
+    "decision_strength: STRONG | MODERATE | WEAK",
+    'decisive_evidence: ["<1-3 条决定性证据>"]',
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  trader: [
+    "agent: trader",
+    "allocation_action: BUY | OVERWEIGHT | HOLD | UNDERWEIGHT | SELL",
+    'target_weight_band: "<low-high pct or UNKNOWN>"',
+    "execution_timing: SAME_CLOSE | NEXT_OPEN | NEXT_CLOSE | WAIT_FOR_TRIGGER",
+    "add_trigger_state: READY | WAIT | BLOCKED",
+    "risk_control_state: NORMAL | ELEVATED | BREACHED",
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  aggressive_debator: [
+    "agent: aggressive_risk",
+    "risk_posture: INCREASE_RISK | MAINTAIN | WAIT",
+    "upside_pressure: HIGH | MEDIUM | LOW",
+    "opportunity_cost: HIGH | MEDIUM | LOW",
+    'max_risk_budget: "<仓位/风险预算>"',
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  conservative_debator: [
+    "agent: conservative_risk",
+    "risk_posture: REDUCE_RISK | CAP_RISK | MAINTAIN",
+    "drawdown_risk: HIGH | MEDIUM | LOW",
+    "liquidity_risk: HIGH | MEDIUM | LOW",
+    'max_risk_budget: "<仓位/风险预算>"',
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  neutral_debator: [
+    "agent: neutral_risk",
+    "risk_posture: BALANCED | WAIT | CONDITIONAL_ADD | CONDITIONAL_REDUCE",
+    "risk_reward_balance: FAVORABLE | BALANCED | UNFAVORABLE",
+    "confirmation_need: HIGH | MEDIUM | LOW",
+    'conditional_action: "<条件化动作>"',
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+  portfolio_manager: [
+    "agent: portfolio_manager",
+    "final_decision: BUY | OVERWEIGHT | HOLD | UNDERWEIGHT | SELL",
+    'target_weight_band: "<low-high pct or UNKNOWN>"',
+    "risk_budget: LOW | MEDIUM | HIGH",
+    "rebalance_mode: ADD | TRIM | HOLD | EXIT | WAIT",
+    'key_drivers: ["<3-5 条关键证据>"]',
+    "confidence: <0-1>",
+  ],
+};
+
 function findDecisionSignalSummaryIndex(text: string): number {
   let bestIdx = -1;
   for (const marker of DECISION_SIGNAL_SUMMARY_MARKERS) {
@@ -48,7 +199,7 @@ export function getDecisionSignalSummaryInstruction(ctx: PromptContext): string 
       "摘要必须使用以下字段，字段名保持不变：方向、置信度、时间窗口、ETF传导路径、核心证据、最大反证条件、配置含义、下一步观察。" +
       "方向只能写偏多、偏空或中性；置信度只能写低、中或高；核心证据写2-3条带数据或来源的证据；" +
       "配置含义必须明确对应ETF整体仓位的增持、持有、减持或回避含义，不得给成分股交易指令。" +
-      "摘要应短而可被后续研究经理和交易员直接使用，不要输出JSON、代码块或机器字段名。\n"
+      "摘要应短而可被后续研究经理和交易员直接使用；不要输出JSON或代码块，角色输出Schema字段用普通文本字段行填写。\n"
     );
   }
   return (
@@ -56,7 +207,32 @@ export function getDecisionSignalSummaryInstruction(ctx: PromptContext): string 
     "At the end of the final top-level section, append a bold line **Decision Signal Summary**; do not create an extra top-level section." +
     " Use these exact fields: Direction, Confidence, Time Window, ETF Transmission Path, Core Evidence, Main Invalidation, Allocation Implication, Next Watch Items." +
     " Direction must be bullish, bearish, or neutral; confidence must be low, medium, or high; core evidence should include 2-3 data-backed points." +
-    " Allocation implication must target the ETF position only, never constituent-stock trades. Do not output JSON or code blocks.\n"
+    " Allocation implication must target the ETF position only, never constituent-stock trades. Do not output JSON or code blocks; render the role output schema as plain field lines.\n"
+  );
+}
+
+export function getAgentOutputSchemaFieldNames(schemaId: AgentOutputSchemaId): string[] {
+  return AGENT_OUTPUT_SCHEMAS[schemaId].map((line) => line.slice(0, line.indexOf(":")));
+}
+
+export function getAgentOutputSchemaInstruction(
+  schemaId: AgentOutputSchemaId,
+  ctx: PromptContext,
+): string {
+  const lines = AGENT_OUTPUT_SCHEMAS[schemaId].join("\n");
+  if (isChinese(ctx.language)) {
+    return (
+      "\n## 输出Schema要求\n" +
+      "在 **决策信号摘要** 之后附加 **输出Schema**，参考 MOSAIC-Agents 风格，用普通文本逐行填写以下字段；不要使用代码块、JSON对象或额外字段。" +
+      "枚举字段必须从给定枚举中选择；key_drivers 保持3-5条；confidence 使用0到1之间的小数。\n" +
+      `${lines}\n`
+    );
+  }
+  return (
+    "\n## Output Schema Requirement\n" +
+    "After **Decision Signal Summary**, append **Output Schema** in MOSAIC-Agents style as plain text field lines. Do not use code fences, JSON objects, or extra fields. " +
+    "Choose enum values from the allowed options; keep key_drivers to 3-5 items; use a 0-1 decimal for confidence.\n" +
+    `${lines}\n`
   );
 }
 
@@ -188,15 +364,15 @@ export function getCollaborationStopInstruction(ctx: PromptContext): string {
 export function getLocalizedExecutionBiasInstruction(ctx: PromptContext): string {
   if (isChinese(ctx.language)) {
     return (
-      "以明确的执行倾向结束，最后一行必须使用格式：" +
+      "以明确的执行倾向结束主要报告，执行倾向行必须使用格式：" +
       "'执行倾向: **买入/增持/持有/减持/卖出**'。" +
-      "这里表达的是交易执行层的倾向，不要冒充最终投资组合决策。"
+      "这里表达的是交易执行层的倾向，不要冒充最终投资组合决策；若提示词要求输出Schema，Schema放在执行倾向行之后。"
     );
   }
   return (
-    "End with a clear execution-bias line and always conclude your response with " +
+    "End the main report with a clear execution-bias line using " +
     "'EXECUTION BIAS: **BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL**'. " +
-    "This is an execution-layer stance, not the final portfolio decision."
+    "This is an execution-layer stance, not the final portfolio decision; when an Output Schema is required, place it after that execution-bias line."
   );
 }
 
@@ -228,7 +404,7 @@ export function getConciseHeadingInstruction(): string {
     "when the structure already provides a precise heading for that section. " +
     "If the structure does not provide a heading, write one that is brief, forceful, and immediately usable. " +
     "In Chinese output, top-level and second-level headings must stay in plain Chinese and must NOT append English translations or notes in parentheses. " +
-    "Do NOT output code blocks, JSON, dictionary mappings, variable assignments, or any programming-language structure. " +
+    "Do NOT output code blocks, JSON, dictionary mappings, variable assignments, or any programming-language structure, except the required plain-text Output Schema field block. " +
     "Each heading should appear directly in the report as readable text, not as configuration. " +
     "Use '一、' for top-level headings and '（一）' for second-level headings."
   );

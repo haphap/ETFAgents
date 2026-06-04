@@ -15,6 +15,8 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
   getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
   type PromptContext,
@@ -24,6 +26,7 @@ export const AGGRESSIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
   analystName: "aggressive_debator",
   requiredTopSections: [],
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("aggressive_debator"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否积极挑战保守方和中立方观点？\n" +
@@ -42,6 +45,7 @@ export function buildAggressiveDebatorSystemMessage(ctx: PromptContext): string 
       "输出主体可以是对话式短段落，但必须有明确风险预算：建议增加到什么仓位区间、需要哪些确认信号、什么条件下暂停加仓或回撤。" +
       "不要只写'积极把握机会'这类口号；必须把上行理由、时间窗口、反证条件和执行边界说清楚。" +
       getDecisionSignalSummaryInstruction(ctx) +
+      getAgentOutputSchemaInstruction("aggressive_debator", ctx) +
       getLanguageInstruction(ctx)
     );
   }
@@ -69,6 +73,7 @@ export function buildAggressiveDebatorSystemMessage(ctx: PromptContext): string 
     "to underscore why a high-risk approach is optimal. Output " +
     "conversationally, then end with the required decision signal summary." +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("aggressive_debator", ctx) +
     getLanguageInstruction(ctx)
   );
 }

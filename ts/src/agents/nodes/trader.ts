@@ -15,7 +15,7 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { buildTraderBacktestSignal } from "../helpers/backtest_signal.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
-import { renderTraderProposal } from "../helpers/render.js";
+import { appendTraderOutputSchema, renderTraderProposal } from "../helpers/render.js";
 import { normalizeChineseManagerTerms } from "../helpers/role_terms.js";
 import { invokeStructuredOrFreetext } from "../helpers/structured_output.js";
 import {
@@ -95,6 +95,7 @@ export function createTraderNode(opts: TraderNodeOptions) {
     postProcessed = normalizeTraderConfigLogicHeading(postProcessed, ctx.language);
     postProcessed = restoreTraderExecutionBiasSection(postProcessed, ctx.language);
     postProcessed = stripConstituentTradeInstructions(postProcessed, ctx.language);
+    postProcessed = appendTraderOutputSchema(postProcessed, _structured, ctx.language);
 
     return {
       messages: [new AIMessage(postProcessed)],

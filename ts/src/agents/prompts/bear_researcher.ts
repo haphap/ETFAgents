@@ -12,6 +12,8 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
   getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
   type PromptContext,
@@ -22,6 +24,7 @@ export const BEAR_REPORT_SPEC: AnalystReportSpec = {
   // Debate output is free-form conversational argument; minimal structure checks.
   requiredTopSections: [],
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("bear_researcher"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 辩论论点是否涵盖宏观暴露脆弱点、因子传导压力、产品层弱点和空方确认？\n" +
@@ -75,6 +78,7 @@ export function buildBearResearcherSystemMessage(ctx: PromptContext): string {
     "For ordinary lists, use Arabic numerals such as 1. 2. 3.; " +
     "if you use Chinese section headings, keep forms like 一、二、三." +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("bear_researcher", ctx) +
     getLanguageInstruction(ctx)
   );
 }

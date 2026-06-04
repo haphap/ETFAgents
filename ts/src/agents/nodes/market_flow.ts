@@ -35,6 +35,7 @@ import { buildMarketFlowSystemMessage, ETF_MARKET_INDICATORS } from "../prompts/
 import {
   buildInstrumentContext,
   dateDaysBefore,
+  getAgentOutputSchemaFieldNames,
   getCollaborationStopInstruction,
   type PromptContext,
 } from "../prompts/shared.js";
@@ -57,6 +58,7 @@ const MARKET_FLOW_REPORT_SPEC: AnalystReportSpec = {
   requiredTailTokens: ["综合结论和指标总览"],
   requireTailTable: true,
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("market_flow"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否包含四个一级章节：一、市场结构与量价诊断；二、交易确认与执行计划；三、关键价位与条件情景推演；四、综合结论和指标总览？\n" +

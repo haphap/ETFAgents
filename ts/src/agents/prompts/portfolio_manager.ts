@@ -13,13 +13,19 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import type { PromptContext } from "./shared.js";
-import { getDecisionSignalSummaryInstruction, getLanguageInstruction } from "./shared.js";
+import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
+  getDecisionSignalSummaryInstruction,
+  getLanguageInstruction,
+} from "./shared.js";
 
 export const PORTFOLIO_MANAGER_REPORT_SPEC: AnalystReportSpec = {
   analystName: "portfolio_manager",
   requiredTopSections: [],
   requiredTailTokens: [],
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("portfolio_manager"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否评估了三个风险视角（激进/保守/中性）在整个辩论中的优劣？\n" +
@@ -50,6 +56,7 @@ export function buildPortfolioManagerSystemMessage(ctx: PromptContext): string {
       "- 包含目标仓位区间、最大初始仓位、加/减/轮动条件、止损或退出触发、再平衡规则和下一步监控。\n\n" +
       "最终结论必须可执行：有仓位、有时间窗口、有触发条件、有反证条件。" +
       getDecisionSignalSummaryInstruction(ctx) +
+      getAgentOutputSchemaInstruction("portfolio_manager", ctx) +
       getLanguageInstruction(ctx)
     );
   }
@@ -99,6 +106,7 @@ export function buildPortfolioManagerSystemMessage(ctx: PromptContext): string {
     "Be decisive and ground every conclusion in specific evidence from " +
     "the analysts." +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("portfolio_manager", ctx) +
     getLanguageInstruction(ctx)
   );
 }

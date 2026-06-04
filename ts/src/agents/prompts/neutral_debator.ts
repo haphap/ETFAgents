@@ -12,6 +12,8 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
   getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
   type PromptContext,
@@ -21,6 +23,7 @@ export const NEUTRAL_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
   analystName: "neutral_debator",
   requiredTopSections: [],
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("neutral_debator"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否同时挑战激进方和保守方的观点？\n" +
@@ -40,6 +43,7 @@ export function buildNeutralDebatorSystemMessage(ctx: PromptContext): string {
       "正文写成3-5个短段落，段落之间留空行，不使用项目符号。" +
       "最后必须说明一个条件化方案：当前基础仓位、允许加仓的确认信号、需要减仓的风险信号、下一次复核时点。" +
       getDecisionSignalSummaryInstruction(ctx) +
+      getAgentOutputSchemaInstruction("neutral_debator", ctx) +
       getLanguageInstruction(ctx)
     );
   }
@@ -65,6 +69,7 @@ export function buildNeutralDebatorSystemMessage(ctx: PromptContext): string {
     "Write the visible body in 3-5 short paragraphs with blank lines " +
     "between paragraphs; do not use bullet points or numbered lists before the required decision signal summary." +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("neutral_debator", ctx) +
     getLanguageInstruction(ctx)
   );
 }

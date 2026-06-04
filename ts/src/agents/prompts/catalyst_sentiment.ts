@@ -2,6 +2,8 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
   getConciseHeadingInstruction,
   getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
@@ -15,6 +17,7 @@ export const CATALYST_SENTIMENT_REPORT_SPEC: AnalystReportSpec = {
   analystName: "catalyst_sentiment",
   requiredTopSections: ["一", "二", "三", "四"],
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("catalyst_sentiment"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否将分析扩展到ETF重行业和权重股，而非仅停留在ETF代码层面？\n" +
@@ -78,6 +81,7 @@ export function buildCatalystSentimentSystemMessage(
     "第四章附Markdown跟踪表，列为：事件、来源强度、影响方向、ETF传导、时间窗口、确认/反证条件。\n\n" +
     "写作纪律：不得停留在ETF代码标题层面；不得用英文小标题；不得输出'数据缺失'式段落；不得把短期噪声包装成配置理由。" +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("catalyst_sentiment", ctx) +
     getLanguageInstruction(ctx)
   );
 }

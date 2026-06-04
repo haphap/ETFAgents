@@ -2,6 +2,8 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
   getConciseHeadingInstruction,
   getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
@@ -16,6 +18,7 @@ export const HOLDINGS_INDUSTRY_REPORT_SPEC: AnalystReportSpec = {
   requiredTopSections: ["一", "二", "三", "四"],
   requireTopSectionLeads: true,
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("holdings_industry"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否逐份深度分析每份行业报告（而非仅凭标题判断）？\n" +
@@ -61,6 +64,7 @@ export function buildHoldingsIndustrySystemMessage(ctx: PromptContext): string {
     "    表格列为：券商/来源、行业关键词、立场、核心证据、ETF权重影响、触发或风险。\n\n" +
     "写作纪律：不要讨论检索噪声、券商标签噪声或搜索错配；缺失数据直接省略；不得停留在行业评论，必须落到ETF整体仓位。" +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("holdings_industry", ctx) +
     getLanguageInstruction(ctx)
   );
 }

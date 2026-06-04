@@ -249,6 +249,53 @@ describe("visible agent prompts", () => {
     }
   });
 
+  it("requires MOSAIC-style output schemas from every visible agent prompt", () => {
+    const ctx = { language: "Chinese" };
+    const catalystData = {
+      etfInfo: "",
+      etfHoldings: "",
+      tickerNews: "",
+      holdingsNews: "",
+      globalNews: "",
+    };
+    const prompts = [
+      ["market_flow", buildMarketFlowSystemMessage(ctx)],
+      ["macro_regime", buildMacroRegimeSystemMessage(ctx)],
+      ["meso_commodity", buildMesoCommoditySystemMessage(ctx)],
+      ["catalyst_sentiment", buildCatalystSentimentSystemMessage(ctx, catalystData)],
+      ["holdings_industry", buildHoldingsIndustrySystemMessage(ctx)],
+      ["top_holdings", buildTopHoldingsSystemMessage(ctx)],
+      ["bull_researcher", buildBullResearcherSystemMessage(ctx)],
+      ["bear_researcher", buildBearResearcherSystemMessage(ctx)],
+      ["research_manager", buildResearchManagerSystemMessage(ctx)],
+      ["trader", buildTraderSystemMessage(ctx)],
+      ["aggressive_debator", buildAggressiveDebatorSystemMessage(ctx)],
+      ["conservative_debator", buildConservativeDebatorSystemMessage(ctx)],
+      ["neutral_debator", buildNeutralDebatorSystemMessage(ctx)],
+      ["portfolio_manager", buildPortfolioManagerSystemMessage(ctx)],
+    ] as const;
+
+    for (const [name, prompt] of prompts) {
+      expect({
+        name,
+        hasOutputSchema: prompt.includes("输出Schema"),
+        hasAgentField: prompt.includes("agent:"),
+        hasConfidenceField: prompt.includes("confidence: <0-1>"),
+      }).toEqual({
+        name,
+        hasOutputSchema: true,
+        hasAgentField: true,
+        hasConfidenceField: true,
+      });
+    }
+    expect(buildMesoCommoditySystemMessage(ctx)).toContain(
+      "oil_regime: BACKWARDATION | CONTANGO | NEUTRAL",
+    );
+    expect(buildMesoCommoditySystemMessage(ctx)).toContain(
+      "china_demand_signal: ACCELERATING | STEADY | DECELERATING",
+    );
+  });
+
   it("uses Chinese source prompts for the risk team in Chinese mode", () => {
     const ctx = { language: "Chinese" };
     expect(buildAggressiveDebatorSystemMessage(ctx)).toContain("你是激进风险分析师");

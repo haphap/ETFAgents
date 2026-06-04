@@ -2,6 +2,8 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
   getConciseHeadingInstruction,
   getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
@@ -15,6 +17,7 @@ export const MACRO_REGIME_REPORT_SPEC: AnalystReportSpec = {
   analystName: "macro_regime",
   requiredTopSections: ["一", "二", "三", "四"],
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("macro_regime"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否建立了逻辑链：ETF暴露 → 宏观与政策制度 → 异常信号 → 情景敏感性 → 配置含义？\n" +
@@ -56,6 +59,7 @@ export function buildMacroRegimeSystemMessage(ctx: PromptContext): string {
     "第四章先给ETF配置结论，再附Markdown跟踪表；表格列为：宏观变量、当前信号、ETF传导、仓位含义、失效/确认条件。\n\n" +
     "写作纪律：一级和二级标题只写中文；不得以'本报告将'等任务说明开头；缺失数据直接省略；不要写与ETF暴露无关的宏观常识。" +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("macro_regime", ctx) +
     getLanguageInstruction(ctx)
   );
 }

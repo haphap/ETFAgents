@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderTraderProposal } from "../src/agents/helpers/render.js";
+import { appendTraderOutputSchema, renderTraderProposal } from "../src/agents/helpers/render.js";
 import { isChinese, localizeRating } from "../src/agents/schemas/rating.js";
 import { TraderProposalSchema } from "../src/agents/schemas/trader_proposal.js";
 
@@ -99,5 +99,28 @@ describe("renderTraderProposal", () => {
     const rendered = renderTraderProposal(proposal, { language: "English" });
     expect(rendered).toContain("## ETF Allocation Thesis");
     expect(rendered).toContain("EXECUTION BIAS: **BUY**");
+  });
+
+  it("appends a concrete trader output schema after the execution bias", () => {
+    const withSchema = appendTraderOutputSchema(
+      renderTraderProposal(proposal, { language: "Chinese" }),
+      proposal,
+      "Chinese",
+    );
+    expect(withSchema).toContain("**输出Schema**");
+    expect(withSchema).toContain("agent: trader");
+    expect(withSchema).toContain("allocation_action: BUY");
+    expect(withSchema).toContain('target_weight_band: "UNKNOWN"');
+    expect(withSchema).toContain("confidence:");
+    expect(withSchema.indexOf("四、执行倾向")).toBeLessThan(withSchema.indexOf("**输出Schema**"));
+    expect(appendTraderOutputSchema(withSchema, proposal, "Chinese")).toBe(withSchema);
+  });
+
+  it("replaces an incomplete trader output schema", () => {
+    const partial = `${renderTraderProposal(proposal, { language: "Chinese" })}\n\n**输出Schema**\nagent: trader`;
+    const withSchema = appendTraderOutputSchema(partial, proposal, "Chinese");
+    expect(withSchema.match(/\*\*输出Schema\*\*/g)?.length).toBe(1);
+    expect(withSchema).toContain("allocation_action: BUY");
+    expect(withSchema).toContain("key_drivers:");
   });
 });

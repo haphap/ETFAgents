@@ -2,6 +2,8 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
   getConciseHeadingInstruction,
   getDecisionSignalSummaryInstruction,
   getLanguageInstruction,
@@ -17,6 +19,7 @@ export const MESO_COMMODITY_REPORT_SPEC: AnalystReportSpec = {
   requireTopSectionLeads: true,
   leadRequiredTopSections: ["一", "二", "三"],
   requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("meso_commodity"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否包含四个一级章节：一、核心矛盾与主线判断；二、矛盾推演；三、情景推演与策略启示；四、近期合约表现总览？\n" +
@@ -62,6 +65,7 @@ export function buildMesoCommoditySystemMessage(ctx: PromptContext): string {
     "第四章只放事实表，不写额外结论段；表格只列被正文使用过、且与ETF相关的关键合约。\n\n" +
     "写作纪律：不得用'判断：''证据：''合约信号：'标签；不得为了覆盖而罗列无关合约；连续数字后必须解释ETF配置含义；缺失字段直接省略，不得编造。" +
     getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("meso_commodity", ctx) +
     getLanguageInstruction(ctx)
   );
 }
