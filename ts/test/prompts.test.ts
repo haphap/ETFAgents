@@ -134,6 +134,36 @@ describe("market_flow prompt", () => {
   });
 });
 
+describe("front-line analyst prompt rewrites", () => {
+  it("uses compact decision frameworks instead of long sample reports", () => {
+    const ctx = { language: "Chinese" };
+    const catalystData = {
+      etfInfo: "",
+      etfHoldings: "",
+      tickerNews: "",
+      holdingsNews: "",
+      globalNews: "",
+    };
+    const prompts = [
+      buildMarketFlowSystemMessage(ctx),
+      buildMacroRegimeSystemMessage(ctx),
+      buildMesoCommoditySystemMessage(ctx),
+      buildCatalystSentimentSystemMessage(ctx, catalystData),
+      buildHoldingsIndustrySystemMessage(ctx),
+      buildTopHoldingsSystemMessage(ctx),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain("决策框架");
+      expect(prompt).toContain("ETF整体仓位");
+      expect(prompt).not.toContain("完整报告示例");
+      expect(prompt).not.toContain("示例合约");
+      expect(prompt).not.toContain("正面示例");
+      expect(prompt).not.toContain("反面示例");
+    }
+  });
+});
+
 describe("trader prompt", () => {
   it("includes the three structured-only sentences exactly once each", () => {
     const sys = buildTraderSystemMessage({ language: "Chinese" });
