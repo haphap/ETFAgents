@@ -14,6 +14,7 @@ import type { AIMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import { END, START, StateGraph } from "@langchain/langgraph";
 import { ToolNode } from "@langchain/langgraph/prebuilt";
+import type { PositionSizingOptions } from "../agents/helpers/position_sizing.js";
 import { createMarketFlowNode } from "../agents/nodes/market_flow.js";
 import { createTraderNode } from "../agents/nodes/trader.js";
 import type { PromptContext } from "../agents/prompts/shared.js";
@@ -23,6 +24,7 @@ export interface BuildMiniSpineOptions {
   llm: BaseChatModel;
   marketFlowTools: ReadonlyArray<StructuredToolInterface>;
   promptContext: PromptContext;
+  positionSizing?: PositionSizingOptions;
 }
 
 export function buildMiniSpineGraph(opts: BuildMiniSpineOptions) {
@@ -34,6 +36,7 @@ export function buildMiniSpineGraph(opts: BuildMiniSpineOptions) {
   const traderNode = createTraderNode({
     llm: opts.llm,
     promptContext: opts.promptContext,
+    ...(opts.positionSizing ? { positionSizing: opts.positionSizing } : {}),
   });
   const marketFlowTools = new ToolNode(opts.marketFlowTools as StructuredToolInterface[]);
 

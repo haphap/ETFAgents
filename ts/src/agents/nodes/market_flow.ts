@@ -21,6 +21,7 @@ import {
   normalizeMarketFlowTailSections,
 } from "../helpers/market_flow_normalize.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
+import { signalUpdate, stripAgentMachineBlocks } from "../helpers/output_schema.js";
 import { postJudgeClean, preJudgeClean } from "../helpers/report_leads.js";
 import { normalizeChineseRoleTerms } from "../helpers/role_terms.js";
 import {
@@ -35,6 +36,7 @@ import { buildMarketFlowSystemMessage, ETF_MARKET_INDICATORS } from "../prompts/
 import {
   buildInstrumentContext,
   dateDaysBefore,
+  getAgentOutputSchemaFieldNames,
   getCollaborationStopInstruction,
   type PromptContext,
 } from "../prompts/shared.js";
@@ -56,6 +58,8 @@ const MARKET_FLOW_REPORT_SPEC: AnalystReportSpec = {
   requiredIndicatorTokens: ["MACD", "RSI"],
   requiredTailTokens: ["综合结论和指标总览"],
   requireTailTable: true,
+  requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("market_flow"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否包含四个一级章节：一、市场结构与量价诊断；二、交易确认与执行计划；三、关键价位与条件情景推演；四、综合结论和指标总览？\n" +
@@ -147,10 +151,13 @@ export function createMarketFlowNode(opts: AnalystNodeOptions) {
         );
       }
     }
+    const signalSourceReport = cleaned;
+    const visibleReport = stripAgentMachineBlocks(cleaned);
 
     return {
-      messages: [cleaned ? new AIMessage(cleaned) : result],
-      market_flow_report: cleaned,
+      messages: [visibleReport ? new AIMessage(visibleReport) : result],
+      market_flow_report: visibleReport,
+      agent_signals: signalUpdate(MARKET_FLOW_REPORT_SPEC.analystName, signalSourceReport),
     };
   };
 }

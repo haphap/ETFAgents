@@ -1,12 +1,14 @@
 /**
  * Trader system message + structured-output-only sentences.
- * Verbatim port of the prompt block in ``etfagents.agents.trader.trader``.
+ * Port of the prompt block in ``etfagents.agents.trader.trader`` with
+ * TS-specific visible schema guidance.
  *
  * Path A: omits ``inject_memory_prompt_section``. Sub-step 2 will add it.
  */
 
 import { isChinese } from "../schemas/rating.js";
 import {
+  getAgentOutputSchemaInstruction,
   getLanguageInstruction,
   getLocalizedExecutionBiasInstruction,
   type PromptContext,
@@ -14,7 +16,7 @@ import {
 
 export const STRUCTURED_FIELD_POPULATION_INSTRUCTION =
   "In addition to the prose sections, populate the structured fields " +
-  "target_weight_pct, target_weight_band, execution_timing, add_triggers, " +
+  "key_drivers, confidence, target_weight_pct, target_weight_band, execution_timing, add_triggers, " +
   "reduce_triggers, exit_triggers, rebalance_triggers, and risk_controls " +
   "whenever the evidence supports them; use null or empty lists only when " +
   "the reports truly do not justify reliable values.";
@@ -27,7 +29,7 @@ export const STRUCTURED_TRIGGER_METRICS_INSTRUCTION =
 export const STRUCTURED_FIELD_VISIBILITY_INSTRUCTION =
   "Never expose machine-readable field names such as target_weight_pct, " +
   "target_weight_band, execution_timing, add_triggers, reduce_triggers, " +
-  "exit_triggers, rebalance_triggers, or risk_controls in the visible prose.";
+  "exit_triggers, rebalance_triggers, or risk_controls in the visible prose outside the required Output Schema block.";
 
 export const TRADER_FREETEXT_FALLBACK_INSTRUCTION =
   "Free-text fallback mode: write the final visible report directly, not hidden schema fields. " +
@@ -35,7 +37,8 @@ export const TRADER_FREETEXT_FALLBACK_INSTRUCTION =
   "`一、配置逻辑`, `二、配置执行计划`, `三、再平衡与风险控制`, `四、执行倾向`. " +
   "In section `四、执行倾向`, put only the final rating on the next line as `**买入/增持/持有/减持/卖出**` when writing in Chinese, " +
   "or `**BUY/OVERWEIGHT/HOLD/UNDERWEIGHT/SELL**` when writing in English. " +
-  "Do not output parameter mappings, field-value tables, machine-readable field names, or trigger arrays.";
+  "After the four sections, append the required plain-text Output Schema block if the system prompt asks for it. " +
+  "Do not output parameter mappings, field-value tables outside that Output Schema, hidden structured field dumps, or trigger arrays.";
 
 function traderDetailInstruction(ctx: PromptContext): string {
   if (isChinese(ctx.language)) {
@@ -83,13 +86,16 @@ export function buildTraderSystemMessage(ctx: PromptContext): string {
     `${STRUCTURED_TRIGGER_METRICS_INSTRUCTION} ` +
     `${STRUCTURED_FIELD_VISIBILITY_INSTRUCTION} ` +
     `${traderDetailInstruction(ctx)} ` +
-    `${getLocalizedExecutionBiasInstruction(ctx)}${getLanguageInstruction(ctx)}`
+    `${getLocalizedExecutionBiasInstruction(ctx)}` +
+    getAgentOutputSchemaInstruction("trader", ctx, "afterExecutionBias") +
+    getLanguageInstruction(ctx)
   );
 }
 
 export function buildTraderContextMessage(opts: {
   asset: string;
   instrumentContext: string;
+  structuredSignals?: string;
   researchPlan: string;
   marketFlowReport: string;
   catalystSentimentReport: string;
@@ -103,7 +109,11 @@ export function buildTraderContextMessage(opts: {
     `${opts.instrumentContext} ` +
     "This view incorporates insights from current technical market trends, macroeconomic indicators, commodity signals, " +
     "market flows, event-driven sentiment, industry structure, and constituent-level research. " +
-    "Use this view as a foundation for evaluating your next ETF allocation decision.\n\n" +
+    "Use this view as a foundation for evaluating your next ETF allocation decision. " +
+    "When an upstream block contains `决策信号摘要` or `Decision Signal Summary`, treat that block as the highest-priority summary and use the surrounding report excerpt only as supporting evidence.\n\n" +
+    (opts.structuredSignals?.trim()
+      ? `${opts.structuredSignals.trim()}\n\nUse these structured signals as the machine-readable state snapshot; use the report excerpts below to verify evidence and thresholds.\n\n`
+      : "") +
     `Proposed Allocation View: ${opts.researchPlan}\n\n` +
     `Macro regime analysis: ${opts.macroRegimeReport}\n` +
     `Meso commodity analysis: ${opts.mesoCommodityReport}\n` +

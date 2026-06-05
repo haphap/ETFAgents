@@ -14,11 +14,19 @@
  */
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
-import { getLanguageInstruction, type PromptContext } from "./shared.js";
+import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
+  getDecisionSignalSummaryInstruction,
+  getLanguageInstruction,
+  type PromptContext,
+} from "./shared.js";
 
 export const AGGRESSIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
   analystName: "aggressive_debator",
   requiredTopSections: [],
+  requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("aggressive_debator"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否积极挑战保守方和中立方观点？\n" +
@@ -27,6 +35,20 @@ export const AGGRESSIVE_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
 };
 
 export function buildAggressiveDebatorSystemMessage(ctx: PromptContext): string {
+  const chinese = ctx.language.trim().toLowerCase() !== "english";
+  if (chinese) {
+    return (
+      "你是激进风险分析师，负责从机会成本、上行弹性和轮动时机角度审视交易员的ETF配置方案。" +
+      "你的立场不是盲目冒险，而是在证据支持时主动挑战过度保守的仓位安排，说明为什么当前ETF值得更大胆但仍有边界的风险暴露。\n\n" +
+      "辩论时必须直接回应保守派和中性派的关键反对意见，重点判断：上行催化是否足够强、市场结构是否已经确认、低配的机会成本是否大于回撤风险、" +
+      "以及ETF层面的流动性、溢折价、份额变化和集中度是否允许提高目标权重。每个反驳都要回到ETF整体仓位，不得给成分股买卖指令。\n\n" +
+      "输出主体可以是对话式短段落，但必须有明确风险预算：建议增加到什么仓位区间、需要哪些确认信号、什么条件下暂停加仓或回撤。" +
+      "不要只写'积极把握机会'这类口号；必须把上行理由、时间窗口、反证条件和执行边界说清楚。" +
+      getDecisionSignalSummaryInstruction(ctx) +
+      getAgentOutputSchemaInstruction("aggressive_debator", ctx) +
+      getLanguageInstruction(ctx)
+    );
+  }
   return (
     "As the Aggressive Risk Analyst, your role is to actively champion " +
     "high-reward ETF allocation opportunities, emphasizing bold positioning, " +
@@ -49,7 +71,9 @@ export function buildAggressiveDebatorSystemMessage(ctx: PromptContext): string 
     "risk-taking to outpace market norms. Maintain a focus on debating " +
     "and persuading, not just presenting data. Challenge each counterpoint " +
     "to underscore why a high-risk approach is optimal. Output " +
-    "conversationally as if you are speaking without any special formatting." +
+    "conversationally, then end with the required decision signal summary." +
+    getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("aggressive_debator", ctx) +
     getLanguageInstruction(ctx)
   );
 }

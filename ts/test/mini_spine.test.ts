@@ -57,7 +57,18 @@ class FakeChatModel {
           "偏多配置。\n\n" +
           "| 指标 | 数值 |\n" +
           "| --- | --- |\n" +
-          "| MACD | 0.05 |\n",
+          "| MACD | 0.05 |\n\n" +
+          "**决策信号摘要**\n" +
+          "方向: 偏多\n置信度: 中\n时间窗口: 1周\nETF传导路径: 量价 -> ETF\n核心证据: MACD改善\n最大反证条件: 放量跌破支撑\n配置含义: 增持ETF\n下一步观察: 成交量\n\n" +
+          "**输出Schema**\n" +
+          "agent: market_flow\n" +
+          "price_regime: TREND_UP\n" +
+          "flow_regime: ACCUMULATION\n" +
+          "volatility_regime: NORMAL\n" +
+          "execution_bias: ADD\n" +
+          'key_levels: ["3.58"]\n' +
+          'key_drivers: ["MACD改善", "量能确认", "支撑有效"]\n' +
+          "confidence: 0.75",
       );
     }
     return new AIMessage("(unexpected) no tool result available");
@@ -70,6 +81,7 @@ class FakeChatModel {
       execution_plan: "目标仓位 30%，回踩 50 日均线加仓",
       risk_management: "跌破 2.05 元减仓",
       rating: "Buy",
+      key_drivers: ["趋势改善", "量能确认", "风险可控"],
       add_triggers: [],
       reduce_triggers: [],
       exit_triggers: [],
@@ -120,8 +132,13 @@ describe("buildMiniSpineGraph", () => {
     expect(llm.structuredCalls).toBe(1);
 
     expect(result.market_flow_report).toContain("一、市场结构与量价诊断");
+    expect(result.market_flow_report).not.toContain("输出Schema");
+    expect(result.market_flow_report).not.toContain("决策信号摘要");
+    expect(result.agent_signals.market_flow?.fields.price_regime).toBe("TREND_UP");
     expect(result.trader_allocation_plan).toContain("一、配置逻辑");
     expect(result.trader_allocation_plan).toContain("**买入**");
+    expect(result.trader_allocation_plan).not.toContain("输出Schema");
+    expect(result.agent_signals.trader?.fields.allocation_action).toBe("BUY");
     expect(result.sender).toBe("Trader");
   });
 });

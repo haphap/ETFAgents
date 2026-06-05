@@ -15,7 +15,13 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { AIMessage, HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { buildTraderBacktestSignal } from "../helpers/backtest_signal.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
-import { renderTraderProposal } from "../helpers/render.js";
+import {
+  formatAgentSignalsForPrompt,
+  signalUpdate,
+  stripAgentMachineBlocks,
+} from "../helpers/output_schema.js";
+import type { PositionSizingOptions } from "../helpers/position_sizing.js";
+import { appendTraderOutputSchema, renderTraderProposal } from "../helpers/render.js";
 import { normalizeChineseManagerTerms } from "../helpers/role_terms.js";
 import { invokeStructuredOrFreetext } from "../helpers/structured_output.js";
 import {
@@ -27,7 +33,7 @@ import {
 import {
   buildInstrumentContext,
   type PromptContext,
-  truncateForPrompt,
+  reportForDecisionContext,
 } from "../prompts/shared.js";
 import {
   buildTraderContextMessage,
@@ -41,6 +47,7 @@ import type { SpineStateType, SpineStateUpdate } from "../state.js";
 export interface TraderNodeOptions {
   llm: BaseChatModel;
   promptContext: PromptContext;
+  positionSizing?: PositionSizingOptions;
 }
 
 export function createTraderNode(opts: TraderNodeOptions) {
@@ -52,13 +59,31 @@ export function createTraderNode(opts: TraderNodeOptions) {
     const contextMessage = buildTraderContextMessage({
       asset: ticker,
       instrumentContext,
-      researchPlan: truncateForPrompt(state.research_allocation_plan, ctx),
-      marketFlowReport: truncateForPrompt(state.market_flow_report, ctx),
-      catalystSentimentReport: truncateForPrompt(state.catalyst_sentiment_report, ctx),
-      macroRegimeReport: truncateForPrompt(state.macro_regime_report, ctx),
-      mesoCommodityReport: truncateForPrompt(state.meso_commodity_report, ctx),
-      holdingsIndustryReport: state.holdings_industry_report,
-      topHoldingsReport: state.top_holdings_report,
+      structuredSignals: formatAgentSignalsForPrompt(state.agent_signals, {
+        language: ctx.language,
+        include: [
+          "market_flow",
+          "catalyst_sentiment",
+          "macro_regime",
+          "meso_commodity",
+          "holdings_industry",
+          "top_holdings",
+          "bull_researcher",
+          "bear_researcher",
+          "research_manager",
+        ],
+      }),
+      researchPlan: reportForDecisionContext(state.research_allocation_plan, ctx, 4_000),
+      marketFlowReport: reportForDecisionContext(state.market_flow_report, ctx, 5_000),
+      catalystSentimentReport: reportForDecisionContext(
+        state.catalyst_sentiment_report,
+        ctx,
+        5_000,
+      ),
+      macroRegimeReport: reportForDecisionContext(state.macro_regime_report, ctx, 5_000),
+      mesoCommodityReport: reportForDecisionContext(state.meso_commodity_report, ctx, 5_000),
+      holdingsIndustryReport: reportForDecisionContext(state.holdings_industry_report, ctx, 5_000),
+      topHoldingsReport: reportForDecisionContext(state.top_holdings_report, ctx, 5_000),
     });
 
     const systemMessage = buildTraderSystemMessage(ctx);
@@ -91,15 +116,25 @@ export function createTraderNode(opts: TraderNodeOptions) {
     postProcessed = normalizeTraderConfigLogicHeading(postProcessed, ctx.language);
     postProcessed = restoreTraderExecutionBiasSection(postProcessed, ctx.language);
     postProcessed = stripConstituentTradeInstructions(postProcessed, ctx.language);
+    postProcessed = appendTraderOutputSchema(postProcessed, _structured, ctx.language);
+    const signalSourceReport = postProcessed;
+    const visibleReport = stripAgentMachineBlocks(postProcessed);
 
     return {
-      messages: [new AIMessage(postProcessed)],
-      trader_allocation_plan: postProcessed,
+      messages: [new AIMessage(visibleReport)],
+      trader_allocation_plan: visibleReport,
+      agent_signals: signalUpdate("trader", signalSourceReport),
       trader_backtest_signal: buildTraderBacktestSignal(
         ticker,
         state.trade_date ?? "",
-        postProcessed,
+        signalSourceReport,
         _structured,
+        {
+          agentSignals: state.agent_signals,
+          ...(opts.positionSizing?.maxDrawdownBudget !== undefined
+            ? { maxDrawdownBudget: opts.positionSizing.maxDrawdownBudget }
+            : {}),
+        },
       ) as unknown as Record<string, unknown>,
       sender: "Trader",
     };

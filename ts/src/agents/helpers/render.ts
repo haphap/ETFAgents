@@ -51,10 +51,179 @@ const TRADER_HEADING_ALIASES: ReadonlyArray<string> = [
   "Rebalance and Risk Control",
 ];
 
+const TRADER_SCHEMA_HEADING_RE =
+  /(?:^|\n)\s*(?:\*\*)?(?:输出Schema|Output Schema)(?:\*\*)?\s*(?:\n|$)/;
+
+const RATING_TO_ALLOCATION_ACTION: Record<TraderProposal["rating"], string> = {
+  Buy: "BUY",
+  Overweight: "OVERWEIGHT",
+  Hold: "HOLD",
+  Underweight: "UNDERWEIGHT",
+  Sell: "SELL",
+};
+
+const EXECUTION_TIMING_SCHEMA_VALUE = {
+  same_close: "SAME_CLOSE",
+  next_open: "NEXT_OPEN",
+  next_close: "NEXT_CLOSE",
+} as const;
+
+const TRADER_SCHEMA_FIELDS = [
+  "agent",
+  "allocation_action",
+  "target_weight_band",
+  "execution_timing",
+  "execution_trigger_state",
+  "risk_control_state",
+  "key_drivers",
+  "confidence",
+] as const;
+
 export interface RenderOptions {
   language: string;
   /** Upstream market-flow report used by ``inlineContextualMarketLevels`` and ``defaultExecutionPlan``. */
   contextText?: string;
+}
+
+function compactSchemaDriver(text: string | undefined): string {
+  const cleaned = (text ?? "")
+    .replace(/\*\*(?:输出Schema|Output Schema)\*\*[\s\S]*$/m, "")
+    .replace(/^(?:一、|二、|三、|四、|##\s*)[^\n]*\n?/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "";
+  const sentence = cleaned.split(/[。！？!?]\s*|[.!?]\s+/)[0]?.trim() || cleaned;
+  return sentence.length > 140 ? `${sentence.slice(0, 137)}...` : sentence;
+}
+
+function schemaDrivers(
+  plan: TraderProposal | null | undefined,
+  text: string,
+  language: string,
+): string[] {
+  const explicitDrivers = (plan?.key_drivers ?? []).map((driver) => driver.trim()).filter(Boolean);
+  const candidates = plan
+    ? [...explicitDrivers, plan.thesis, plan.execution_plan, plan.risk_management]
+    : text.split(/\n{2,}/).slice(0, 5);
+  const drivers: string[] = [];
+  const seen = new Set<string>();
+  for (const candidate of candidates) {
+    const driver = compactSchemaDriver(candidate);
+    if (!driver) continue;
+    const key = compactText(driver);
+    if (seen.has(key)) continue;
+    drivers.push(driver);
+    seen.add(key);
+    if (drivers.length >= 5) break;
+  }
+  const fallbackDrivers = isChinese(language)
+    ? [
+        "上游研究结论需要和交易执行条件同步验证",
+        "目标仓位必须以ETF整体风险预算为约束",
+        "风险控制触发条件决定是否维持或下调暴露",
+      ]
+    : [
+        "Upstream research must be checked against execution conditions",
+        "Target weight must stay within the ETF-level risk budget",
+        "Risk-control triggers decide whether exposure is maintained or reduced",
+      ];
+  for (const fallback of fallbackDrivers) {
+    if (drivers.length >= 3) break;
+    const key = compactText(fallback);
+    if (seen.has(key)) continue;
+    drivers.push(fallback);
+    seen.add(key);
+  }
+  return drivers.slice(0, 5);
+}
+
+function targetWeightBand(plan: TraderProposal | null | undefined): string {
+  if (plan?.target_weight_band) {
+    const [low, high] = plan.target_weight_band;
+    return `${low}-${high}%`;
+  }
+  if (typeof plan?.target_weight_pct === "number") return `${plan.target_weight_pct}%`;
+  return "UNKNOWN";
+}
+
+function schemaConfidence(plan: TraderProposal | null | undefined): string {
+  if (!plan) return "0.50";
+  if (typeof plan.confidence === "number" && Number.isFinite(plan.confidence)) {
+    return Math.min(Math.max(plan.confidence, 0), 1).toFixed(2);
+  }
+  let score = 0.6;
+  if (typeof plan.target_weight_pct === "number" || plan.target_weight_band) score += 0.08;
+  if (plan.execution_timing) score += 0.06;
+  if (plan.add_triggers.length + plan.reduce_triggers.length + plan.exit_triggers.length > 0) {
+    score += 0.06;
+  }
+  if (plan.risk_controls.length > 0) score += 0.06;
+  return Math.min(score, 0.84).toFixed(2);
+}
+
+function schemaRiskControlState(plan: TraderProposal | null | undefined): string {
+  if (!plan) return "NORMAL";
+  if (plan.rating === "Sell" || plan.rating === "Underweight") return "ELEVATED";
+  if (plan.risk_controls.some((rule) => rule.action === "exit" || rule.action === "cap")) {
+    return "ELEVATED";
+  }
+  return "NORMAL";
+}
+
+function schemaExecutionTriggerState(plan: TraderProposal | null | undefined): string {
+  if (!plan) return "WAIT";
+  if (plan.rating === "Buy" || plan.rating === "Overweight") {
+    if (plan.add_triggers.length > 0) return "READY";
+    return plan.risk_controls.some((rule) => rule.action === "cap" || rule.action === "exit")
+      ? "BLOCKED"
+      : "WAIT";
+  }
+  if (plan.rating === "Sell") return plan.exit_triggers.length > 0 ? "READY" : "WAIT";
+  if (plan.rating === "Underweight") {
+    return plan.reduce_triggers.length + plan.exit_triggers.length > 0 ? "READY" : "WAIT";
+  }
+  return plan.rebalance_triggers.length > 0 ? "READY" : "WAIT";
+}
+
+function hasSchemaField(text: string, field: string): boolean {
+  return new RegExp(`(?:^|\\n)\\s*${field}\\s*[:：]`).test(text);
+}
+
+/**
+ * Append the trader's MOSAIC-style visible schema after post-processing.
+ * The structured render path otherwise has no prose-level schema block, while
+ * the free-text fallback may lose its schema when the execution-bias section is restored.
+ */
+export function appendTraderOutputSchema(
+  text: string,
+  plan: TraderProposal | null | undefined,
+  language: string,
+): string {
+  const existingSchema = TRADER_SCHEMA_HEADING_RE.exec(text);
+  if (existingSchema) {
+    const schemaText = text.slice(existingSchema.index);
+    if (TRADER_SCHEMA_FIELDS.every((field) => hasSchemaField(schemaText, field))) {
+      return collapseBlankLines(text);
+    }
+    text = text.slice(0, existingSchema.index).trimEnd();
+  }
+
+  const heading = isChinese(language) ? "**输出Schema**" : "**Output Schema**";
+  const allocationAction = plan ? RATING_TO_ALLOCATION_ACTION[plan.rating] : "HOLD";
+  const timing = plan?.execution_timing
+    ? EXECUTION_TIMING_SCHEMA_VALUE[plan.execution_timing]
+    : "WAIT_FOR_TRIGGER";
+  const block =
+    `${heading}\n` +
+    "agent: trader\n" +
+    `allocation_action: ${allocationAction}\n` +
+    `target_weight_band: "${targetWeightBand(plan)}"\n` +
+    `execution_timing: ${timing}\n` +
+    `execution_trigger_state: ${schemaExecutionTriggerState(plan)}\n` +
+    `risk_control_state: ${schemaRiskControlState(plan)}\n` +
+    `key_drivers: ${JSON.stringify(schemaDrivers(plan, text, language))}\n` +
+    `confidence: ${schemaConfidence(plan)}`;
+  return collapseBlankLines(`${text}\n\n${block}`);
 }
 
 export function renderTraderProposal(plan: TraderProposal, opts: RenderOptions): string {

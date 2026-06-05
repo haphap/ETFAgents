@@ -5,6 +5,7 @@ import {
   backendDisplay,
   buildExecutionSummary,
   clampRound,
+  executionDelayLabel,
   extractPriceRows,
   initState,
   libraryTickers,
@@ -12,6 +13,7 @@ import {
   normalizeBacktestResult,
   normalizeReportSummary,
   parseTickers,
+  priceCandleGlyphs,
   priceRuler,
   reducer,
   reportDisplayViewport,
@@ -61,7 +63,12 @@ trade_date,open,high,low,close,vol
 `);
 
     expect(rows).toHaveLength(2);
-    expect(rows[1]).toMatchObject({ date: "2026-05-29", close: 3.927, volume: 1250 });
+    expect(rows[1]).toMatchObject({
+      date: "2026-05-29",
+      open: 3.85,
+      close: 3.927,
+      volume: 1250,
+    });
     expect(rows[1]?.pctChg).toBeCloseTo(2, 5);
   });
 
@@ -122,8 +129,16 @@ trade_date,open,high,low,close,vol
       stopPrice: 3.72,
       executionDelay: "next_open",
     });
-    expect(summary?.addConditions[0]).toContain("close >= 3.950");
-    expect(summary?.riskControls[0]).toContain("close < 3.720");
+    expect(summary?.addConditions[0]).toContain("收盘价 不低于 3.950");
+    expect(summary?.riskControls[0]).toContain("收盘价 低于 3.720");
+  });
+
+  it("localizes execution timing and builds terminal price candle glyphs", () => {
+    expect(executionDelayLabel("next_open")).toBe("次日开盘");
+    expect(executionDelayLabel("WAIT_FOR_TRIGGER")).toBe("等待触发");
+    expect(priceCandleGlyphs([{ open: 3.8, high: 4, low: 3.7, close: 3.95 }])).toEqual([
+      { glyph: "▇", direction: "up" },
+    ]);
   });
 
   it("falls back to Chinese condition text when trigger prices are not structured", () => {
@@ -144,6 +159,20 @@ trade_date,open,high,low,close,vol
     expect(priceRuler(3.72, 3.88, 3.95, 12)).toContain("止损价 3.720");
     expect(priceRuler(3.72, 3.88, 3.95, 12)).toContain("╋ 现价 3.880");
     expect(priceRuler(3.72, 3.88, 3.95, 12)).toContain("目标价 3.950");
+  });
+
+  it("stores price rows for the decision summary chart", () => {
+    const state = reducer(initState(), {
+      type: "etfDetailLoaded",
+      history: [3.8, 3.9],
+      priceRows: [
+        { date: "2026-05-28", open: 3.8, high: 3.92, low: 3.78, close: 3.9 },
+        { date: "2026-05-29", open: 3.9, high: 3.98, low: 3.86, close: 3.95 },
+      ],
+    });
+
+    expect(state.etfDetail?.priceRows).toHaveLength(2);
+    expect(state.etfDetail?.priceRows?.[1]?.close).toBe(3.95);
   });
 
   it("parses and deduplicates multi-ticker input for the research queue", () => {

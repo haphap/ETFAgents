@@ -63,6 +63,7 @@ export function buildMemoryPayload(state: SpineStateType): Record<string, unknow
     research_allocation_plan: state.research_allocation_plan,
     trader_allocation_plan: state.trader_allocation_plan,
     final_allocation_decision: state.final_allocation_decision,
+    agent_signals: state.agent_signals,
     // Intentionally NOT sending trader_backtest_signal: the TS portfolio
     // manager produces no structured signal, and build_state_backtest_signal
     // prefers trader_backtest_signal over final_allocation_decision. Omitting it

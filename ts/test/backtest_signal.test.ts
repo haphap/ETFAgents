@@ -41,6 +41,28 @@ describe("buildTraderBacktestSignal", () => {
     expect(signal.rating).toBe("BUY");
   });
 
+  it("uses parsed trader output schema when structured plan is unavailable", () => {
+    const rendered =
+      "一、配置逻辑\n结构转弱。\n\n" +
+      "四、执行倾向\n**减持**\n\n" +
+      "**输出Schema**\n" +
+      "agent: trader\n" +
+      "allocation_action: UNDERWEIGHT\n" +
+      'target_weight_band: "5-10%"\n' +
+      "execution_timing: NEXT_CLOSE\n" +
+      "execution_trigger_state: READY\n" +
+      "risk_control_state: NORMAL\n" +
+      'key_drivers: ["资金流转弱", "支撑破位", "风险预算收紧"]\n' +
+      "confidence: 0.80";
+    const signal = buildTraderBacktestSignal("510300.SH", "2024-06-01", rendered, null);
+    expect(signal.rating).toBe("UNDERWEIGHT");
+    expect(signal.target_weight_pct).toBe(7.5);
+    expect(signal.target_weight_min_pct).toBe(5);
+    expect(signal.target_weight_max_pct).toBe(10);
+    expect(signal.weight_source).toBe("schema_field");
+    expect(signal.execution_delay).toBe("next_close");
+  });
+
   it("extracts target weight from structured target_weight_pct", () => {
     const signal = buildTraderBacktestSignal(
       "510300.SH",
@@ -50,6 +72,63 @@ describe("buildTraderBacktestSignal", () => {
     );
     expect(signal.target_weight_pct).toBe(25);
     expect(signal.weight_source).toBe("structured_field");
+  });
+
+  it("calibrates structured target weight with risk budget and upstream signals", () => {
+    const signal = buildTraderBacktestSignal(
+      "510300.SH",
+      "2024-06-01",
+      "**输出Schema**\nagent: trader\nrisk_control_state: ELEVATED\nconfidence: 0.50",
+      makePlan({ target_weight_pct: 30, confidence: 0.5 }),
+      {
+        maxDrawdownBudget: 0.08,
+        agentSignals: {
+          market_flow: {
+            source: "market_flow",
+            agent: "market_flow",
+            fields: {
+              agent: "market_flow",
+              volatility_regime: "EXPANDING",
+              flow_regime: "DISTRIBUTION",
+            },
+            raw: "",
+          },
+        },
+      },
+    );
+    expect(signal.raw_target_weight_pct).toBe(30);
+    expect(signal.target_weight_pct).toBeLessThan(30);
+    expect(signal.position_sizing_multiplier).toBeLessThan(1);
+    expect(signal.position_sizing_reasons?.join(" ")).toContain("估算回撤");
+    expect(signal.position_sizing_inputs?.volatility_regime).toBe("EXPANDING");
+    expect(signal.position_sizing_inputs?.flow_regime).toBe("DISTRIBUTION");
+  });
+
+  it("does not scale above the trader target under favorable regimes", () => {
+    const signal = buildTraderBacktestSignal(
+      "510300.SH",
+      "2024-06-01",
+      "**输出Schema**\nagent: trader\nrisk_control_state: NORMAL\nconfidence: 0.90",
+      makePlan({ target_weight_pct: 20, confidence: 0.9 }),
+      {
+        maxDrawdownBudget: 0.25,
+        agentSignals: {
+          market_flow: {
+            source: "market_flow",
+            agent: "market_flow",
+            fields: {
+              agent: "market_flow",
+              volatility_regime: "CONTRACTING",
+              flow_regime: "ACCUMULATION",
+            },
+            raw: "",
+          },
+        },
+      },
+    );
+    expect(signal.raw_target_weight_pct).toBe(20);
+    expect(signal.target_weight_pct).toBe(20);
+    expect(signal.position_sizing_multiplier).toBe(1);
   });
 
   it("extracts target weight from structured target_weight_band", () => {

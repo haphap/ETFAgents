@@ -13,12 +13,19 @@
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
 import type { PromptContext } from "./shared.js";
-import { getLanguageInstruction } from "./shared.js";
+import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
+  getDecisionSignalSummaryInstruction,
+  getLanguageInstruction,
+} from "./shared.js";
 
 export const RESEARCH_MANAGER_REPORT_SPEC: AnalystReportSpec = {
   analystName: "research_manager",
   requiredTopSections: [],
   requiredTailTokens: [],
+  requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("research_manager"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否评估了多空双方在整个辩论中的优劣？\n" +
@@ -29,6 +36,32 @@ export const RESEARCH_MANAGER_REPORT_SPEC: AnalystReportSpec = {
 };
 
 export function buildResearchManagerSystemMessage(ctx: PromptContext): string {
+  const chinese = ctx.language.trim().toLowerCase() !== "english";
+  if (chinese) {
+    return (
+      "你是ETF研究经理和多空辩论主持人，负责评估完整多空辩论并给出明确配置结论。" +
+      "你必须先比较多头和空头证据强弱，再选择看多、看空或持有；只有在证据确实均衡且缺少可交易确认时才能选择持有。\n\n" +
+      "输出只写最终报告，不要复制提示词规则。所有执行对象只能是ETF整体仓位或ETF目标权重；成分股只能作为证据和归因，不得输出成分股交易指令。" +
+      "必须优先使用上游分析师的决策信号摘要，并在必要时才引用报告正文。\n\n" +
+      "按以下顺序输出Markdown标题：\n" +
+      "## 辩论结论\n" +
+      "- 第一句直接给出选择多头、空头或持有，以及当前ETF研究观点。\n" +
+      "- 比较多头和空头最强证据，指出输掉一方的决定性弱点。\n" +
+      "- 若存在异常信号，解释它相对近期基线为何异常，以及它是否改变配置结论。\n\n" +
+      "## 行为逻辑\n" +
+      "- 写出你自己的ETF配置逻辑，不要复述任一方原文。\n" +
+      "- 说明宏观冲击 -> 行业平衡 -> 盈利/估值 -> ETF基准与持仓影响 -> 执行时机的传导链。\n" +
+      "- 第一句必须说明ETF持有人现在应该做什么、为什么现在做。\n" +
+      "- 写清什么证据会触发维持、加仓、减仓、轮动或反转。\n\n" +
+      "## 持仓建议\n" +
+      "- 给出明确ETF建议：买入、增持、持有、减持或卖出。\n" +
+      "- 包含交易员可执行的信息：初始仓位区间、加/减/轮动条件、再平衡触发、风险控制和下一步监控。\n\n" +
+      "结论必须果断，且每个关键判断都要有证据来源、置信度和反证条件。" +
+      getDecisionSignalSummaryInstruction(ctx) +
+      getAgentOutputSchemaInstruction("research_manager", ctx) +
+      getLanguageInstruction(ctx)
+    );
+  }
   return (
     "As the ETF research manager and debate facilitator, your role is to " +
     "critically evaluate the full multi-round debate and make a definitive " +
@@ -77,6 +110,8 @@ export function buildResearchManagerSystemMessage(ctx: PromptContext): string {
     "constituent stocks.\n\n" +
     "Be decisive and ground every conclusion in specific evidence from " +
     "the debate." +
+    getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("research_manager", ctx) +
     getLanguageInstruction(ctx)
   );
 }

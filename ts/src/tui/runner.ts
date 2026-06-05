@@ -21,6 +21,85 @@ function runtimeBaseUrl(state: AppState): string | undefined {
   return url;
 }
 
+function positionSizingFromConfig(config: Record<string, unknown>) {
+  const budget = Number(config.max_drawdown_budget);
+  return Number.isFinite(budget) && budget > 0 ? { maxDrawdownBudget: budget } : {};
+}
+
+function conciseBridgeError(error: unknown): string {
+  const msg = error instanceof Error ? error.message : String(error);
+  if (/Bridge call tools\.call/i.test(msg)) return "基础信息读取失败：数据工具暂不可用";
+  if (/ECONNREFUSED|connect/i.test(msg)) return "基础信息读取失败：Bridge 未连接";
+  return `基础信息读取失败：${msg.slice(0, 48)}`;
+}
+
+function debateCount(update: Record<string, unknown>, key: string): number | null {
+  const debate = update[key];
+  if (!debate || typeof debate !== "object") return null;
+  const count = (debate as Record<string, unknown>).count;
+  return typeof count === "number" && Number.isFinite(count) ? count : null;
+}
+
+function nodeDisplayLabel(
+  node: string,
+  baseLabel: string,
+  update: Record<string, unknown>,
+): string {
+  if (node === "bull_researcher" || node === "bear_researcher") {
+    const count = debateCount(update, "investment_debate_state");
+    const round = count ? Math.max(1, Math.ceil(count / 2)) : 1;
+    return `第 ${round} 轮 · ${baseLabel}`;
+  }
+  if (
+    node === "aggressive_debator" ||
+    node === "conservative_debator" ||
+    node === "neutral_debator"
+  ) {
+    const count = debateCount(update, "risk_debate_state");
+    const round = count ? Math.max(1, Math.ceil(count / 3)) : 1;
+    return `第 ${round} 轮 · ${baseLabel}`;
+  }
+  return baseLabel;
+}
+
+function nodeCompletesSection(
+  node: string,
+  defaultCompletes: boolean,
+  update: Record<string, unknown>,
+  state: AppState,
+): boolean {
+  if (node === "bear_researcher") {
+    const count = debateCount(update, "investment_debate_state");
+    return count !== null && count >= 2 * state.debateRounds;
+  }
+  if (node === "neutral_debator") {
+    const count = debateCount(update, "risk_debate_state");
+    return count !== null && count >= 3 * state.riskRounds;
+  }
+  return defaultCompletes;
+}
+
+function mergeGraphUpdate(
+  previous: Record<string, unknown>,
+  update: Record<string, unknown>,
+): Record<string, unknown> {
+  const next = { ...previous, ...update };
+  const prevSignals = previous.agent_signals;
+  const nextSignals = update.agent_signals;
+  if (
+    prevSignals &&
+    typeof prevSignals === "object" &&
+    nextSignals &&
+    typeof nextSignals === "object"
+  ) {
+    next.agent_signals = {
+      ...(prevSignals as Record<string, unknown>),
+      ...(nextSignals as Record<string, unknown>),
+    };
+  }
+  return next;
+}
+
 export async function fetchVllmModels(dispatch: AppDispatch) {
   for (const baseUrl of VLLM_BASE_URLS) {
     try {
@@ -67,6 +146,7 @@ export async function runAnalysis(
     const { buildEffectiveMemoryConfig } = await import("../agents/nodes/memory_writer.js");
     const { ANALYST_TOOLS, fetchMemoryContext } = await import("../cli/commands/shared_tools.js");
     const { createLlmFromConfig } = await import("../llm/factory.js");
+    const { saveAnalysisReportArtifact } = await import("./services/artifacts.js");
 
     dispatchIfCurrent({ type: "appendLog", msg: "── 连接 Bridge…" });
     const client = new BridgeClient();
@@ -151,6 +231,7 @@ export async function runAnalysis(
           riskDebate: [],
         },
         promptContext,
+        positionSizing: positionSizingFromConfig(config as Record<string, unknown>),
         maxDebateRounds: state.debateRounds,
         maxRiskRounds: state.riskRounds,
         selectedAnalysts: selectedAnalystList,
@@ -207,12 +288,13 @@ export async function runAnalysis(
               ...(volume !== undefined ? { volume } : {}),
               ...(volumeChangePct !== undefined ? { volumeChangePct } : {}),
               history: rows.map((row) => row.close).filter((v): v is number => v !== undefined),
+              priceRows: rows.slice(-60),
             });
           } else {
             dispatchIfCurrent({ type: "etfDetailLoaded", name: ticker });
           }
         } catch (e) {
-          dispatchIfCurrent({ type: "etfDetailError", error: (e as Error).message });
+          dispatchIfCurrent({ type: "etfDetailError", error: conciseBridgeError(e) });
         }
         if (!ensureActive()) return;
 
@@ -246,7 +328,7 @@ export async function runAnalysis(
             if (!ensureActive()) return;
             for (const [node, update] of Object.entries(chunk as Record<string, unknown>)) {
               if (!update || typeof update !== "object") continue;
-              finalState = { ...finalState, ...(update as Record<string, unknown>) };
+              finalState = mergeGraphUpdate(finalState, update as Record<string, unknown>);
               const info = NODE_INFO[node];
               if (!info) continue; // tool-loop node (e.g. *_tools) — no UI section
               dispatchIfCurrent({ type: "sectionStarted", sectionId: info.section });
@@ -259,11 +341,16 @@ export async function runAnalysis(
               dispatchIfCurrent({
                 type: "sectionReport",
                 sectionId: info.section,
-                nodeLabel: tickers.length > 1 ? `${ticker} · ${info.label}` : info.label,
+                nodeLabel:
+                  tickers.length > 1
+                    ? `${ticker} · ${nodeDisplayLabel(node, info.label, update as Record<string, unknown>)}`
+                    : nodeDisplayLabel(node, info.label, update as Record<string, unknown>),
                 body: body as string,
               });
               dispatchIfCurrent({ type: "setStats", stats: { llm_calls: 1 } });
-              if (info.completes) {
+              if (
+                nodeCompletesSection(node, info.completes, update as Record<string, unknown>, state)
+              ) {
                 dispatchIfCurrent({ type: "sectionDone", sectionId: info.section });
               }
               dispatchIfCurrent({ type: "appendLog", msg: `✓ ${ticker} · ${info.label}` });
@@ -285,6 +372,20 @@ export async function runAnalysis(
             (finalState.final_allocation_decision as string) ||
             (finalState.trader_allocation_plan as string) ||
             "(无最终决策)";
+          try {
+            const reportPath = await saveAnalysisReportArtifact({
+              ticker,
+              tradeDate: state.date,
+              state: finalState,
+              config: config as Record<string, unknown>,
+            });
+            dispatchIfCurrent({ type: "appendLog", msg: `✓ 研报已保存: ${reportPath}` });
+          } catch (e) {
+            dispatchIfCurrent({
+              type: "appendLog",
+              msg: `✗ 研报保存失败: ${(e as Error).message.slice(0, 80)}`,
+            });
+          }
           lastDecision = decision;
           dispatchIfCurrent({ type: "queueTickerDone", index });
         } catch (e) {

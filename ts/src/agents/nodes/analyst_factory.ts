@@ -12,6 +12,7 @@ import { AIMessage } from "@langchain/core/messages";
 import type { StructuredToolInterface } from "@langchain/core/tools";
 import type { MemoryRoleConfig } from "../helpers/memory.js";
 import { buildMemoryPromptSection, injectMemoryPromptSection } from "../helpers/memory.js";
+import { signalUpdate, stripAgentMachineBlocks } from "../helpers/output_schema.js";
 import { postJudgeClean, preJudgeClean } from "../helpers/report_leads.js";
 import { normalizeChineseRoleTerms } from "../helpers/role_terms.js";
 import {
@@ -48,7 +49,7 @@ export interface AnalystConfig {
    * Mirrors the Python nodes that embed reports directly in the prompt rather
    * than relying solely on accumulated message history.
    */
-  buildContextBlock?: (state: SpineStateType) => string;
+  buildContextBlock?: (state: SpineStateType, ctx: PromptContext) => string;
   /**
    * Whether to append the report to the message history (default true). Debate
    * and manager nodes set this false: they read explicit context blocks and
@@ -91,7 +92,7 @@ export function createAnalystNode(
     const analystBody = config.buildSystemBody(ctx);
     const toolNames = config.tools.map((t) => t.name).join(", ");
     // Explicit reports/debate context (debators & managers), built from state.
-    const contextBlock = config.buildContextBlock?.(state) ?? "";
+    const contextBlock = config.buildContextBlock?.(state, ctx) ?? "";
 
     const buildSystemMessage = (phase: SystemMessagePhase): string => {
       let body = analystBody;
@@ -152,15 +153,20 @@ export function createAnalystNode(
       }
       processedReport = postJudgeClean(processedReport);
     }
+    const signalSourceReport = processedReport;
+    const visibleReport = stripAgentMachineBlocks(processedReport);
 
     const stateUpdate: Record<string, unknown> = {};
-    stateUpdate[config.stateKey as string] = processedReport;
+    stateUpdate[config.stateKey as string] = visibleReport;
+    if (config.reportSpec?.analystName) {
+      stateUpdate.agent_signals = signalUpdate(config.reportSpec.analystName, signalSourceReport);
+    }
     // Analysts append their report to the message history so the next analyst /
     // tool round sees it; debate & manager nodes opt out (appendMessage: false)
     // since they read explicit context blocks instead, matching Python (their
     // nodes return only debate-state / plan fields, not chat messages).
     if (config.appendMessage !== false) {
-      stateUpdate.messages = [new AIMessage(processedReport)];
+      stateUpdate.messages = [new AIMessage(visibleReport)];
     }
 
     return stateUpdate as SpineStateUpdate;

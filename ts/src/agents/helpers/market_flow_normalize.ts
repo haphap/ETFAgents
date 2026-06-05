@@ -22,6 +22,9 @@ const MARKET_FLOW_REQUIRED_TOP_SECTIONS: ReadonlySet<string> = new Set(["一", "
 const MARKET_FLOW_COMBINED_TAIL_HEADING = "四、综合结论和指标总览";
 
 const TABLE_SEPARATOR_RE = /^\|(?:\s*:?-{3,}:?\s*\|)+\s*$/;
+const TABLE_DATA_ROW_RE = /^\|(?:[^|\n]*\|){2,}\s*$/;
+const TABLE_SEPARATOR_CELL_RE = /^:?-{3,}:?$/;
+const PLACEHOLDER_TABLE_TEXT_RE = /实盘数据填入后即可执行|待填入|待补充|N\/A|暂无数据/i;
 const CONCLUSION_LABEL_RE = /^\s*综合结论\s*[:：]\s*(.+)$/;
 const COMBINED_TAIL_LINE_RE =
   /^\s*(?:#{1,6}\s*)?[一二三四五六七八九十]+[、.．]\s*综合结论和指标总览(?:[。.]|\s|$)/;
@@ -42,12 +45,32 @@ export function looksLikeCompleteMarketFlowReport(report: string | undefined): b
   for (const need of MARKET_FLOW_REQUIRED_TOP_SECTIONS) {
     if (!marks.has(need)) return false;
   }
-  // Section 四 must contain an indicator overview table — accept any
-  // markdown table separator anywhere in the content.
-  for (const line of content.split("\n")) {
-    if (TABLE_SEPARATOR_RE.test(line.trim())) return true;
+  // Section 四 must contain an indicator overview table with at least one
+  // actual data row, not just a template header/separator.
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length - 2; i += 1) {
+    const header = (lines[i] ?? "").trim();
+    const separator = (lines[i + 1] ?? "").trim();
+    const row = (lines[i + 2] ?? "").trim();
+    if (
+      header.startsWith("|") &&
+      TABLE_SEPARATOR_RE.test(separator) &&
+      TABLE_DATA_ROW_RE.test(row) &&
+      hasNonSeparatorCell(row) &&
+      !PLACEHOLDER_TABLE_TEXT_RE.test(row)
+    ) {
+      return true;
+    }
   }
   return false;
+}
+
+function hasNonSeparatorCell(row: string): boolean {
+  return row
+    .split("|")
+    .slice(1, -1)
+    .map((cell) => cell.trim())
+    .some((cell) => cell.length > 0 && !TABLE_SEPARATOR_CELL_RE.test(cell));
 }
 
 // -------------------------------------------------------- internals
@@ -105,6 +128,7 @@ function collectTailConclusion(lines: ReadonlyArray<string>, start: number, end:
   for (let i = start; i < end; i++) {
     let stripped = (lines[i] ?? "").trim();
     if (!stripped) continue;
+    if (PLACEHOLDER_TABLE_TEXT_RE.test(stripped)) continue;
     const normalized = stripped.replace(HEADING_PREFIX_RE, "");
     if (
       normalized === "指标总览" ||

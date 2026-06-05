@@ -16,10 +16,23 @@
  * uncompressed.
  */
 
+import { type PromptContext, reportForDecisionContext } from "../prompts/shared.js";
 import type { DebateState, SpineStateType } from "../state.js";
+import { formatAgentSignalsForPrompt } from "./output_schema.js";
+
+const DEBATE_REPORT_CONTEXT_LIMIT = 5_000;
 
 /** The six analyst reports, labelled, skipping any that are still empty. */
-export function buildReportsBlock(state: SpineStateType): string {
+export function buildReportsBlock(state: SpineStateType, ctx?: PromptContext): string {
+  const reportContextCharLimit = Math.min(
+    ctx?.reportContextCharLimit ?? DEBATE_REPORT_CONTEXT_LIMIT,
+    DEBATE_REPORT_CONTEXT_LIMIT,
+  );
+  const promptContext: PromptContext = {
+    language: ctx?.language ?? "Chinese",
+    reportContextCharLimit,
+    ...(ctx?.validationMode ? { validationMode: ctx.validationMode } : {}),
+  };
   const rows: Array<[string, string]> = [
     ["市场与资金流分析", state.market_flow_report],
     ["舆情与事件影响分析", state.catalyst_sentiment_report],
@@ -30,8 +43,25 @@ export function buildReportsBlock(state: SpineStateType): string {
   ];
   const blocks = rows
     .filter(([, body]) => body?.trim())
-    .map(([label, body]) => `### ${label}\n${body.trim()}`);
-  return blocks.length ? `## 分析师报告\n\n${blocks.join("\n\n")}` : "";
+    .map(
+      ([label, body]) =>
+        `### ${label}\n${reportForDecisionContext(body, promptContext, reportContextCharLimit)}`,
+    );
+  const structuredSignals = formatAgentSignalsForPrompt(state.agent_signals, {
+    language: promptContext.language,
+    include: [
+      "market_flow",
+      "catalyst_sentiment",
+      "macro_regime",
+      "meso_commodity",
+      "holdings_industry",
+      "top_holdings",
+    ],
+  });
+  const reportBlock = blocks.length
+    ? `## 分析师报告\n\n优先使用上方「结构化信号」中的决策信号摘要和输出Schema字段；报告摘录只作为证据核对，不要把长篇正文重新复述。\n\n${blocks.join("\n\n")}`
+    : "";
+  return join([structuredSignals, reportBlock]);
 }
 
 function section(title: string, body: string): string {
@@ -43,10 +73,10 @@ function join(parts: string[]): string {
 }
 
 /** Bull researcher sees reports + own history + the bear's full history and latest argument. */
-export function buildBullContext(state: SpineStateType): string {
+export function buildBullContext(state: SpineStateType, ctx?: PromptContext): string {
   const d = state.investment_debate_state;
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
     section("我方（看多）完整历史", d.bullHistory),
     section("对手（看空）完整历史", d.bearHistory),
     section("对手最新论点", d.currentBearResponse),
@@ -54,10 +84,10 @@ export function buildBullContext(state: SpineStateType): string {
 }
 
 /** Bear researcher sees reports + own history + the bull's full history and latest argument. */
-export function buildBearContext(state: SpineStateType): string {
+export function buildBearContext(state: SpineStateType, ctx?: PromptContext): string {
   const d = state.investment_debate_state;
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
     section("我方（看空）完整历史", d.bearHistory),
     section("对手（看多）完整历史", d.bullHistory),
     section("对手最新论点", d.currentBullResponse),
@@ -65,10 +95,10 @@ export function buildBearContext(state: SpineStateType): string {
 }
 
 /** Research manager sees reports + both sides' complete debate histories. */
-export function buildResearchManagerContext(state: SpineStateType): string {
+export function buildResearchManagerContext(state: SpineStateType, ctx?: PromptContext): string {
   const d = state.investment_debate_state;
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
     section("看多完整辩论历史", d.bullHistory),
     section("看空完整辩论历史", d.bearHistory),
   ]);
@@ -99,12 +129,24 @@ const RISK_META: Record<
   Neutral: { label: "中性派", history: "neutralHistory", response: "currentNeutralResponse" },
 };
 
-export function buildRiskContext(state: SpineStateType, speaker: RiskRole): string {
+export function buildRiskContext(
+  state: SpineStateType,
+  speaker: RiskRole,
+  ctx?: PromptContext,
+): string {
   const d = state.risk_debate_state;
   const own = RISK_META[speaker];
   const others = (Object.keys(RISK_META) as RiskRole[]).filter((r) => r !== speaker);
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
+    formatAgentSignalsForPrompt(state.agent_signals, {
+      language: ctx?.language ?? "Chinese",
+      include: ["research_manager", "trader"],
+      title:
+        ctx?.language?.trim().toLowerCase() === "english"
+          ? "## Manager and Trader Structured Signals"
+          : "## 研究经理与交易员结构化信号",
+    }),
     section("交易员配置方案", state.trader_allocation_plan),
     section(`我方（${own.label}）完整历史`, String(d[own.history] ?? "")),
     ...others.flatMap((r) => [
@@ -114,20 +156,34 @@ export function buildRiskContext(state: SpineStateType, speaker: RiskRole): stri
   ]);
 }
 
-export const buildAggressiveContext = (state: SpineStateType): string =>
-  buildRiskContext(state, "Aggressive");
+export const buildAggressiveContext = (state: SpineStateType, ctx?: PromptContext): string =>
+  buildRiskContext(state, "Aggressive", ctx);
 
-export const buildConservativeContext = (state: SpineStateType): string =>
-  buildRiskContext(state, "Conservative");
+export const buildConservativeContext = (state: SpineStateType, ctx?: PromptContext): string =>
+  buildRiskContext(state, "Conservative", ctx);
 
-export const buildNeutralContext = (state: SpineStateType): string =>
-  buildRiskContext(state, "Neutral");
+export const buildNeutralContext = (state: SpineStateType, ctx?: PromptContext): string =>
+  buildRiskContext(state, "Neutral", ctx);
 
 /** Portfolio manager sees reports + the research plan + all three risk histories. */
-export function buildPortfolioManagerContext(state: SpineStateType): string {
+export function buildPortfolioManagerContext(state: SpineStateType, ctx?: PromptContext): string {
   const d = state.risk_debate_state;
   return join([
-    buildReportsBlock(state),
+    buildReportsBlock(state, ctx),
+    formatAgentSignalsForPrompt(state.agent_signals, {
+      language: ctx?.language ?? "Chinese",
+      include: [
+        "research_manager",
+        "trader",
+        "aggressive_debator",
+        "conservative_debator",
+        "neutral_debator",
+      ],
+      title:
+        ctx?.language?.trim().toLowerCase() === "english"
+          ? "## Downstream Structured Signals"
+          : "## 下游结构化信号",
+    }),
     section("研究经理配置方案", state.research_allocation_plan),
     section("激进派历史", d.aggressiveHistory),
     section("保守派历史", d.conservativeHistory),

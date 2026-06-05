@@ -46,6 +46,14 @@ describe("looksLikeCompleteMarketFlowReport", () => {
     const noTable = COMPLETE_REPORT.replace("| --- | --- | --- | --- | --- |", "");
     expect(looksLikeCompleteMarketFlowReport(noTable)).toBe(false);
   });
+
+  it("rejects a table with no real data row", () => {
+    const separatorOnly = COMPLETE_REPORT.replace(
+      "| MACD | 0.05 | 零轴上方 | 动能增强 | 死叉则衰减 |",
+      "| --- | --- | --- | --- | --- |",
+    );
+    expect(looksLikeCompleteMarketFlowReport(separatorOnly)).toBe(false);
+  });
 });
 
 describe("normalizeMarketFlowTailSections", () => {

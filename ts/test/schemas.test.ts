@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderTraderProposal } from "../src/agents/helpers/render.js";
+import { appendTraderOutputSchema, renderTraderProposal } from "../src/agents/helpers/render.js";
 import { isChinese, localizeRating } from "../src/agents/schemas/rating.js";
 import { TraderProposalSchema } from "../src/agents/schemas/trader_proposal.js";
 
@@ -33,6 +33,7 @@ describe("TraderProposalSchema", () => {
       rating: "Buy",
     });
     expect(parsed.add_triggers).toEqual([]);
+    expect(parsed.key_drivers).toEqual([]);
     expect(parsed.reduce_triggers).toEqual([]);
     expect(parsed.rating).toBe("Buy");
     expect(parsed.target_weight_pct).toBeUndefined();
@@ -44,6 +45,8 @@ describe("TraderProposalSchema", () => {
       execution_plan: "e",
       risk_management: "r",
       rating: "Overweight",
+      key_drivers: ["资金流改善", "宏观压力缓和", "行业盈利修复"],
+      confidence: 0.78,
       target_weight_pct: 30,
       execution_timing: "next_open",
       add_triggers: [
@@ -53,6 +56,8 @@ describe("TraderProposalSchema", () => {
         { metric: "pnl_pct", op: "<=", threshold: -5, action: "exit", note: "stop loss" },
       ],
     });
+    expect(parsed.key_drivers.length).toBe(3);
+    expect(parsed.confidence).toBe(0.78);
     expect(parsed.target_weight_pct).toBe(30);
     expect(parsed.add_triggers[0]?.metric).toBe("close_50_sma");
     expect(parsed.risk_controls[0]?.action).toBe("exit");
@@ -99,5 +104,51 @@ describe("renderTraderProposal", () => {
     const rendered = renderTraderProposal(proposal, { language: "English" });
     expect(rendered).toContain("## ETF Allocation Thesis");
     expect(rendered).toContain("EXECUTION BIAS: **BUY**");
+  });
+
+  it("appends a concrete trader output schema after the execution bias", () => {
+    const withSchema = appendTraderOutputSchema(
+      renderTraderProposal(proposal, { language: "Chinese" }),
+      proposal,
+      "Chinese",
+    );
+    expect(withSchema).toContain("**输出Schema**");
+    expect(withSchema).toContain("agent: trader");
+    expect(withSchema).toContain("allocation_action: BUY");
+    expect(withSchema).toContain('target_weight_band: "UNKNOWN"');
+    expect(withSchema).toContain("execution_trigger_state: WAIT");
+    expect(withSchema).toContain("confidence:");
+    expect(withSchema.indexOf("四、执行倾向")).toBeLessThan(withSchema.indexOf("**输出Schema**"));
+    expect(appendTraderOutputSchema(withSchema, proposal, "Chinese")).toBe(withSchema);
+  });
+
+  it("replaces an incomplete trader output schema", () => {
+    const partial = `${renderTraderProposal(proposal, { language: "Chinese" })}\n\n**输出Schema**\nagent: trader`;
+    const withSchema = appendTraderOutputSchema(partial, proposal, "Chinese");
+    expect(withSchema.match(/\*\*输出Schema\*\*/g)?.length).toBe(1);
+    expect(withSchema).toContain("allocation_action: BUY");
+    expect(withSchema).toContain("key_drivers:");
+  });
+
+  it("uses structured trader confidence and drivers in the output schema", () => {
+    const richProposal = TraderProposalSchema.parse({
+      thesis: "偏多结构稳固，确认信号同时出现。",
+      execution_plan: "目标仓位 20%-30%，放量突破后加仓。",
+      risk_management: "跌破支撑 2.05 元先减仓。",
+      rating: "Overweight",
+      target_weight_band: [20, 30],
+      add_triggers: [{ metric: "close", op: ">=", threshold: 2.2, action: "add", note: "突破" }],
+      key_drivers: ["资金流持续净流入", "量价结构转强", "宏观风险边际缓和"],
+      confidence: 0.81,
+    });
+    const withSchema = appendTraderOutputSchema(
+      renderTraderProposal(richProposal, { language: "Chinese" }),
+      richProposal,
+      "Chinese",
+    );
+    expect(withSchema).toContain('target_weight_band: "20-30%"');
+    expect(withSchema).toContain("execution_trigger_state: READY");
+    expect(withSchema).toContain("资金流持续净流入");
+    expect(withSchema).toContain("confidence: 0.81");
   });
 });

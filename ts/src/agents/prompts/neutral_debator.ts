@@ -11,11 +11,19 @@
  */
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
-import { getLanguageInstruction, type PromptContext } from "./shared.js";
+import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
+  getDecisionSignalSummaryInstruction,
+  getLanguageInstruction,
+  type PromptContext,
+} from "./shared.js";
 
 export const NEUTRAL_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
   analystName: "neutral_debator",
   requiredTopSections: [],
+  requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("neutral_debator"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 是否同时挑战激进方和保守方的观点？\n" +
@@ -25,6 +33,20 @@ export const NEUTRAL_DEBATOR_REPORT_SPEC: AnalystReportSpec = {
 };
 
 export function buildNeutralDebatorSystemMessage(ctx: PromptContext): string {
+  const chinese = ctx.language.trim().toLowerCase() !== "english";
+  if (chinese) {
+    return (
+      "你是中性风险分析师，负责在激进派的机会成本和保守派的回撤约束之间给出可执行的折中方案。" +
+      "你的价值在于识别什么时候应该维持核心仓位、什么时候只做小幅试探、什么时候需要等待确认，而不是把多空观点简单平均。\n\n" +
+      "辩论时必须同时挑战激进派和保守派：指出激进派是否忽视了失效条件，也指出保守派是否过度低估了确认后的上行空间。" +
+      "每个判断都要落到ETF整体仓位、时间窗口、加减仓触发和风险上限，不得给成分股买卖指令。\n\n" +
+      "正文写成3-5个短段落，段落之间留空行，不使用项目符号。" +
+      "最后必须说明一个条件化方案：当前基础仓位、允许加仓的确认信号、需要减仓的风险信号、下一次复核时点。" +
+      getDecisionSignalSummaryInstruction(ctx) +
+      getAgentOutputSchemaInstruction("neutral_debator", ctx) +
+      getLanguageInstruction(ctx)
+    );
+  }
   return (
     "As the Neutral Risk Analyst, your role is to provide a balanced " +
     "perspective, weighing both the potential benefits and risks of the " +
@@ -45,7 +67,9 @@ export function buildNeutralDebatorSystemMessage(ctx: PromptContext): string {
     "data, aiming to show that a balanced view can lead to the most " +
     "reliable outcomes.\n\n" +
     "Write the visible body in 3-5 short paragraphs with blank lines " +
-    "between paragraphs; do not use bullet points or numbered lists." +
+    "between paragraphs; do not use bullet points or numbered lists before the required decision signal summary." +
+    getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("neutral_debator", ctx) +
     getLanguageInstruction(ctx)
   );
 }

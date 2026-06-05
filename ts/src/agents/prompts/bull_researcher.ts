@@ -11,12 +11,20 @@
  */
 
 import type { AnalystReportSpec } from "../helpers/validate_refine.js";
-import { getLanguageInstruction, type PromptContext } from "./shared.js";
+import {
+  getAgentOutputSchemaFieldNames,
+  getAgentOutputSchemaInstruction,
+  getDecisionSignalSummaryInstruction,
+  getLanguageInstruction,
+  type PromptContext,
+} from "./shared.js";
 
 export const BULL_REPORT_SPEC: AnalystReportSpec = {
   analystName: "bull_researcher",
   // Debate output is free-form conversational argument; minimal structure checks.
   requiredTopSections: [],
+  requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: getAgentOutputSchemaFieldNames("bull_researcher"),
   customRulesMarkdown:
     "### 内容覆盖\n" +
     "- 辩论论点是否涵盖宏观暴露、因子传导、ETF产品适配与确认质量？\n" +
@@ -68,6 +76,8 @@ export function buildBullResearcherSystemMessage(ctx: PromptContext): string {
     "discussing single names in isolation. " +
     "For ordinary lists, use Arabic numerals such as 1. 2. 3.; " +
     "if you use Chinese section headings, keep forms like 一、二、三." +
+    getDecisionSignalSummaryInstruction(ctx) +
+    getAgentOutputSchemaInstruction("bull_researcher", ctx) +
     getLanguageInstruction(ctx)
   );
 }

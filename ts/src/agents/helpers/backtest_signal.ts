@@ -12,6 +12,8 @@
  */
 
 import type { TraderProposal } from "../schemas/trader_proposal.js";
+import { type AgentOutputSignal, parseAgentOutputSchema } from "./output_schema.js";
+import { applyPositionSizingPolicy, type PositionSizingContext } from "./position_sizing.js";
 
 // ===========================================================================
 // Types
@@ -46,7 +48,15 @@ export interface BacktestSignal {
   target_weight_pct: number | null;
   target_weight_min_pct: number | null;
   target_weight_max_pct: number | null;
+  raw_target_weight_pct?: number | null;
+  raw_target_weight_min_pct?: number | null;
+  raw_target_weight_max_pct?: number | null;
   weight_source: string;
+  position_sizing_multiplier?: number;
+  position_sizing_reasons?: string[];
+  position_sizing_inputs?: Record<string, string | number>;
+  max_drawdown_budget?: number;
+  estimated_drawdown?: number;
   execution_delay: string;
   starter_size_text: string;
   add_triggers: BacktestTriggerRule[];
@@ -187,9 +197,13 @@ export function buildTraderBacktestSignal(
   decisionDate: string,
   renderedText: string,
   structuredPlan: TraderProposal | null = null,
+  sizingContext: PositionSizingContext = {},
 ): BacktestSignal {
+  const schemaSignal = parseAgentOutputSchema(renderedText, "trader");
   const rating = normalizeRating(
-    (structuredPlan?.rating as string | undefined) ?? parseRating(renderedText),
+    (structuredPlan?.rating as string | undefined) ??
+      schemaFieldString(schemaSignal, "allocation_action") ??
+      parseRating(renderedText),
   );
   const actionText =
     normalizeText(structuredPlan?.execution_plan ?? "") ||
@@ -207,6 +221,8 @@ export function buildTraderBacktestSignal(
     primaryText: actionText,
     secondaryText: riskText,
     structuredPlan,
+    schemaSignal,
+    sizingContext,
   });
 }
 
@@ -223,6 +239,8 @@ interface BuildSignalOptions {
   primaryText: string;
   secondaryText: string;
   structuredPlan: TraderProposal | null;
+  schemaSignal: AgentOutputSignal | null;
+  sizingContext: PositionSizingContext;
 }
 
 function buildSignal(opts: BuildSignalOptions): BacktestSignal {
@@ -235,14 +253,21 @@ function buildSignal(opts: BuildSignalOptions): BacktestSignal {
     primaryText,
     secondaryText,
     structuredPlan,
+    schemaSignal,
+    sizingContext,
   } = opts;
 
-  // Target weight: structured → prose → rating defaults
+  // Target weight: structured plan → parsed Output Schema → prose → rating defaults
   let targetRange = extractStructuredTargetWeight(structuredPlan);
   let weightSource: string;
   if (targetRange === null) {
-    targetRange = extractTargetWeight(primaryText, secondaryText);
-    weightSource = targetRange ? targetRange[1] : "unknown";
+    targetRange = extractSchemaTargetWeight(schemaSignal);
+    if (targetRange === null) {
+      targetRange = extractTargetWeight(primaryText, secondaryText);
+      weightSource = targetRange ? targetRange[1] : "unknown";
+    } else {
+      weightSource = targetRange[1];
+    }
   } else {
     weightSource = targetRange[1];
   }
@@ -268,17 +293,37 @@ function buildSignal(opts: BuildSignalOptions): BacktestSignal {
     .filter(Boolean)
     .join("\n");
 
+  const sizing = applyPositionSizingPolicy({
+    rating,
+    targetWeightPct,
+    targetWeightMinPct,
+    targetWeightMaxPct,
+    ...sizingContext,
+    traderSchemaSignal: schemaSignal,
+    ...(structuredPlan?.confidence !== undefined && structuredPlan.confidence !== null
+      ? { traderConfidence: structuredPlan.confidence }
+      : {}),
+  });
+
   return {
     ticker,
     decision_date: decisionDate,
     source,
     source_section: sourceSection,
     rating,
-    target_weight_pct: targetWeightPct,
-    target_weight_min_pct: targetWeightMinPct,
-    target_weight_max_pct: targetWeightMaxPct,
+    target_weight_pct: sizing.targetWeightPct,
+    target_weight_min_pct: sizing.targetWeightMinPct,
+    target_weight_max_pct: sizing.targetWeightMaxPct,
+    raw_target_weight_pct: sizing.rawTargetWeightPct,
+    raw_target_weight_min_pct: sizing.rawTargetWeightMinPct,
+    raw_target_weight_max_pct: sizing.rawTargetWeightMaxPct,
     weight_source: weightSource,
-    execution_delay: extractExecutionTiming(structuredPlan),
+    position_sizing_multiplier: sizing.multiplier,
+    position_sizing_reasons: sizing.reasons,
+    position_sizing_inputs: sizing.inputs,
+    max_drawdown_budget: sizing.maxDrawdownBudget,
+    estimated_drawdown: sizing.estimatedDrawdown,
+    execution_delay: extractExecutionTiming(structuredPlan, schemaSignal),
     starter_size_text: extractSentenceWithHints(primaryText, INITIAL_HINTS),
     add_triggers: structuredTriggers.add_triggers,
     reduce_triggers: structuredTriggers.reduce_triggers,
@@ -314,6 +359,29 @@ function extractStructuredTargetWeight(
     if (low !== null && high !== null) {
       return [[Math.min(low, high), Math.max(low, high)], "structured_field"];
     }
+  }
+  return null;
+}
+
+function extractSchemaTargetWeight(
+  signal: AgentOutputSignal | null,
+): [[number, number], string] | null {
+  const raw = signal?.fields.target_weight_band;
+  if (raw === undefined || Array.isArray(raw)) return null;
+  if (typeof raw === "number") return [[raw, raw], "schema_field"];
+  const text = raw.trim();
+  if (!text || /^unknown$/i.test(text)) return null;
+  const rangeMatch =
+    /(\d+(?:\.\d+)?)\s*(?:%|％)?\s*(?:-|–|—|~|～|至|到)\s*(\d+(?:\.\d+)?)\s*(?:%|％)?/.exec(text);
+  if (rangeMatch) {
+    const low = Number.parseFloat(rangeMatch[1] ?? "0");
+    const high = Number.parseFloat(rangeMatch[2] ?? "0");
+    return [[Math.min(low, high), Math.max(low, high)], "schema_field"];
+  }
+  const singleMatch = /(\d+(?:\.\d+)?)\s*(?:%|％)?/.exec(text);
+  if (singleMatch) {
+    const value = Number.parseFloat(singleMatch[1] ?? "0");
+    return [[value, value], "schema_field"];
   }
   return null;
 }
@@ -446,10 +514,16 @@ function coerceThreshold(value: unknown): number | [number, number] | null {
   return coercePct(value);
 }
 
-function extractExecutionTiming(plan: TraderProposal | null): string {
-  const raw = plan?.execution_timing ?? null;
+function extractExecutionTiming(
+  plan: TraderProposal | null,
+  signal: AgentOutputSignal | null = null,
+): string {
+  const raw = plan?.execution_timing ?? schemaFieldString(signal, "execution_timing") ?? null;
   if (raw === null || raw === undefined) return "next_open";
   const normalized = String(raw).trim().toLowerCase();
+  if (normalized === "same_close") return "same_close";
+  if (normalized === "next_open") return "next_open";
+  if (normalized === "next_close") return "next_close";
   return ["same_close", "next_open", "next_close"].includes(normalized) ? normalized : "next_open";
 }
 
@@ -549,6 +623,11 @@ function normalizeRating(rating: unknown): string {
     return parseRating(String((rating as Record<string, unknown>).value ?? "HOLD"));
   }
   return parseRating(String(rating ?? "HOLD"));
+}
+
+function schemaFieldString(signal: AgentOutputSignal | null, field: string): string | null {
+  const value = signal?.fields[field];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 // ===========================================================================

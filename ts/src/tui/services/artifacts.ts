@@ -108,6 +108,131 @@ export async function loadLibraryBody(record: ReportMeta, dispatch: AppDispatch)
   }
 }
 
+function textField(state: Record<string, unknown>, key: string): string {
+  const value = state[key];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function debateField(debate: unknown, camelKey: string, snakeKey: string): string {
+  if (!debate || typeof debate !== "object") return "";
+  const record = debate as Record<string, unknown>;
+  const value = record[camelKey] ?? record[snakeKey];
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function section(title: string, body: string): string {
+  if (!body.trim()) return "";
+  return `## ${title}\n\n${body.trim()}`;
+}
+
+function subsection(title: string, body: string): string {
+  if (!body.trim()) return "";
+  return `### ${title}\n\n${body.trim()}`;
+}
+
+function collapseMarkdown(text: string): string {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function buildCompleteReportMarkdown(args: {
+  ticker: string;
+  tradeDate: string;
+  state: Record<string, unknown>;
+}): string {
+  const { ticker, tradeDate, state } = args;
+  const analystBlocks = [
+    subsection("市场与资金流", textField(state, "market_flow_report")),
+    subsection("舆情与事件", textField(state, "catalyst_sentiment_report")),
+    subsection("宏观框架", textField(state, "macro_regime_report")),
+    subsection("中观大宗", textField(state, "meso_commodity_report")),
+    subsection("持仓行业", textField(state, "holdings_industry_report")),
+    subsection("头部持仓", textField(state, "top_holdings_report")),
+  ].filter(Boolean);
+
+  const investmentDebate = state.investment_debate_state;
+  const researchBlocks = [
+    subsection("多方观点", debateField(investmentDebate, "bullHistory", "bull_history")),
+    subsection("空方观点", debateField(investmentDebate, "bearHistory", "bear_history")),
+    subsection("研究经理", textField(state, "research_allocation_plan")),
+  ].filter(Boolean);
+
+  const riskDebate = state.risk_debate_state;
+  const riskBlocks = [
+    subsection("激进风险观点", debateField(riskDebate, "aggressiveHistory", "aggressive_history")),
+    subsection(
+      "保守风险观点",
+      debateField(riskDebate, "conservativeHistory", "conservative_history"),
+    ),
+    subsection("中性风险观点", debateField(riskDebate, "neutralHistory", "neutral_history")),
+  ].filter(Boolean);
+
+  const blocks = [
+    `# ETF配置分析报告: ${ticker}`,
+    `分析日期: ${tradeDate}`,
+    `生成时间: ${new Date().toISOString()}`,
+    section("I. 分析团队报告", analystBlocks.join("\n\n")),
+    section("II. 研究团队结论", researchBlocks.join("\n\n")),
+    section("III. 配置团队计划", subsection("交易员", textField(state, "trader_allocation_plan"))),
+    section("IV. 风险管理团队结论", riskBlocks.join("\n\n")),
+    section(
+      "V. 投资组合经理决策",
+      subsection("投资组合经理", textField(state, "final_allocation_decision")),
+    ),
+  ].filter(Boolean);
+
+  return collapseMarkdown(blocks.join("\n\n"));
+}
+
+export async function saveAnalysisReportArtifact(args: {
+  ticker: string;
+  tradeDate: string;
+  state: Record<string, unknown>;
+  config?: Record<string, unknown>;
+}): Promise<string> {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const libraryRoot = resultsDir();
+  const configuredRoot =
+    typeof args.config?.results_dir === "string" && args.config.results_dir.trim()
+      ? args.config.results_dir.trim()
+      : libraryRoot;
+  const roots = Array.from(new Set([libraryRoot, configuredRoot]));
+  const markdown = buildCompleteReportMarkdown(args);
+  const primaryDir = `${libraryRoot}/${args.ticker}/${args.tradeDate}`;
+
+  for (const root of roots) {
+    const dir = `${root}/${args.ticker}/${args.tradeDate}`;
+    await mkdir(dir, { recursive: true });
+    await writeFile(`${dir}/complete_report.md`, markdown, "utf-8");
+
+    const signals = args.state.agent_signals;
+    if (signals && typeof signals === "object") {
+      await writeFile(`${dir}/agent_signals.json`, JSON.stringify(signals, null, 2), "utf-8");
+      const summaries = Object.fromEntries(
+        Object.entries(signals as Record<string, unknown>)
+          .map(([source, signal]) => [
+            source,
+            signal && typeof signal === "object"
+              ? (signal as Record<string, unknown>).decision_summary
+              : undefined,
+          ])
+          .filter((entry): entry is [string, unknown] => entry[1] !== undefined),
+      );
+      if (Object.keys(summaries).length > 0) {
+        await writeFile(
+          `${dir}/decision_signal_summaries.json`,
+          JSON.stringify(summaries, null, 2),
+          "utf-8",
+        );
+      }
+    }
+  }
+  return `${primaryDir}/complete_report.md`;
+}
+
 export async function loadRecentReportTickers(): Promise<string[]> {
   const { readdir, stat } = await import("node:fs/promises");
   const root = resultsDir();

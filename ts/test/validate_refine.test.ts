@@ -17,6 +17,30 @@ const MARKET_FLOW_SPEC: AnalystReportSpec = {
   requireTailTable: true,
 };
 
+const SUMMARY_REQUIRED_SPEC: AnalystReportSpec = {
+  analystName: "summary_required",
+  requireDecisionSignalSummary: true,
+};
+
+const SCHEMA_REQUIRED_SPEC: AnalystReportSpec = {
+  analystName: "schema_required",
+  requireDecisionSignalSummary: true,
+  requiredOutputSchemaFields: ["agent", "confidence"],
+};
+
+const DECISION_SUMMARY =
+  "\n\n**决策信号摘要**\n" +
+  "方向: 偏多\n" +
+  "置信度: 中\n" +
+  "时间窗口: 1周\n" +
+  "ETF传导路径: 资金流改善 -> ETF价格支撑\n" +
+  "核心证据: MACD改善；份额净申购\n" +
+  "最大反证条件: 放量跌破支撑\n" +
+  "配置含义: 增持ETF整体仓位\n" +
+  "下一步观察: 成交量和份额变化";
+
+const OUTPUT_SCHEMA = "\n\n**输出Schema**\n" + "agent: market_flow\n" + "confidence: 0.72";
+
 const COMPLETE_REPORT =
   "概览段：偏多结构成立，MACD与RSI同步确认。\n\n" +
   "一、市场结构与量价诊断\n" +
@@ -56,6 +80,15 @@ describe("staticValidate", () => {
     expect(verdict.missingElements.some((m) => m.includes("Markdown 表格"))).toBe(true);
   });
 
+  it("rejects a tail table with only separator rows and no data cells", () => {
+    const separatorOnly = COMPLETE_REPORT.replace(
+      "| MACD | 0.05 | 零轴上方 | 动能增强 | 死叉则衰减 |\n| RSI | 64 | 中性偏强 | 接近超买 | 上穿70警惕 |",
+      "| --- | --- | --- | --- | --- |",
+    );
+    const verdict = staticValidate(separatorOnly, MARKET_FLOW_SPEC);
+    expect(verdict.missingElements.some((m) => m.includes("Markdown 表格"))).toBe(true);
+  });
+
   it("flags an opening that jumps straight into a heading", () => {
     const headingFirst = `一、市场结构\n趋势向上。${COMPLETE_REPORT.slice(COMPLETE_REPORT.indexOf("\n二、"))}`;
     const verdict = staticValidate(headingFirst, MARKET_FLOW_SPEC);
@@ -72,6 +105,46 @@ describe("staticValidate", () => {
     const withMeta = `本节锁定偏多结构。\n\n${COMPLETE_REPORT}`;
     const verdict = staticValidate(withMeta, MARKET_FLOW_SPEC);
     expect(verdict.criticalIssues.some((i) => i.includes("自指式元叙述"))).toBe(true);
+  });
+
+  it("enforces the decision signal summary when the spec requires it", () => {
+    const verdict = staticValidate("概览段。\n\n一、正文\n内容。", SUMMARY_REQUIRED_SPEC);
+    expect(verdict.missingElements).toContain("缺少末尾『决策信号摘要』");
+
+    const complete = staticValidate(
+      `概览段。\n\n一、正文\n内容。${DECISION_SUMMARY}`,
+      SUMMARY_REQUIRED_SPEC,
+    );
+    expect(staticVerdictHasIssues(complete)).toBe(false);
+  });
+
+  it("flags missing fields inside the decision signal summary", () => {
+    const verdict = staticValidate(
+      "概览段。\n\n**决策信号摘要**\n方向: 中性",
+      SUMMARY_REQUIRED_SPEC,
+    );
+    expect(verdict.missingElements.some((m) => m.includes("置信度"))).toBe(true);
+    expect(verdict.missingElements.some((m) => m.includes("最大反证条件"))).toBe(true);
+  });
+
+  it("enforces required output schema fields after the decision summary", () => {
+    const missingSchema = staticValidate(
+      `概览段。\n\n一、正文\n内容。${DECISION_SUMMARY}`,
+      SCHEMA_REQUIRED_SPEC,
+    );
+    expect(missingSchema.missingElements).toContain("缺少末尾『输出Schema』");
+
+    const missingField = staticValidate(
+      `概览段。\n\n一、正文\n内容。${DECISION_SUMMARY}\n\n**输出Schema**\nagent: market_flow`,
+      SCHEMA_REQUIRED_SPEC,
+    );
+    expect(missingField.missingElements).toContain("输出Schema缺少字段『confidence』");
+
+    const complete = staticValidate(
+      `概览段。\n\n一、正文\n内容。${DECISION_SUMMARY}${OUTPUT_SCHEMA}`,
+      SCHEMA_REQUIRED_SPEC,
+    );
+    expect(staticVerdictHasIssues(complete)).toBe(false);
   });
 });
 

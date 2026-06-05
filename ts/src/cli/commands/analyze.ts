@@ -21,6 +21,11 @@ interface AnalyzeOptions {
   maxTokens?: string;
 }
 
+function positionSizingFromConfig(config: Record<string, unknown>) {
+  const budget = Number(config.max_drawdown_budget);
+  return Number.isFinite(budget) && budget > 0 ? { maxDrawdownBudget: budget } : {};
+}
+
 export function registerAnalyze(program: Command): void {
   program
     .command("analyze <ticker>")
@@ -89,6 +94,7 @@ export function registerAnalyze(program: Command): void {
           quickLlm: quickHandle.llm,
           tools: toolSets,
           promptContext,
+          positionSizing: positionSizingFromConfig(config as Record<string, unknown>),
           memoryConfig,
           persistMemory: async (payload) => {
             const res = await api.memoryAppendAnalysis(

@@ -3,9 +3,59 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { Action } from "../src/tui/index.js";
-import { loadLibrary } from "../src/tui/services/artifacts.js";
+import { loadLibrary, saveAnalysisReportArtifact } from "../src/tui/services/artifacts.js";
 
 describe("TUI report artifacts", () => {
+  it("persists TS TUI analysis reports so the library can discover tickers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "etfagents-tui-save-report-"));
+    const configRoot = await mkdtemp(join(tmpdir(), "etfagents-tui-config-report-"));
+    const previous = process.env.ETFAGENTS_RESULTS_DIR;
+    process.env.ETFAGENTS_RESULTS_DIR = root;
+    try {
+      const path = await saveAnalysisReportArtifact({
+        ticker: "560860.SH",
+        tradeDate: "2026-06-04",
+        config: { results_dir: configRoot },
+        state: {
+          market_flow_report: "市场与资金流正文",
+          research_allocation_plan: "研究经理正文",
+          trader_allocation_plan: "交易员正文",
+          final_allocation_decision: "投资组合经理正文",
+          agent_signals: {
+            market_flow: {
+              source: "market_flow",
+              agent: "market_flow",
+              fields: { price_regime: "TREND_UP", confidence: 0.8 },
+              raw: "agent: market_flow",
+              decision_summary: { 方向: "偏多" },
+            },
+          },
+        },
+      });
+      expect(path).toContain("complete_report.md");
+      expect(
+        await readFile(join(root, "560860.SH", "2026-06-04", "complete_report.md"), "utf-8"),
+      ).toContain("投资组合经理正文");
+      expect(
+        await readFile(join(root, "560860.SH", "2026-06-04", "agent_signals.json"), "utf-8"),
+      ).toContain("market_flow");
+      expect(
+        await readFile(join(configRoot, "560860.SH", "2026-06-04", "complete_report.md"), "utf-8"),
+      ).toContain("投资组合经理正文");
+
+      const actions: Action[] = [];
+      await loadLibrary((action) => actions.push(action));
+      const loaded = actions.find((action) => action.type === "libraryLoaded");
+      if (loaded?.type !== "libraryLoaded") throw new Error("libraryLoaded not dispatched");
+      expect(loaded.reports[0]?.ticker).toBe("560860.SH");
+    } finally {
+      if (previous === undefined) delete process.env.ETFAGENTS_RESULTS_DIR;
+      else process.env.ETFAGENTS_RESULTS_DIR = previous;
+      await rm(root, { recursive: true, force: true });
+      await rm(configRoot, { recursive: true, force: true });
+    }
+  });
+
   it("derives and persists structured report-card summaries for legacy reports", async () => {
     const root = await mkdtemp(join(tmpdir(), "etfagents-report-summary-"));
     const previous = process.env.ETFAGENTS_RESULTS_DIR;
