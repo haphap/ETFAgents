@@ -8,9 +8,11 @@
 _A multi-agent ETF research & allocation framework, built on LangGraph._
 
 [![CI](https://github.com/haphap/ETFAgents/actions/workflows/ci.yml/badge.svg)](https://github.com/haphap/ETFAgents/actions/workflows/ci.yml)
+![Version](https://img.shields.io/badge/version-0.5-blue)
 ![Python](https://img.shields.io/badge/Python-%E2%89%A53.10-3776AB?logo=python&logoColor=white)
 ![Node](https://img.shields.io/badge/Node-%E2%89%A522-339933?logo=node.js&logoColor=white)
 ![Output](https://img.shields.io/badge/output-中文%20%2F%20English-informational)
+![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Status](https://img.shields.io/badge/use-research%20only-orange)
 
 > 6 位分析师 · 多空研究辩论 · 风险三辩 + 组合经理 · 智能体记忆 · Backtrader 回测 · 纸上交易 —— 全部跑在一个混合 **Python sidecar + TypeScript 前端** 架构上，两端通过**行分隔 JSON-RPC over stdio** 通信。
@@ -215,11 +217,12 @@ cp .env.example .env
 
 ### License
 
-⚠️ 本仓库**尚未附带开源协议文件**。发布前请先添加 `LICENSE`。在此之前，默认保留所有权利。
-This repository does **not yet include a license** — add a `LICENSE` file before publishing.
+本仓库采用 **Apache License 2.0**。完整协议文本见 [`LICENSE`](LICENSE)。
+This repository is licensed under the **Apache License 2.0**. See [`LICENSE`](LICENSE) for the full text.
 
 ### 致谢 (Acknowledgments)
 
+- 🔗 **[TradingAgents](https://github.com/TauricResearch/TradingAgents)** —— 多智能体交易研究框架的设计启发与参考。
 - 🔗 **[LangChain](https://github.com/langchain-ai/langchain) / [LangGraph](https://github.com/langchain-ai/langgraph)** —— Agent 编排框架（Python + LangGraph.js）。
 - 📈 **[Backtrader](https://www.backtrader.com/)** —— 回测引擎。
 - 🇨🇳 **[Tushare](https://tushare.pro/) · [akshare](https://akshare.akfamily.xyz/) · [yfinance](https://github.com/ranaroussi/yfinance) · [FRED](https://fred.stlouisfed.org/)** —— A 股与全球行情 / 宏观数据。

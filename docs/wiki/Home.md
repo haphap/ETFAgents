@@ -6,6 +6,11 @@ hybrid **Python sidecar + TypeScript front-end** architecture connected by
 
 > ⚠️ ETFAgents is for research and experimentation only — **not financial advice.**
 
+Current version: Python package `0.5`, TypeScript package `0.5.0`.
+ETFAgents is licensed under Apache-2.0. The multi-agent trading research
+workflow is inspired by
+[TradingAgents](https://github.com/TauricResearch/TradingAgents).
+
 ## Pages
 
 - **[Architecture](Architecture)** — hybrid sidecar/front-end design and the JSON-RPC bridge.
