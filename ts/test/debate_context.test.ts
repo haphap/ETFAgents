@@ -92,7 +92,7 @@ describe("debate context builders", () => {
       "CLOSING_SIGNAL";
 
     const ctx = buildReportsBlock(longState, { language: "Chinese", reportContextCharLimit: 800 });
-    expect(ctx).toContain("优先使用每份报告中的「决策信号摘要」");
+    expect(ctx).toContain("优先使用上方「结构化信号」中的决策信号摘要");
     expect(ctx).toContain("[Decision signal summary]");
     expect(ctx).toContain("方向: 偏多");
     expect(ctx).toContain("OPENING_SIGNAL");

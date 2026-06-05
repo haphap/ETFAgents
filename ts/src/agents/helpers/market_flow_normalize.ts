@@ -23,6 +23,7 @@ const MARKET_FLOW_COMBINED_TAIL_HEADING = "四、综合结论和指标总览";
 
 const TABLE_SEPARATOR_RE = /^\|(?:\s*:?-{3,}:?\s*\|)+\s*$/;
 const TABLE_DATA_ROW_RE = /^\|(?:[^|\n]*\|){2,}\s*$/;
+const TABLE_SEPARATOR_CELL_RE = /^:?-{3,}:?$/;
 const PLACEHOLDER_TABLE_TEXT_RE = /实盘数据填入后即可执行|待填入|待补充|N\/A|暂无数据/i;
 const CONCLUSION_LABEL_RE = /^\s*综合结论\s*[:：]\s*(.+)$/;
 const COMBINED_TAIL_LINE_RE =
@@ -55,12 +56,21 @@ export function looksLikeCompleteMarketFlowReport(report: string | undefined): b
       header.startsWith("|") &&
       TABLE_SEPARATOR_RE.test(separator) &&
       TABLE_DATA_ROW_RE.test(row) &&
+      hasNonSeparatorCell(row) &&
       !PLACEHOLDER_TABLE_TEXT_RE.test(row)
     ) {
       return true;
     }
   }
   return false;
+}
+
+function hasNonSeparatorCell(row: string): boolean {
+  return row
+    .split("|")
+    .slice(1, -1)
+    .map((cell) => cell.trim())
+    .some((cell) => cell.length > 0 && !TABLE_SEPARATOR_CELL_RE.test(cell));
 }
 
 // -------------------------------------------------------- internals

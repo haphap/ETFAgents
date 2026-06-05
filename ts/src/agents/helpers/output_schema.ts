@@ -31,6 +31,14 @@ function lastSchemaIndex(text: string): number {
   return index;
 }
 
+function lastSchemaHeadingIndex(text: string): number {
+  let index = -1;
+  for (const match of text.matchAll(SCHEMA_HEADING_RE)) {
+    index = match.index ?? index;
+  }
+  return index;
+}
+
 function stripWrappingQuotes(value: string): string {
   const trimmed = value.trim();
   if (
@@ -95,7 +103,7 @@ function lastDecisionSummaryIndex(text: string): number {
 function readDecisionSummaryBlock(report: string): string {
   const start = lastDecisionSummaryIndex(report);
   if (start < 0) return "";
-  const schemaStart = lastSchemaIndex(report);
+  const schemaStart = lastSchemaHeadingIndex(report);
   const end = schemaStart > start ? schemaStart : report.length;
   return report.slice(start, end).trim();
 }
@@ -200,8 +208,8 @@ export function formatAgentSignalsForPrompt(
   const title =
     opts.title ?? (isChinese(opts.language) ? "## 结构化信号" : "## Structured Signals");
   const intro = isChinese(opts.language)
-    ? "以下字段由各角色报告末尾的输出Schema解析得到；优先作为机器可读状态使用，报告正文只用于核验证据。"
-    : "These fields were parsed from each role's Output Schema; use them as machine-readable state and use the prose reports only to verify evidence.";
+    ? "以下字段由各角色的决策信号摘要和输出Schema解析得到；优先作为机器可读状态使用，报告正文只用于核验证据。"
+    : "These fields were parsed from each role's Decision Signal Summary and Output Schema; use them as machine-readable state and use the prose reports only to verify evidence.";
   const blocks = entries.map(([source, signal]) => {
     const fields = Object.entries(signal.fields)
       .map(([field, value]) => {
@@ -209,7 +217,20 @@ export function formatAgentSignalsForPrompt(
         return `${field}: ${rendered}`;
       })
       .join("\n");
-    return `### ${source}\n${fields}`;
+    const summary = signal.decision_summary
+      ? Object.entries(signal.decision_summary)
+          .map(([field, value]) => `${field}: ${value}`)
+          .join("\n")
+      : "";
+    const summaryTitle = isChinese(opts.language) ? "决策信号摘要" : "Decision Signal Summary";
+    const schemaTitle = isChinese(opts.language) ? "输出Schema字段" : "Output Schema Fields";
+    return [
+      `### ${source}`,
+      summary ? `${summaryTitle}\n${summary}` : "",
+      fields ? `${schemaTitle}\n${fields}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
   });
   return `${title}\n\n${intro}\n\n${blocks.join("\n\n")}`;
 }

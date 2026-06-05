@@ -90,6 +90,7 @@ const MARKDOWN_H1_RE = /^[ \t]*#\s+\S/m;
 const MARKDOWN_H2_RE = /^[ \t]*##\s+\S/m;
 const MARKDOWN_TABLE_SEPARATOR_RE = /^\|(?:\s*:?-{3,}:?\s*\|)+\s*$/m;
 const MARKDOWN_TABLE_DATA_ROW_RE = /^\|(?:[^|\n]*\|){2,}\s*$/m;
+const TABLE_SEPARATOR_CELL_RE = /^:?-{3,}:?$/;
 const PLACEHOLDER_TABLE_TEXT_RE = /实盘数据填入后即可执行|待填入|待补充|N\/A|暂无数据/i;
 const DECISION_SIGNAL_FIELDS: ReadonlyArray<ReadonlyArray<string>> = [
   ["方向", "Direction"],
@@ -130,12 +131,21 @@ function hasMarkdownTableWithData(text: string): boolean {
       header.startsWith("|") &&
       MARKDOWN_TABLE_SEPARATOR_RE.test(separator) &&
       MARKDOWN_TABLE_DATA_ROW_RE.test(row) &&
+      hasNonSeparatorCell(row) &&
       !PLACEHOLDER_TABLE_TEXT_RE.test(row)
     ) {
       return true;
     }
   }
   return false;
+}
+
+function hasNonSeparatorCell(row: string): boolean {
+  return row
+    .split("|")
+    .slice(1, -1)
+    .map((cell) => cell.trim())
+    .some((cell) => cell.length > 0 && !TABLE_SEPARATOR_CELL_RE.test(cell));
 }
 
 export function staticValidate(report: string, spec: AnalystReportSpec): StaticVerdict {

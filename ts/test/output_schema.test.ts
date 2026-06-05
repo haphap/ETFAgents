@@ -27,6 +27,7 @@ describe("agent output schema parser", () => {
     expect(parsed?.fields.confidence).toBe(0.68);
     expect(parsed?.key_drivers).toEqual(["铜库存下降", "中国需求稳定", "油价曲线偏紧"]);
     expect(parsed?.decision_summary?.方向).toBe("中性");
+    expect(parsed?.decision_summary_raw).not.toContain("输出Schema");
   });
 
   it("strips decision summary and output schema from visible report text", () => {
@@ -44,11 +45,15 @@ describe("agent output schema parser", () => {
   it("formats parsed signals as a compact machine-readable context block", () => {
     const signals = signalUpdate(
       "market_flow",
-      "**输出Schema**\nagent: market_flow\nprice_regime: TREND_UP\nconfidence: 0.75",
+      "**决策信号摘要**\n方向: 偏多\n置信度: 高\n配置含义: 增持ETF\n\n" +
+        "**输出Schema**\nagent: market_flow\nprice_regime: TREND_UP\nconfidence: 0.75",
     );
     const block = formatAgentSignalsForPrompt(signals, { language: "Chinese" });
     expect(block).toContain("## 结构化信号");
     expect(block).toContain("### market_flow");
+    expect(block).toContain("决策信号摘要");
+    expect(block).toContain("方向: 偏多");
+    expect(block).toContain("输出Schema字段");
     expect(block).toContain("price_regime: TREND_UP");
     expect(block).toContain("confidence: 0.75");
   });

@@ -80,6 +80,15 @@ describe("staticValidate", () => {
     expect(verdict.missingElements.some((m) => m.includes("Markdown 表格"))).toBe(true);
   });
 
+  it("rejects a tail table with only separator rows and no data cells", () => {
+    const separatorOnly = COMPLETE_REPORT.replace(
+      "| MACD | 0.05 | 零轴上方 | 动能增强 | 死叉则衰减 |\n| RSI | 64 | 中性偏强 | 接近超买 | 上穿70警惕 |",
+      "| --- | --- | --- | --- | --- |",
+    );
+    const verdict = staticValidate(separatorOnly, MARKET_FLOW_SPEC);
+    expect(verdict.missingElements.some((m) => m.includes("Markdown 表格"))).toBe(true);
+  });
+
   it("flags an opening that jumps straight into a heading", () => {
     const headingFirst = `一、市场结构\n趋势向上。${COMPLETE_REPORT.slice(COMPLETE_REPORT.indexOf("\n二、"))}`;
     const verdict = staticValidate(headingFirst, MARKET_FLOW_SPEC);

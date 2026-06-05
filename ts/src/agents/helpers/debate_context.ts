@@ -59,7 +59,7 @@ export function buildReportsBlock(state: SpineStateType, ctx?: PromptContext): s
     ],
   });
   const reportBlock = blocks.length
-    ? `## 分析师报告\n\n优先使用每份报告中的「决策信号摘要」；报告摘录只作为证据核对，不要把长篇正文重新复述。\n\n${blocks.join("\n\n")}`
+    ? `## 分析师报告\n\n优先使用上方「结构化信号」中的决策信号摘要和输出Schema字段；报告摘录只作为证据核对，不要把长篇正文重新复述。\n\n${blocks.join("\n\n")}`
     : "";
   return join([structuredSignals, reportBlock]);
 }
