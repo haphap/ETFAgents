@@ -3,6 +3,8 @@
 TypeScript front-end for ETFAgents. Drives the Python codebase as a JSON-RPC
 sidecar (`etfagents/bridge`) with a full 6-analyst LangGraph pipeline.
 
+Current package version: `0.5.0`. License: Apache-2.0.
+
 ## Quick Start
 
 ```bash

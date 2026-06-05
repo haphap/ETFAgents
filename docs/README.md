@@ -1,10 +1,18 @@
 # Documentation
 
+Current release metadata: Python package `0.5`, TypeScript package `0.5.0`,
+licensed under Apache-2.0. See [`../LICENSE`](../LICENSE).
+
+The local wiki pages live in [`wiki/`](wiki/) and mirror the GitHub Wiki
+structure for architecture, pipeline, CLI/TUI, configuration, and development
+notes.
+
 ## User Guide
 
 | Document | Description |
 |---|---|
 | [usage.md](usage.md) | CLI command reference — TypeScript CLI (analyze, backtest, paper, detail, cache, TUI) and Python CLI |
+| [wiki/Home.md](wiki/Home.md) | Wiki home page and navigation |
 
 ## Architecture & Development
 

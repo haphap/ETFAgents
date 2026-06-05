@@ -21,7 +21,7 @@ import { registerTui } from "./commands/tui.js";
 
 const program = new Command();
 
-program.name("etfagents").description("ETFAgents TypeScript CLI").version("0.1.0");
+program.name("etfagents").description("ETFAgents TypeScript CLI").version("0.5.0");
 
 registerBridgePing(program);
 registerToolCall(program);

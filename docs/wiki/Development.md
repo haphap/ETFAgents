@@ -13,6 +13,18 @@ cp ../.env.example ../.env
 The TS front-end auto-discovers `<repo>/.venv/bin/python` (override with
 `ETFAGENTS_PYTHON`) and spawns the bridge subprocess.
 
+## Release metadata
+
+Current release metadata is split across the Python and TypeScript packages:
+
+- Python package version: `0.5` in `pyproject.toml` and `uv.lock`.
+- TypeScript package / CLI version: `0.5.0` in `ts/package.json` and
+  `ts/src/cli/index.ts`.
+- License: Apache-2.0, with the full text in the repository root `LICENSE`.
+
+When bumping a release, update the package metadata, README badges, and this
+wiki page together.
+
 ## Verification matrix
 
 All green before opening a PR:
