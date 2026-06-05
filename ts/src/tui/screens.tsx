@@ -5,6 +5,7 @@ import type {
   ErrorDetail,
   ExecutionSummary,
   Phase,
+  PriceRow,
   ReportDisplayLine,
   ReportMeta,
   SectionDef,
@@ -15,6 +16,7 @@ import {
   DEFAULT_SECTIONS,
   DEPTH_LABELS,
   DEPTH_OPTIONS,
+  executionDelayLabel,
   HOME_BANNER_FOOTER,
   HOME_BANNER_LINES,
   HOME_OPTIONS,
@@ -25,6 +27,7 @@ import {
   modelHasOptions,
   PROVIDERS,
   parseTickers,
+  priceCandleGlyphs,
   priceRuler,
   queueStatusLabel,
   reportDisplayViewport,
@@ -649,7 +652,7 @@ function TabContent({
   const selectedStatus = selectedId ? (state.sectionStatus[selectedId] ?? "pending") : "pending";
   const selectedBody = selectedId ? (state.reports[selectedId] ?? "") : "";
   const scroll = selectedId ? (state.reportScrollBySection[selectedId] ?? 0) : 0;
-  const summaryRows = state.activeTab === "decision" && state.executionSummary ? 9 : 0;
+  const summaryRows = state.activeTab === "decision" && state.executionSummary ? 11 : 0;
   const bodyRows = Math.max(4, viewportRows - summaryRows - 2);
   const bodyAreaRows = bodyRows + 2;
   const view = reportDisplayViewport(selectedBody, scroll, bodyRows);
@@ -669,6 +672,7 @@ function TabContent({
         <ExecutionSummaryView
           summary={state.executionSummary}
           history={state.etfDetail?.history ?? []}
+          priceRows={state.etfDetail?.priceRows ?? []}
           current={state.etfDetail?.close}
         />
       )}
@@ -789,10 +793,12 @@ function TabButton({
 function ExecutionSummaryView({
   summary,
   history,
+  priceRows,
   current,
 }: {
   summary: ExecutionSummary;
   history: number[];
+  priceRows: PriceRow[];
   current: number | undefined;
 }) {
   const range =
@@ -825,6 +831,9 @@ function ExecutionSummaryView({
         <Text dimColor>{"░".repeat(12 - filled)}</Text> <Text bold>{range}</Text>
       </Text>
       <Text>
+        K线近况: <CandleStrip rows={priceRows} />
+      </Text>
+      <Text>
         价格趋势:{" "}
         {recent.length >= 2 ? (
           <Text color="cyan">{sparkline(recent, 44)}</Text>
@@ -839,11 +848,30 @@ function ExecutionSummaryView({
         {summary.targetPrice !== undefined ? ` · 目标 ${fmtNum(summary.targetPrice)}` : ""}
       </Text>
       <Text dimColor>{ruler || "价格标尺: 等待目标价与止损价"}</Text>
-      <Text dimColor>执行节奏: {summary.executionDelay || "—"}</Text>
+      <Text dimColor>执行节奏: {executionDelayLabel(summary.executionDelay)}</Text>
       <SummaryLine label="加仓依据" values={summary.addConditions} />
       <SummaryLine label="减仓依据" values={summary.reduceConditions} />
       <SummaryLine label="风控规则" values={summary.riskControls} />
     </Box>
+  );
+}
+
+function CandleStrip({ rows }: { rows: PriceRow[] }) {
+  const candles = priceCandleGlyphs(rows, 44);
+  if (candles.length < 2) return <Text dimColor>—</Text>;
+  return (
+    <>
+      {candles.map((candle, i) => {
+        const color =
+          candle.direction === "up" ? "red" : candle.direction === "down" ? "green" : "yellow";
+        return (
+          /* biome-ignore lint/suspicious/noArrayIndexKey: compact price strip */
+          <Text key={`${i}-${candle.glyph}`} color={color}>
+            {candle.glyph}
+          </Text>
+        );
+      })}
+    </>
   );
 }
 

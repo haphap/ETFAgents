@@ -347,11 +347,19 @@ export interface ExecutionSummary {
 export interface PriceRow {
   date?: string;
   name?: string;
+  open?: number;
   close?: number;
   pctChg?: number;
   high?: number;
   low?: number;
   volume?: number;
+}
+
+export type PriceCandleDirection = "up" | "down" | "flat";
+
+export interface PriceCandleGlyph {
+  glyph: string;
+  direction: PriceCandleDirection;
 }
 
 export interface AppState {
@@ -408,6 +416,7 @@ export interface AppState {
     volume?: number;
     volumeChangePct?: number;
     history?: number[];
+    priceRows?: PriceRow[];
     loading: boolean;
     error?: string;
   } | null;
@@ -495,6 +504,7 @@ export type Action =
       volume?: number;
       volumeChangePct?: number;
       history?: number[];
+      priceRows?: PriceRow[];
     }
   | { type: "etfDetailError"; error: string }
   | { type: "vllmModelsFetched"; models: string[]; baseUrl?: string }
@@ -1355,6 +1365,7 @@ export function normalizePriceRows(rows: Array<Record<string, unknown>>): PriceR
   const normalized = rows
     .map((row) => {
       const name = valueByKeys(row, ["name", "Name", "fund_name"]);
+      const open = asNumber(valueByKeys(row, ["Open", "open"]));
       const close = asNumber(valueByKeys(row, ["Close", "close"]));
       const pctChg = asNumber(valueByKeys(row, ["pct_chg", "PctChg", "ChangePct"]));
       const high = asNumber(valueByKeys(row, ["High", "high"]));
@@ -1363,6 +1374,7 @@ export function normalizePriceRows(rows: Array<Record<string, unknown>>): PriceR
       return {
         date: String(valueByKeys(row, ["Date", "trade_date", "date"]) ?? ""),
         ...(typeof name === "string" && name ? { name } : {}),
+        ...(open !== undefined ? { open } : {}),
         ...(close !== undefined ? { close } : {}),
         ...(pctChg !== undefined ? { pctChg } : {}),
         ...(high !== undefined ? { high } : {}),
@@ -1446,6 +1458,28 @@ export function sparkline(values: readonly number[], width = 16): string {
     .join("");
 }
 
+export function priceCandleGlyphs(rows: readonly PriceRow[], width = 36): PriceCandleGlyph[] {
+  const sample = rows
+    .filter((row) => row.close !== undefined && Number.isFinite(row.close))
+    .slice(-Math.max(1, width));
+  if (sample.length === 0) return [];
+  const lows = sample.map((row) => row.low ?? row.close ?? 0);
+  const highs = sample.map((row) => row.high ?? row.close ?? 0);
+  const min = Math.min(...lows);
+  const max = Math.max(...highs);
+  const span = max - min;
+  const blocks = "▁▂▃▄▅▆▇█";
+  return sample.map((row, i) => {
+    const close = row.close ?? row.low ?? row.high ?? min;
+    const open = row.open ?? sample[i - 1]?.close ?? close;
+    const idx = span > 0 ? Math.round(((close - min) / span) * (blocks.length - 1)) : 0;
+    return {
+      glyph: blocks[idx] ?? "▁",
+      direction: close > open ? "up" : close < open ? "down" : "flat",
+    };
+  });
+}
+
 export function listFromUnknown(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -1457,6 +1491,46 @@ export function listFromUnknown(value: unknown): string[] {
 const PRICE_RULE_METRICS = new Set(["close", "price", "nav"]);
 const PRICE_TEXT_RE = /(\d+(?:\.\d+)?)(?:\s*元)/g;
 const CONDITION_STRIP_RE = /^\s*\d+[.、)）]\s*|^[-*•]\s*|`[^`]*`/g;
+const CJK_RE = /[\u3400-\u9fff]/;
+const METRIC_LABELS: Record<string, string> = {
+  close: "收盘价",
+  price: "价格",
+  nav: "净值",
+  volume: "成交量",
+  turnover: "换手率",
+  flow: "资金流",
+  flow_score: "资金流强度",
+  liquidity: "流动性",
+  volatility: "波动率",
+  max_drawdown: "最大回撤",
+  drawdown: "回撤",
+};
+const OPERATOR_LABELS: Record<string, string> = {
+  ">": "高于",
+  ">=": "不低于",
+  "<": "低于",
+  "<=": "不高于",
+  "=": "等于",
+  "==": "等于",
+};
+const ACTION_LABELS: Record<string, string> = {
+  add: "加仓",
+  buy: "买入",
+  reduce: "减仓",
+  sell: "卖出",
+  exit: "退出",
+  stop: "止损",
+  rebalance: "再平衡",
+  hold: "持有",
+  wait: "等待",
+};
+const EXECUTION_DELAY_LABELS: Record<string, string> = {
+  next_open: "次日开盘",
+  next_close: "次日收盘",
+  same_close: "当日收盘",
+  immediate: "立即执行",
+  wait_for_trigger: "等待触发",
+};
 
 function signalNumber(value: unknown, suffix = ""): string {
   const n = asNumber(value);
@@ -1480,10 +1554,27 @@ function signalThreshold(rule: Record<string, unknown>): string {
   return signalNumber(threshold);
 }
 
+function metricLabel(metric: string): string {
+  const key = metric.trim().toLowerCase();
+  return METRIC_LABELS[key] ?? metric.trim();
+}
+
+function operatorLabel(op: string): string {
+  const key = op.trim();
+  return OPERATOR_LABELS[key] ?? key;
+}
+
+function actionLabel(action: string): string {
+  const key = action.trim().toLowerCase();
+  return ACTION_LABELS[key] ?? action.trim();
+}
+
 function ruleLine(rule: Record<string, unknown>): string {
-  const note = String(rule.note ?? rule.action ?? "").trim();
-  const metric = String(rule.metric ?? "").trim();
-  const op = String(rule.op ?? "").trim();
+  const rawNote = String(rule.note ?? "").trim();
+  const rawAction = String(rule.action ?? "").trim();
+  const note = rawNote || actionLabel(rawAction);
+  const metric = metricLabel(String(rule.metric ?? ""));
+  const op = operatorLabel(String(rule.op ?? ""));
   const threshold = signalThreshold(rule);
   const prefix = [metric, op, threshold].filter((part) => part && part !== "--").join(" ");
   return note ? `${prefix} ${note}`.trim() : prefix;
@@ -1586,6 +1677,14 @@ export function priceRuler(stop: number, current: number, target: number, width 
     parts.push(`${marker}${item.labels.join("/")} ${signalNumber(item.value)}`);
   }
   return parts.join(" ");
+}
+
+export function executionDelayLabel(value: string | undefined): string {
+  const raw = value?.trim();
+  if (!raw) return "—";
+  if (CJK_RE.test(raw)) return raw;
+  const key = raw.toLowerCase();
+  return EXECUTION_DELAY_LABELS[key] ?? ACTION_LABELS[key] ?? "按策略触发";
 }
 
 export function queueStatusLabel(status: QueueItem["status"]): string {
@@ -2074,6 +2173,7 @@ export function reducer(state: AppState, action: Action): AppState {
             ? { volumeChangePct: action.volumeChangePct }
             : {}),
           ...(action.history !== undefined ? { history: action.history } : {}),
+          ...(action.priceRows !== undefined ? { priceRows: action.priceRows } : {}),
         },
       };
     case "etfDetailError":

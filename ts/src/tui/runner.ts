@@ -288,6 +288,7 @@ export async function runAnalysis(
               ...(volume !== undefined ? { volume } : {}),
               ...(volumeChangePct !== undefined ? { volumeChangePct } : {}),
               history: rows.map((row) => row.close).filter((v): v is number => v !== undefined),
+              priceRows: rows.slice(-60),
             });
           } else {
             dispatchIfCurrent({ type: "etfDetailLoaded", name: ticker });
